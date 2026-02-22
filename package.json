@@ -1,0 +1,145 @@
+{
+  "name": "image-inspector",
+  "displayName": "Image Inspector",
+  "description": "Displays image information (dimensions, size, format, dominant colors).",
+  "version": "1.0.0",
+  "publisher": "pierre-luc-guegan",
+  "icon": "assets/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/PLuc360/ImageInspector.git"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "customEditors": [
+      {
+        "viewType": "imageInspector.previewEditor",
+        "displayName": "Image Details Preview",
+        "selector": [
+          {
+            "filenamePattern": "*.png"
+          },
+          {
+            "filenamePattern": "*.jpg"
+          },
+          {
+            "filenamePattern": "*.jpeg"
+          },
+          {
+            "filenamePattern": "*.webp"
+          },
+          {
+            "filenamePattern": "*.gif"
+          },
+          {
+            "filenamePattern": "*.bmp"
+          },
+          {
+            "filenamePattern": "*.tif"
+          },
+          {
+            "filenamePattern": "*.tiff"
+          },
+          {
+            "filenamePattern": "*.avif"
+          },
+          {
+            "filenamePattern": "*.svg"
+          },
+          {
+            "filenamePattern": "*.heic"
+          },
+          {
+            "filenamePattern": "*.heif"
+          }
+        ],
+        "priority": "default"
+      }
+    ],
+    "commands": [
+      {
+        "command": "imageInspector.showImageDetails",
+        "title": "Image Inspector: Open with Details"
+      },
+      {
+        "command": "imageInspector.zoomIn",
+        "title": "Image Inspector: Zoom +"
+      },
+      {
+        "command": "imageInspector.zoomOut",
+        "title": "Image Inspector: Zoom -"
+      },
+      {
+        "command": "imageInspector.zoomReset",
+        "title": "Image Inspector: Zoom 100%"
+      },
+      {
+        "command": "imageInspector.zoomFit",
+        "title": "Image Inspector: Zoom Fit"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "imageInspector.zoomIn",
+        "key": "ctrl+=",
+        "mac": "cmd+=",
+        "when": "activeCustomEditorId == imageInspector.previewEditor"
+      },
+      {
+        "command": "imageInspector.zoomIn",
+        "key": "ctrl+numpad_add",
+        "mac": "cmd+numpad_add",
+        "when": "activeCustomEditorId == imageInspector.previewEditor"
+      },
+      {
+        "command": "imageInspector.zoomOut",
+        "key": "ctrl+-",
+        "mac": "cmd+-",
+        "when": "activeCustomEditorId == imageInspector.previewEditor"
+      },
+      {
+        "command": "imageInspector.zoomOut",
+        "key": "ctrl+numpad_subtract",
+        "mac": "cmd+numpad_subtract",
+        "when": "activeCustomEditorId == imageInspector.previewEditor"
+      },
+      {
+        "command": "imageInspector.zoomReset",
+        "key": "ctrl+0",
+        "mac": "cmd+0",
+        "when": "activeCustomEditorId == imageInspector.previewEditor"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "imageInspector.showImageDetails",
+          "when": "resourceExtname == .png || resourceExtname == .jpg || resourceExtname == .jpeg || resourceExtname == .webp || resourceExtname == .gif || resourceExtname == .bmp || resourceExtname == .tif || resourceExtname == .tiff || resourceExtname == .avif || resourceExtname == .svg || resourceExtname == .heic || resourceExtname == .heif"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "echo \"No lint configured\""
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.30",
+    "@types/vscode": "^1.90.0",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "sharp": "^0.34.4"
+  }
+}
