@@ -41,6 +41,7 @@ class ImageCustomDocument implements vscode.CustomDocument {
 class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorProvider<ImageCustomDocument> {
   static readonly viewType = 'imageInspector.previewEditor';
   private activePanel: vscode.WebviewPanel | undefined;
+  private readonly refreshDebounceTimers = new Map<string, NodeJS.Timeout>();
 
   /**
    * Creates a provider instance.
@@ -67,11 +68,20 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
    */
   async resolveCustomEditor(document: ImageCustomDocument, webviewPanel: vscode.WebviewPanel): Promise<void> {
     this.activePanel = webviewPanel;
+    const fileWatcher = this.createDocumentFileWatcher(document, webviewPanel);
 
     webviewPanel.onDidDispose(() => {
       if (this.activePanel === webviewPanel) {
         this.activePanel = undefined;
       }
+
+      const refreshTimer = this.refreshDebounceTimers.get(webviewPanel.viewType + document.uri.toString());
+      if (refreshTimer) {
+        clearTimeout(refreshTimer);
+        this.refreshDebounceTimers.delete(webviewPanel.viewType + document.uri.toString());
+      }
+
+      fileWatcher.dispose();
     }, undefined, this.context.subscriptions);
 
     webviewPanel.onDidChangeViewState((event) => {
@@ -88,9 +98,21 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
       ]
     };
 
+    await this.renderDocument(document, webviewPanel);
+  }
+
+  /**
+   * Renders the webview for a specific image document.
+   *
+   * @param document Custom document instance.
+   * @param webviewPanel Target webview panel.
+   */
+  private async renderDocument(document: ImageCustomDocument, webviewPanel: vscode.WebviewPanel): Promise<void> {
+    const cacheBuster = Date.now();
+
     try {
       const details = await getImageDetails(document.uri.fsPath);
-      const imageSource = await getWebviewImageSource(document.uri.fsPath, document.uri, webviewPanel.webview);
+      const imageSource = await getWebviewImageSource(document.uri.fsPath, document.uri, webviewPanel.webview, cacheBuster);
       webviewPanel.title = details.fileName;
       webviewPanel.webview.html = buildCustomEditorWebview(
         webviewPanel.webview,
@@ -102,6 +124,52 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
       const message = getImageLoadErrorMessage(document.uri.fsPath, error);
       webviewPanel.webview.html = buildErrorWebview(message);
     }
+  }
+
+  /**
+   * Creates a file watcher to refresh a webview when its image changes externally.
+   *
+   * @param document Custom document being displayed.
+   * @param webviewPanel Associated webview panel.
+   * @returns Disposable watcher.
+   */
+  private createDocumentFileWatcher(
+    document: ImageCustomDocument,
+    webviewPanel: vscode.WebviewPanel
+  ): vscode.Disposable {
+    const fileName = path.basename(document.uri.fsPath);
+    const parentFolder = path.dirname(document.uri.fsPath);
+    const filePattern = new vscode.RelativePattern(parentFolder, fileName);
+    const watcher = vscode.workspace.createFileSystemWatcher(filePattern);
+
+    const scheduleRefresh = () => {
+      const timerKey = webviewPanel.viewType + document.uri.toString();
+      const existingTimer = this.refreshDebounceTimers.get(timerKey);
+      if (existingTimer) {
+        clearTimeout(existingTimer);
+      }
+
+      const refreshTimer = setTimeout(() => {
+        this.refreshDebounceTimers.delete(timerKey);
+        void this.renderDocument(document, webviewPanel);
+      }, 150);
+
+      this.refreshDebounceTimers.set(timerKey, refreshTimer);
+    };
+
+    watcher.onDidChange(() => {
+      scheduleRefresh();
+    }, undefined, this.context.subscriptions);
+
+    watcher.onDidCreate(() => {
+      scheduleRefresh();
+    }, undefined, this.context.subscriptions);
+
+    watcher.onDidDelete(() => {
+      scheduleRefresh();
+    }, undefined, this.context.subscriptions);
+
+    return watcher;
   }
 
   /**
@@ -288,12 +356,17 @@ async function getImageDetails(filePath: string): Promise<ImageDetailsViewModel>
  * @param webview Target webview.
  * @returns Image source URL or data URI.
  */
-async function getWebviewImageSource(filePath: string, originalUri: vscode.Uri, webview: vscode.Webview): Promise<string> {
+async function getWebviewImageSource(
+  filePath: string,
+  originalUri: vscode.Uri,
+  webview: vscode.Webview,
+  cacheBuster: number
+): Promise<string> {
   const extension = path.extname(filePath).toLowerCase();
   const needsConversion = extension === '.tif' || extension === '.tiff' || extension === '.heic' || extension === '.heif';
 
   if (!needsConversion) {
-    return webview.asWebviewUri(originalUri).toString();
+    return `${webview.asWebviewUri(originalUri).toString()}?t=${cacheBuster}`;
   }
 
   const previewBuffer = await sharp(filePath)
