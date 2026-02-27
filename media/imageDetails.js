@@ -1,3 +1,4 @@
+const pipetteZoomLoupe = document.getElementById('pipette-zoom-loupe');
 const ZOOM_STEP = 0.1;
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 32;
@@ -17,6 +18,10 @@ const zoomFitButton = document.getElementById('zoom-fit');
 const zoomSelectButton = document.getElementById('zoom-select');
 const infoToggleButton = document.getElementById('info-toggle');
 const zoomSelectionBox = document.getElementById('zoom-selection-box');
+const pipetteButton = document.getElementById('pipette-tool');
+const pipetteCanvas = document.getElementById('pipette-canvas');
+const pipetteColorResult = document.getElementById('pipette-color-result');
+let pipetteMode = false;
 const INFO_OVERLAY_STORAGE_KEY = 'imageDetails.infoOverlayVisible';
 const INFO_OVERLAY_POSITION_STORAGE_KEY = 'imageDetails.infoOverlayPosition';
 
@@ -59,6 +64,143 @@ function setSelectionMode(isEnabled) {
 
   updateSelectionModeUi();
 }
+
+function setPipetteMode(isEnabled) {
+  pipetteMode = isEnabled;
+  if (pipetteButton) {
+    pipetteButton.classList.toggle('is-active', pipetteMode);
+    pipetteButton.setAttribute('aria-pressed', pipetteMode ? 'true' : 'false');
+  }
+  if (pipetteMode) {
+    if (pipetteCanvas && image) {
+      pipetteCanvas.width = image.naturalWidth;
+      pipetteCanvas.height = image.naturalHeight;
+      pipetteCanvas.style.display = 'none';
+      const ctx = pipetteCanvas.getContext('2d');
+      ctx.clearRect(0, 0, pipetteCanvas.width, pipetteCanvas.height);
+      ctx.drawImage(image, 0, 0);
+    }
+    if (previewBody) {
+      previewBody.style.cursor = 'none';
+    }
+    if (pipetteZoomLoupe) {
+      pipetteZoomLoupe.style.display = 'block';
+    }
+  } else {
+    if (previewBody) {
+      previewBody.style.cursor = '';
+    }
+    if (pipetteColorResult) {
+      pipetteColorResult.style.display = 'none';
+    }
+    if (pipetteZoomLoupe) {
+      pipetteZoomLoupe.style.display = 'none';
+    }
+  }
+}
+// Affichage de la loupe de zoom local autour du curseur en mode pipette
+previewBody?.addEventListener('pointermove', (event) => {
+  if (!pipetteMode || !pipetteCanvas || !image || !pipetteZoomLoupe) return;
+  const imageRect = image.getBoundingClientRect();
+  const x = Math.round((event.clientX - imageRect.left) * (image.naturalWidth / imageRect.width));
+  const y = Math.round((event.clientY - imageRect.top) * (image.naturalHeight / imageRect.height));
+  // Taille de la zone à zoomer (en pixels natifs)
+  const region = 9;
+  const displayedZoom = imageRect.width / image.naturalWidth;
+  const baseLoupeZoom = 8;
+  const dynamicLoupeZoom = Math.max(2, baseLoupeZoom / displayedZoom); // min 2 pour éviter une loupe trop petite
+  const loupeSize = region * dynamicLoupeZoom;
+  // Limite la taille de la loupe à la taille de l'image
+  const maxLoupeSize = Math.min(128, image.naturalWidth * dynamicLoupeZoom, image.naturalHeight * dynamicLoupeZoom);
+  pipetteZoomLoupe.width = pipetteZoomLoupe.height = Math.round(maxLoupeSize);
+  const ctx = pipetteCanvas.getContext('2d');
+  const loupeCtx = pipetteZoomLoupe.getContext('2d');
+  loupeCtx.clearRect(0, 0, pipetteZoomLoupe.width, pipetteZoomLoupe.height);
+  // Calcul de la zone source sans jamais sortir de l'image
+  let sx = Math.max(0, Math.min(x - Math.floor(region / 2), image.naturalWidth - region));
+  let sy = Math.max(0, Math.min(y - Math.floor(region / 2), image.naturalHeight - region));
+  loupeCtx.imageSmoothingEnabled = false;
+  loupeCtx.drawImage(pipetteCanvas, sx, sy, region, region, 0, 0, pipetteZoomLoupe.width, pipetteZoomLoupe.height);
+  // Dessine une croix au centre
+  loupeCtx.strokeStyle = '#f00';
+  loupeCtx.lineWidth = 0.5;
+  loupeCtx.beginPath();
+  // Centre exact du canvas
+  const center = Math.floor(pipetteZoomLoupe.width / 2) + 0.5;
+  loupeCtx.moveTo(center, 0);
+  loupeCtx.lineTo(center, pipetteZoomLoupe.height);
+  loupeCtx.moveTo(0, center);
+  loupeCtx.lineTo(pipetteZoomLoupe.width, center);
+  loupeCtx.stroke();
+  pipetteZoomLoupe.style.left = (event.clientX - pipetteZoomLoupe.width / 2) + 'px';
+  pipetteZoomLoupe.style.top = (event.clientY - pipetteZoomLoupe.height / 2) + 'px';
+});
+// Cache la loupe quand le curseur quitte la zone
+previewBody?.addEventListener('pointerleave', () => {
+  if (pipetteZoomLoupe) pipetteZoomLoupe.style.display = 'none';
+});
+previewBody?.addEventListener('pointerenter', () => {
+  if (pipetteMode && pipetteZoomLoupe) pipetteZoomLoupe.style.display = 'block';
+});
+// Gestion du bouton pipette
+pipetteButton?.addEventListener('click', (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  setPipetteMode(!pipetteMode);
+});
+
+// Gestion du clic pour la pipette
+previewBody?.addEventListener('click', (event) => {
+  if (!pipetteMode || !pipetteCanvas || !image) return;
+  // Calculer la position du clic relative à l'image affichée
+  const imageRect = image.getBoundingClientRect();
+  const x = Math.round((event.clientX - imageRect.left) * (image.naturalWidth / imageRect.width));
+  const y = Math.round((event.clientY - imageRect.top) * (image.naturalHeight / imageRect.height));
+  if (x < 0 || y < 0 || x >= image.naturalWidth || y >= image.naturalHeight) return;
+  const ctx = pipetteCanvas.getContext('2d');
+  const pixel = ctx.getImageData(x, y, 1, 1).data;
+  const hex = '#' + [pixel[0], pixel[1], pixel[2]].map(v => v.toString(16).padStart(2, '0')).join('');
+  // Copier dans le presse-papier
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(hex).catch(() => {});
+  } else {
+    // Fallback pour vieux navigateurs : textarea caché
+    const textarea = document.createElement('textarea');
+    textarea.value = hex;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    try { document.execCommand('copy'); } catch {}
+    document.body.removeChild(textarea);
+  }
+  // Afficher le résultat
+  if (pipetteColorResult) {
+    pipetteColorResult.style.display = 'block';
+    // Décale la bulle à droite de la loupe (loupe centrée sur le curseur, 40px de marge)
+    pipetteColorResult.style.left = (event.clientX + 48) + 'px';
+    pipetteColorResult.style.top = (event.clientY - 24) + 'px';
+    pipetteColorResult.innerHTML = `<span style="display:inline-block;width:16px;height:16px;border-radius:50%;background:${hex};border:1px solid #ccc;vertical-align:middle;margin-right:6px;"></span><span style="vertical-align:middle;">${hex} <small>(copied)</small></span>`;
+    pipetteColorResult.style.background = '#fff';
+    pipetteColorResult.style.color = '#000';
+    pipetteColorResult.style.border = '1px solid #ccc';
+    pipetteColorResult.style.padding = '4px 8px';
+    pipetteColorResult.style.borderRadius = '4px';
+    pipetteColorResult.style.position = 'fixed';
+    pipetteColorResult.style.zIndex = 30;
+    pipetteColorResult.style.boxShadow = '0 2px 8px #0002';
+    pipetteColorResult.style.fontSize = '13px';
+    pipetteColorResult.style.pointerEvents = 'none';
+  }
+});
+
+// Désactive le mode pipette à l'ESC
+window.addEventListener('keydown', (event) => {
+  if (pipetteMode && event.key === 'Escape') {
+    setPipetteMode(false);
+  }
+});
 
 function hideSelectionBox() {
   if (!zoomSelectionBox) {

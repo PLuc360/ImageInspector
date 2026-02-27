@@ -102,6 +102,13 @@ export function buildCustomEditorWebview(
         <button id="zoom-select" type="button" title="Zoom to selection" aria-label="Zoom to selection">
           <span class="icon" aria-hidden="true">▭</span>
         </button>
+        <button id="pipette-tool" type="button" title="Color picker" aria-label="Color picker">
+          <span class="icon" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:inline;vertical-align:middle">
+              <path d="M14.44 2.44a2.5 2.5 0 0 1 3.54 3.54l-1.13 1.13-3.54-3.54 1.13-1.13zm-2.2 2.2l3.54 3.54-9.19 9.19c-.2.2-.45.34-.72.4l-3.13.7a.5.5 0 0 1-.6-.6l.7-3.13c.06-.27.2-.52.4-.72l9.19-9.19z" fill="var(--vscode-icon-foreground)"/>
+            </svg>
+          </span>
+        </button>
         <button id="info-toggle" type="button" title="Show/Hide info" aria-label="Show/Hide info">
           <span class="icon" aria-hidden="true">?</span>
         </button>
@@ -121,7 +128,10 @@ export function buildCustomEditorWebview(
       </aside>
       <div class="preview-scroll">
         <div class="preview-body">
-          <img id="preview-image" src="${imageSource}" alt="${escapeHtml(details.fileName)}" />
+          <img id="preview-image" src="${imageSource}" alt="${escapeHtml(details.fileName)}" style="image-rendering: pixelated; image-rendering: crisp-edges; -ms-interpolation-mode: nearest-neighbor;" />
+          <canvas id="pipette-canvas" style="display:none;"></canvas>
+          <div id="pipette-color-result" style="display:none;position:absolute;z-index:10;background:#fff;padding:4px;border-radius:4px;border:1px solid #ccc;font-size:12px;"></div>
+          <canvas id="pipette-zoom-loupe" width="64" height="64" style="display:none;position:fixed;pointer-events:none;z-index:20;border-radius:50%;background:#fff;box-shadow:0 2px 8px #0003;"></canvas>
         </div>
       </div>
       <div id="zoom-selection-box" class="zoom-selection-box" aria-hidden="true"></div>
