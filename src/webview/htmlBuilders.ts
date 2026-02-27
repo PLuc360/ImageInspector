@@ -65,6 +65,15 @@ export function buildCustomEditorWebview(
     `script-src 'nonce-${nonce}'`
   ].join('; ');
 
+  // Extract file extension (with dot, lowercase)
+  const fileExtension = details.fileName.includes('.')
+    ? details.fileName.slice(details.fileName.lastIndexOf('.')).toLowerCase()
+    : '';
+  // Génère une classe CSS unique pour chaque extension, ex: badge-ext-png
+  const extClass = fileExtension ? `badge-ext-${fileExtension.replace('.', '')}` : '';
+  // Extension sans point et en majuscule pour affichage
+  const extLabel = fileExtension ? fileExtension.replace('.', '').toUpperCase() : '';
+
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -105,7 +114,7 @@ export function buildCustomEditorWebview(
         </div>
         <div class="meta-row compact">
           <span><span class="color-chip"></span>${escapeHtml(details.dominantColorHex)}</span>
-          <span class="badge">${escapeHtml(details.format)}</span>
+          <span class="badge ${extClass}">${extLabel}</span>
           <span class="badge">${details.width} × ${details.height}</span>
         </div>
         <table class="info-table">${tableRows}</table>
