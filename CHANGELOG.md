@@ -5,8 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
-## [Unreleased]
-- Minor improvements and documentation updates.
+## [1.2.1] - 2026-02-28
+### Added
+- Toolbar position is now configurable: top, bottom, left, or right (vertical/horizontal orientation auto).
 
 ## [1.2.0] - 2026-02-28
 ### Added
@@ -26,5 +27,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Image metadata display: dimensions, size, format, color space, alpha, dominant color.
 - Integrated webview for image preview and details.
 - Advanced zoom features (toolbar, selection, keyboard shortcuts).
-- Test image generation script (`scripts/generate-test-images.mjs`).
 - Project documentation (README, structure, usage instructions).

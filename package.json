@@ -2,7 +2,7 @@
   "name": "image-inspector",
   "displayName": "Image Inspector",
   "description": "Displays image information (dimensions, size, format, dominant colors).",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "publisher": "pierre-luc-guegan",
   "icon": "assets/icon.png",
   "repository": {
@@ -25,46 +25,34 @@
         "viewType": "imageInspector.previewEditor",
         "displayName": "Image Details Preview",
         "selector": [
-          {
-            "filenamePattern": "*.png"
-          },
-          {
-            "filenamePattern": "*.jpg"
-          },
-          {
-            "filenamePattern": "*.jpeg"
-          },
-          {
-            "filenamePattern": "*.webp"
-          },
-          {
-            "filenamePattern": "*.gif"
-          },
-          {
-            "filenamePattern": "*.bmp"
-          },
-          {
-            "filenamePattern": "*.tif"
-          },
-          {
-            "filenamePattern": "*.tiff"
-          },
-          {
-            "filenamePattern": "*.avif"
-          },
-          {
-            "filenamePattern": "*.svg"
-          },
-          {
-            "filenamePattern": "*.heic"
-          },
-          {
-            "filenamePattern": "*.heif"
-          }
+          { "filenamePattern": "*.png" },
+          { "filenamePattern": "*.jpg" },
+          { "filenamePattern": "*.jpeg" },
+          { "filenamePattern": "*.webp" },
+          { "filenamePattern": "*.gif" },
+          { "filenamePattern": "*.bmp" },
+          { "filenamePattern": "*.tif" },
+          { "filenamePattern": "*.tiff" },
+          { "filenamePattern": "*.avif" },
+          { "filenamePattern": "*.svg" },
+          { "filenamePattern": "*.heic" },
+          { "filenamePattern": "*.heif" }
         ],
         "priority": "default"
       }
     ],
+    "configuration": {
+      "type": "object",
+      "title": "Image Inspector Configuration",
+      "properties": {
+        "imageInspector.toolbarPosition": {
+          "type": "string",
+          "enum": ["top", "bottom", "left", "right"],
+          "default": "top",
+          "description": "Position of the toolbar in the image inspector webview (top, bottom, left, right)."
+        }
+      }
+    },
     "commands": [
       {
         "command": "imageInspector.showImageDetails",

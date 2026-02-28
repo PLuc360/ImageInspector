@@ -1,3 +1,42 @@
+.zoom-toolbar.toolbar-pos-top {
+  top: 18px;
+  left: 50%;
+  right: auto;
+  bottom: auto;
+  transform: translateX(-50%);
+  flex-direction: row;
+  border-radius: 999px;
+}
+
+.zoom-toolbar.toolbar-pos-bottom {
+  bottom: 18px;
+  left: 50%;
+  top: auto;
+  right: auto;
+  transform: translateX(-50%);
+  flex-direction: row;
+  border-radius: 999px;
+}
+
+.zoom-toolbar.toolbar-pos-left {
+  top: 50%;
+  left: 18px;
+  right: auto;
+  bottom: auto;
+  transform: translateY(-50%);
+  flex-direction: column;
+  border-radius: 18px;
+}
+
+.zoom-toolbar.toolbar-pos-right {
+  top: 50%;
+  right: 18px;
+  left: auto;
+  bottom: auto;
+  transform: translateY(-50%);
+  flex-direction: column;
+  border-radius: 18px;
+}
 :root {
   color-scheme: light dark;
 }

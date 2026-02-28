@@ -114,11 +114,14 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
       const details = await getImageDetails(document.uri.fsPath);
       const imageSource = await getWebviewImageSource(document.uri.fsPath, document.uri, webviewPanel.webview, cacheBuster);
       webviewPanel.title = details.fileName;
+      // Lecture de la config pour la position de la toolbar
+      const toolbarPosition = vscode.workspace.getConfiguration('imageInspector').get<string>('toolbarPosition', 'top');
       webviewPanel.webview.html = buildCustomEditorWebview(
         webviewPanel.webview,
         imageSource,
         details,
-        this.context.extensionUri
+        this.context.extensionUri,
+        { toolbarPosition }
       );
     } catch (error) {
       const message = getImageLoadErrorMessage(document.uri.fsPath, error);
@@ -196,32 +199,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const providerDisposable = vscode.window.registerCustomEditorProvider(
     ImageDetailsCustomEditorProvider.viewType,
-    provider,
-    {
-      webviewOptions: {
-        retainContextWhenHidden: true
-      }
-    }
+    provider
   );
-
-  const openDetailsDisposable = vscode.commands.registerCommand('imageInspector.showImageDetails', async (resource?: vscode.Uri) => {
-    try {
-      const imageUri = await resolveImageUri(resource);
-      if (!imageUri) {
-        return;
-      }
-
-      await vscode.commands.executeCommand(
-        'vscode.openWith',
-        imageUri,
-        ImageDetailsCustomEditorProvider.viewType,
-        vscode.ViewColumn.Active
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      void vscode.window.showErrorMessage(`Image Details: ${message}`);
-    }
-  });
 
   const zoomInDisposable = vscode.commands.registerCommand('imageInspector.zoomIn', async () => {
     await provider.sendZoomMessage({ type: 'zoom-in' });
@@ -241,7 +220,6 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     providerDisposable,
-    openDetailsDisposable,
     zoomInDisposable,
     zoomOutDisposable,
     zoomResetDisposable,

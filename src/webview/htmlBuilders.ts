@@ -31,12 +31,24 @@ export interface ImageDetailsViewModel {
  * @param extensionUri Extension root URI.
  * @returns Complete HTML payload for the custom editor.
  */
+/**
+ * Builds the custom editor HTML combining image preview and metadata.
+ *
+ * @param webview Target webview instance.
+ * @param imageSource Image URI to render.
+ * @param details Extracted image details.
+ * @param extensionUri Extension root URI.
+ * @param options Options for rendering (e.g. toolbar position).
+ * @returns Complete HTML payload for the custom editor.
+ */
 export function buildCustomEditorWebview(
   webview: vscode.Webview,
   imageSource: string,
   details: ImageDetailsViewModel,
-  extensionUri: vscode.Uri
+  extensionUri: vscode.Uri,
+  options?: { toolbarPosition?: string }
 ): string {
+  const toolbarPosition = options?.toolbarPosition || 'top';
   const nonce = createNonce();
   const styleContent = loadWebviewStyleContent(extensionUri);
   const scriptContent = loadWebviewScriptContent(extensionUri);
@@ -74,6 +86,9 @@ export function buildCustomEditorWebview(
   // Extension sans point et en majuscule pour affichage
   const extLabel = fileExtension ? fileExtension.replace('.', '').toUpperCase() : '';
 
+  // Détermine la classe CSS selon la position de la toolbar
+  const toolbarClass = `zoom-toolbar toolbar-pos-${toolbarPosition}`;
+
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -86,7 +101,7 @@ export function buildCustomEditorWebview(
 <body>
   <div class="layout" style="--dominant-color: ${escapeHtml(details.dominantColorHex)};">
     <section class="preview">
-      <div class="zoom-toolbar" aria-label="Zoom controls">
+      <div class="${toolbarClass}" aria-label="Zoom controls">
         <button id="zoom-out" type="button" title="Zoom -" aria-label="Zoom -">
           <span class="icon" aria-hidden="true">−</span>
         </button>
