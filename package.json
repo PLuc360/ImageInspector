@@ -34,6 +34,7 @@
           { "filenamePattern": "*.tif" },
           { "filenamePattern": "*.tiff" },
           { "filenamePattern": "*.avif" },
+          { "filenamePattern": "*.ico" },
           { "filenamePattern": "*.svg" },
           { "filenamePattern": "*.heic" },
           { "filenamePattern": "*.heif" }
@@ -111,7 +112,7 @@
       "explorer/context": [
         {
           "command": "imageInspector.showImageDetails",
-          "when": "resourceExtname == .png || resourceExtname == .jpg || resourceExtname == .jpeg || resourceExtname == .webp || resourceExtname == .gif || resourceExtname == .bmp || resourceExtname == .tif || resourceExtname == .tiff || resourceExtname == .avif || resourceExtname == .svg || resourceExtname == .heic || resourceExtname == .heif"
+          "when": "resourceExtname == .png || resourceExtname == .jpg || resourceExtname == .jpeg || resourceExtname == .webp || resourceExtname == .gif || resourceExtname == .bmp || resourceExtname == .tif || resourceExtname == .tiff || resourceExtname == .avif || resourceExtname == .ico || resourceExtname == .svg || resourceExtname == .heic || resourceExtname == .heif"
         }
       ]
     }

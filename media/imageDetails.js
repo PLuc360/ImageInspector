@@ -21,6 +21,8 @@ const zoomSelectionBox = document.getElementById('zoom-selection-box');
 const pipetteButton = document.getElementById('pipette-tool');
 const pipetteCanvas = document.getElementById('pipette-canvas');
 const pipetteColorResult = document.getElementById('pipette-color-result');
+const selectedIcoSizeBadge = document.getElementById('selected-ico-size');
+const icoGalleryItems = Array.from(document.querySelectorAll('.ico-gallery-item'));
 let pipetteMode = false;
 const INFO_OVERLAY_STORAGE_KEY = 'imageDetails.infoOverlayVisible';
 const INFO_OVERLAY_POSITION_STORAGE_KEY = 'imageDetails.infoOverlayPosition';
@@ -97,6 +99,73 @@ function setPipetteMode(isEnabled) {
       pipetteZoomLoupe.style.display = 'none';
     }
   }
+}
+
+function setActiveIcoGalleryItem(selectedItem) {
+  if (!icoGalleryItems.length) {
+    return;
+  }
+
+  for (const galleryItem of icoGalleryItems) {
+    const isSelected = galleryItem === selectedItem;
+    galleryItem.classList.toggle('is-active', isSelected);
+    galleryItem.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
+  }
+
+  if (selectedIcoSizeBadge) {
+    const selectedSizeLabel = selectedItem?.getAttribute('data-size-label');
+    if (selectedSizeLabel) {
+      selectedIcoSizeBadge.textContent = `Taille sélectionnée: ${selectedSizeLabel}`;
+    }
+  }
+}
+
+function syncActiveIcoGalleryItemFromImage() {
+  if (!image || !icoGalleryItems.length) {
+    return;
+  }
+
+  const currentSource = image.getAttribute('src');
+  if (!currentSource) {
+    return;
+  }
+
+  const matchingItem = icoGalleryItems.find((galleryItem) => galleryItem.getAttribute('data-image-source') === currentSource);
+  if (matchingItem) {
+    setActiveIcoGalleryItem(matchingItem);
+  }
+}
+
+function initializeIcoGallery() {
+  if (!image || !icoGalleryItems.length) {
+    return;
+  }
+
+  for (const galleryItem of icoGalleryItems) {
+    galleryItem.addEventListener('click', (event) => {
+      event.preventDefault();
+
+      const nextSource = galleryItem.getAttribute('data-image-source');
+      if (!nextSource) {
+        return;
+      }
+
+      setActiveIcoGalleryItem(galleryItem);
+
+      if (image.getAttribute('src') === nextSource) {
+        return;
+      }
+
+      if (pipetteMode) {
+        setPipetteMode(false);
+      }
+
+      image.setAttribute('src', nextSource);
+      scheduleInitialModeDecision();
+    });
+  }
+
+  syncActiveIcoGalleryItemFromImage();
 }
 // Affichage de la loupe de zoom local autour du curseur en mode pipette
 previewBody?.addEventListener('pointermove', (event) => {
@@ -832,6 +901,7 @@ window.addEventListener('keydown', (event) => {
 
 image?.addEventListener('load', () => {
   image.setAttribute('draggable', 'false');
+  syncActiveIcoGalleryItemFromImage();
   scheduleInitialModeDecision();
 });
 
@@ -861,6 +931,7 @@ window.addEventListener('message', (event) => {
 
 initializeInfoOverlayVisibility();
 initializeInfoOverlayPosition();
+initializeIcoGallery();
 updateSelectionModeUi();
 updateView();
 

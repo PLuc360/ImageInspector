@@ -25,7 +25,7 @@ VS Code extension to inspect images directly in the editor.
 4. Open in VS Code and launch the extension in development mode (`F5`).
 
 ## Usage
-1. Open a supported image (`png`, `jpg`, `jpeg`, `webp`, `gif`, `bmp`, `tif`, `tiff`, `avif`, `svg`, `heic`, `heif`).
+1. Open a supported image (`png`, `jpg`, `jpeg`, `webp`, `gif`, `bmp`, `tif`, `tiff`, `avif`, `ico`, `svg`, `heic`, `heif`).
 2. The custom editor opens by default with the image on the left and details on the right.
 
 Available command: **Image Inspector: Open with Details**.

@@ -6,11 +6,21 @@ import sharp from 'sharp';
 import {
   buildCustomEditorWebview,
   buildErrorWebview,
+  type IcoVariantViewModel,
   type ImageDetailsViewModel
 } from './webview';
 
-const SUPPORTED_IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tif', '.tiff', '.avif', '.svg', '.heic', '.heif'];
+const SUPPORTED_IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tif', '.tiff', '.avif', '.ico', '.svg', '.heic', '.heif'];
 const SUPPORTED_IMAGE_FILTER_EXTENSIONS = SUPPORTED_IMAGE_EXTENSIONS.map((extension) => extension.replace('.', ''));
+
+type IcoImageEntry = {
+  width: number;
+  height: number;
+  bitCount: number;
+  bytesInResource: number;
+  imageOffset: number;
+  isPng: boolean;
+};
 
 type ZoomMessage = {
   type: 'zoom-in' | 'zoom-out' | 'zoom-reset' | 'zoom-fit';
@@ -112,7 +122,14 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
 
     try {
       const details = await getImageDetails(document.uri.fsPath);
-      const imageSource = await getWebviewImageSource(document.uri.fsPath, document.uri, webviewPanel.webview, cacheBuster);
+      let imageSource = await getWebviewImageSource(document.uri.fsPath, document.uri, webviewPanel.webview, cacheBuster);
+      const extension = path.extname(document.uri.fsPath).toLowerCase();
+      const icoVariants = extension === '.ico' ? await getIcoGalleryItems(document.uri.fsPath) : [];
+
+      if (icoVariants.length > 0) {
+        imageSource = getDefaultIcoVariantSource(icoVariants);
+      }
+
       webviewPanel.title = details.fileName;
       // Lecture de la config pour la position de la toolbar
       const toolbarPosition = vscode.workspace.getConfiguration('imageInspector').get<string>('toolbarPosition', 'top');
@@ -121,7 +138,7 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
         imageSource,
         details,
         this.context.extensionUri,
-        { toolbarPosition }
+        { toolbarPosition, icoVariants }
       );
     } catch (error) {
       const message = getImageLoadErrorMessage(document.uri.fsPath, error);
@@ -295,35 +312,220 @@ function getImageLoadErrorMessage(filePath: string, error: unknown): string {
  * @returns Consolidated image details.
  */
 async function getImageDetails(filePath: string): Promise<ImageDetailsViewModel> {
-  const [stats, metadata, imageStats] = await Promise.all([
-    fs.stat(filePath),
-    sharp(filePath).metadata(),
-    sharp(filePath).stats()
-  ]);
+  const stats = await fs.stat(filePath);
 
-  const width = metadata.width ?? 0;
-  const height = metadata.height ?? 0;
+  try {
+    const [metadata, imageStats] = await Promise.all([
+      sharp(filePath).metadata(),
+      sharp(filePath).stats()
+    ]);
 
-  const dominant = imageStats.dominant;
-  const dominantColorHex = rgbToHex(dominant.r, dominant.g, dominant.b);
-  const dominantColorRgb = `rgb(${dominant.r}, ${dominant.g}, ${dominant.b})`;
+    const width = metadata.width ?? 0;
+    const height = metadata.height ?? 0;
 
-  return {
-    fileName: path.basename(filePath),
-    absolutePath: filePath,
-    sizeBytes: stats.size,
-    sizeText: formatBytes(stats.size),
-    width,
-    height,
-    megapixels: ((width * height) / 1_000_000).toFixed(2),
-    format: metadata.format?.toUpperCase() ?? 'Unknown',
-    space: metadata.space ?? 'Unknown',
-    channels: metadata.channels ?? 0,
-    hasAlpha: Boolean(metadata.hasAlpha),
-    density: metadata.density,
-    dominantColorHex,
-    dominantColorRgb
-  };
+    const dominant = imageStats.dominant;
+    const dominantColorHex = rgbToHex(dominant.r, dominant.g, dominant.b);
+    const dominantColorRgb = `rgb(${dominant.r}, ${dominant.g}, ${dominant.b})`;
+
+    return {
+      fileName: path.basename(filePath),
+      absolutePath: filePath,
+      sizeBytes: stats.size,
+      sizeText: formatBytes(stats.size),
+      width,
+      height,
+      megapixels: ((width * height) / 1_000_000).toFixed(2),
+      format: metadata.format?.toUpperCase() ?? 'Unknown',
+      space: metadata.space ?? 'Unknown',
+      channels: metadata.channels ?? 0,
+      hasAlpha: Boolean(metadata.hasAlpha),
+      density: metadata.density,
+      dominantColorHex,
+      dominantColorRgb
+    };
+  } catch (error) {
+    const extension = path.extname(filePath).toLowerCase();
+    if (extension !== '.ico') {
+      throw error;
+    }
+
+    const icoEntry = await getIcoPrimaryEntry(filePath);
+    const width = icoEntry?.width ?? 0;
+    const height = icoEntry?.height ?? 0;
+    const estimatedChannels = Math.max(1, Math.ceil((icoEntry?.bitCount ?? 0) / 8));
+
+    return {
+      fileName: path.basename(filePath),
+      absolutePath: filePath,
+      sizeBytes: stats.size,
+      sizeText: formatBytes(stats.size),
+      width,
+      height,
+      megapixels: ((width * height) / 1_000_000).toFixed(2),
+      format: 'ICO',
+      space: 'Unknown',
+      channels: estimatedChannels,
+      hasAlpha: (icoEntry?.bitCount ?? 0) >= 32,
+      density: undefined,
+      dominantColorHex: '#808080',
+      dominantColorRgb: 'rgb(128, 128, 128)'
+    };
+  }
+}
+
+/**
+ * Reads an ICO header and returns the most relevant icon entry.
+ *
+ * @param filePath Absolute ICO file path.
+ * @returns Largest icon entry when available.
+ */
+async function getIcoPrimaryEntry(filePath: string): Promise<IcoImageEntry | undefined> {
+  const entries = await parseIcoEntries(filePath);
+
+  if (entries.length === 0) {
+    return undefined;
+  }
+
+  return entries.sort((entryA, entryB) => {
+    const areaDifference = entryB.width * entryB.height - entryA.width * entryA.height;
+    if (areaDifference !== 0) {
+      return areaDifference;
+    }
+
+    return entryB.bitCount - entryA.bitCount;
+  })[0];
+}
+
+/**
+ * Parses ICO directory entries from a file.
+ *
+ * @param filePath Absolute ICO file path.
+ * @returns Parsed icon entries in file order.
+ */
+async function parseIcoEntries(filePath: string): Promise<IcoImageEntry[]> {
+  const buffer = await fs.readFile(filePath);
+
+  if (buffer.length < 6) {
+    return [];
+  }
+
+  const reserved = buffer.readUInt16LE(0);
+  const type = buffer.readUInt16LE(2);
+  const count = buffer.readUInt16LE(4);
+
+  if (reserved !== 0 || type !== 1 || count === 0) {
+    return [];
+  }
+
+  const entries: IcoImageEntry[] = [];
+  const directoryOffset = 6;
+  const entryLength = 16;
+
+  for (let index = 0; index < count; index += 1) {
+    const entryOffset = directoryOffset + index * entryLength;
+    if (entryOffset + entryLength > buffer.length) {
+      break;
+    }
+
+    const widthByte = buffer.readUInt8(entryOffset);
+    const heightByte = buffer.readUInt8(entryOffset + 1);
+    const bitCount = buffer.readUInt16LE(entryOffset + 6);
+    const bytesInResource = buffer.readUInt32LE(entryOffset + 8);
+    const imageOffset = buffer.readUInt32LE(entryOffset + 12);
+
+    const imageEndOffset = imageOffset + bytesInResource;
+    const imageBuffer = imageOffset < buffer.length && imageEndOffset <= buffer.length
+      ? buffer.subarray(imageOffset, imageEndOffset)
+      : Buffer.alloc(0);
+
+    entries.push({
+      width: widthByte === 0 ? 256 : widthByte,
+      height: heightByte === 0 ? 256 : heightByte,
+      bitCount,
+      bytesInResource,
+      imageOffset,
+      isPng: isPngBuffer(imageBuffer)
+    });
+  }
+
+  return entries;
+}
+
+/**
+ * Builds gallery variants for ICO files when entries contain PNG payloads.
+ *
+ * @param filePath Absolute ICO file path.
+ * @returns Clickable icon variants for webview display.
+ */
+async function getIcoGalleryItems(filePath: string): Promise<IcoVariantViewModel[]> {
+  const buffer = await fs.readFile(filePath);
+  const entries = await parseIcoEntries(filePath);
+
+  return entries
+    .map((entry, index) => {
+      const imageEndOffset = entry.imageOffset + entry.bytesInResource;
+      if (!entry.isPng || entry.imageOffset >= buffer.length || imageEndOffset > buffer.length) {
+        return undefined;
+      }
+
+      const imageBuffer = buffer.subarray(entry.imageOffset, imageEndOffset);
+      const label = `${entry.width}x${entry.height}`;
+
+      return {
+        id: `ico-variant-${String(index + 1)}`,
+        label,
+        width: entry.width,
+        height: entry.height,
+        imageSource: toPngDataUri(imageBuffer)
+      } satisfies IcoVariantViewModel;
+    })
+    .filter((variant): variant is IcoVariantViewModel => Boolean(variant));
+}
+
+/**
+ * Detects whether a buffer starts with a PNG signature.
+ *
+ * @param buffer Binary payload to inspect.
+ * @returns True when buffer contains a PNG image.
+ */
+function isPngBuffer(buffer: Buffer): boolean {
+  if (buffer.length < 8) {
+    return false;
+  }
+
+  const pngSignature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  return pngSignature.every((byte, index) => buffer[index] === byte);
+}
+
+/**
+ * Converts a PNG buffer to a webview-compatible data URI.
+ *
+ * @param buffer PNG payload.
+ * @returns Data URI string.
+ */
+function toPngDataUri(buffer: Buffer): string {
+  return `data:image/png;base64,${buffer.toString('base64')}`;
+}
+
+/**
+ * Chooses the default ICO variant source for initial preview.
+ *
+ * @param variants Parsed ICO variants.
+ * @returns Source URL for the preferred initial variant.
+ */
+function getDefaultIcoVariantSource(variants: IcoVariantViewModel[]): string {
+  const preferred = variants
+    .slice()
+    .sort((variantA, variantB) => {
+      const areaDifference = variantB.width * variantB.height - variantA.width * variantA.height;
+      if (areaDifference !== 0) {
+        return areaDifference;
+      }
+
+      return variantB.label.localeCompare(variantA.label, undefined, { numeric: true, sensitivity: 'base' });
+    })[0];
+
+  return preferred?.imageSource ?? variants[0].imageSource;
 }
 
 /**

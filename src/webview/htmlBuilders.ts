@@ -23,6 +23,17 @@ export interface ImageDetailsViewModel {
 }
 
 /**
+ * Represents one selectable ICO variant displayed in the gallery.
+ */
+export interface IcoVariantViewModel {
+  id: string;
+  label: string;
+  width: number;
+  height: number;
+  imageSource: string;
+}
+
+/**
  * Builds the custom editor HTML combining image preview and metadata.
  *
  * @param webview Target webview instance.
@@ -46,7 +57,7 @@ export function buildCustomEditorWebview(
   imageSource: string,
   details: ImageDetailsViewModel,
   extensionUri: vscode.Uri,
-  options?: { toolbarPosition?: string }
+  options?: { toolbarPosition?: string; icoVariants?: IcoVariantViewModel[] }
 ): string {
   const toolbarPosition = options?.toolbarPosition || 'top';
   const nonce = createNonce();
@@ -88,6 +99,24 @@ export function buildCustomEditorWebview(
 
   // Détermine la classe CSS selon la position de la toolbar
   const toolbarClass = `zoom-toolbar toolbar-pos-${toolbarPosition}`;
+  const icoVariants = options?.icoVariants ?? [];
+  const hasIcoGallery = icoVariants.length > 1;
+  const initialIcoVariantLabel = hasIcoGallery ? icoVariants[0].label : '';
+  const icoGalleryMarkup = hasIcoGallery
+    ? `<div class="ico-gallery" aria-label="ICO variants gallery">${icoVariants.map((variant, index) => `
+      <button
+        type="button"
+        class="ico-gallery-item${index === 0 ? ' is-active' : ''}"
+        data-image-source="${escapeHtml(variant.imageSource)}"
+        data-size-label="${escapeHtml(variant.label)}"
+        title="${escapeHtml(variant.label)}"
+        aria-label="Show ${escapeHtml(variant.label)} icon"
+        aria-pressed="${index === 0 ? 'true' : 'false'}"
+      >
+        <img src="${escapeHtml(variant.imageSource)}" alt="${escapeHtml(variant.label)} thumbnail" />
+        <span>${escapeHtml(variant.label)}</span>
+      </button>`).join('')}</div>`
+    : '';
 
   return `<!doctype html>
 <html lang="en">
@@ -138,6 +167,7 @@ export function buildCustomEditorWebview(
           <span><span class="color-chip"></span>${escapeHtml(details.dominantColorHex)}</span>
           <span class="badge ${extClass}">${extLabel}</span>
           <span class="badge">${details.width} × ${details.height}</span>
+          ${hasIcoGallery ? `<span id="selected-ico-size" class="badge">Taille sélectionnée: ${escapeHtml(initialIcoVariantLabel)}</span>` : ''}
         </div>
         <table class="info-table">${tableRows}</table>
       </aside>
@@ -149,6 +179,7 @@ export function buildCustomEditorWebview(
           <canvas id="pipette-zoom-loupe" width="64" height="64" style="display:none;position:fixed;pointer-events:none;z-index:20;border-radius:50%;background:#fff;box-shadow:0 2px 8px #0003;"></canvas>
         </div>
       </div>
+      ${icoGalleryMarkup}
       <div id="zoom-selection-box" class="zoom-selection-box" aria-hidden="true"></div>
     </section>
   </div>
