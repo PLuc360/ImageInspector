@@ -37,15 +37,6 @@ export interface IcoVariantViewModel {
  * Builds the custom editor HTML combining image preview and metadata.
  *
  * @param webview Target webview instance.
- * @param imageUri Image URI to render.
- * @param details Extracted image details.
- * @param extensionUri Extension root URI.
- * @returns Complete HTML payload for the custom editor.
- */
-/**
- * Builds the custom editor HTML combining image preview and metadata.
- *
- * @param webview Target webview instance.
  * @param imageSource Image URI to render.
  * @param details Extracted image details.
  * @param extensionUri Extension root URI.
@@ -99,16 +90,16 @@ export function buildCustomEditorWebview(
     `script-src 'nonce-${nonce}'`
   ].join('; ');
 
-  // Extract file extension (with dot, lowercase)
+  // Extract the file extension with a leading dot (lowercase).
   const fileExtension = details.fileName.includes('.')
     ? details.fileName.slice(details.fileName.lastIndexOf('.')).toLowerCase()
     : '';
-  // Génère une classe CSS unique pour chaque extension, ex: badge-ext-png
+  // Build a CSS class per extension, for example: badge-ext-png.
   const extClass = fileExtension ? `badge-ext-${fileExtension.replace('.', '')}` : '';
-  // Extension sans point et en majuscule pour affichage
+  // User-facing extension label without dot, uppercased.
   const extLabel = fileExtension ? fileExtension.replace('.', '').toUpperCase() : '';
 
-  // Détermine la classe CSS selon la position de la toolbar
+  // Resolve toolbar placement class.
   const toolbarClass = `zoom-toolbar toolbar-pos-${toolbarPosition}`;
   const icoVariants = options?.icoVariants ?? [];
   const hasIcoGallery = icoVariants.length > 1;
@@ -178,7 +169,7 @@ export function buildCustomEditorWebview(
           <span><span class="color-chip"></span>${escapeHtml(details.dominantColorHex)}</span>
           <span class="badge ${extClass}">${extLabel}</span>
           <span class="badge">${details.width} × ${details.height}</span>
-          ${hasIcoGallery ? `<span id="selected-ico-size" class="badge">Taille sélectionnée: ${escapeHtml(initialIcoVariantLabel)}</span>` : ''}
+          ${hasIcoGallery ? `<span id="selected-ico-size" class="badge">Selected size: ${escapeHtml(initialIcoVariantLabel)}</span>` : ''}
         </div>
         <div id="pipette-hover-info" class="pipette-hover-info is-hidden" aria-live="polite">
           <div class="pipette-hover-row">

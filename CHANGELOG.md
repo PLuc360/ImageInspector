@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
+## [1.3.0] - 2026-03-06
+### Added
+- Color picker loupe settings are now configurable from extension settings (diameter, virtual resolution, zoom at min image zoom, zoom at max image zoom).
+- Live pixel information from the color picker is now displayed in the info panel (position and color preview).
+
+### Changed
+- Refined internal webview/editor code with small, behavior-preserving cleanups (reduced duplication in event handlers and refresh timer key handling).
+- Improved code readability in `media/imageDetails.js` through local helper extraction (`stopEvent`, `bindClickAction`, loupe positioning, drag end handling).
+- Standardized remaining runtime French UI/comment strings to English for consistency (including selected ICO size label and related comments).
+- Improved the color picker loupe visual style and rendering behavior for a clearer, more polished preview.
+
+
 ## [1.2.1] - 2026-02-28
 ### Added
 - Toolbar position is now configurable: top, bottom, left, or right (vertical/horizontal orientation auto).

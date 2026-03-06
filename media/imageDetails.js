@@ -217,6 +217,18 @@ function hidePipetteColorResult(immediate = false) {
   }, PIPETTE_RESULT_FADE_DURATION_MS);
 }
 
+function stopEvent(event) {
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+function bindClickAction(button, action) {
+  button?.addEventListener('click', (event) => {
+    stopEvent(event);
+    action();
+  });
+}
+
 function setActiveIcoGalleryItem(selectedItem) {
   if (!icoGalleryItems.length) {
     return;
@@ -231,7 +243,7 @@ function setActiveIcoGalleryItem(selectedItem) {
   if (selectedIcoSizeBadge) {
     const selectedSizeLabel = selectedItem?.getAttribute('data-size-label');
     if (selectedSizeLabel) {
-      selectedIcoSizeBadge.textContent = `Taille sélectionnée: ${selectedSizeLabel}`;
+      selectedIcoSizeBadge.textContent = `Selected size: ${selectedSizeLabel}`;
     }
   }
 }
@@ -304,7 +316,16 @@ function getDynamicLoupeZoom(displayedZoom) {
   );
 }
 
-// Affichage de la loupe de zoom local autour du curseur en mode pipette
+function positionLoupeAtPointer(clientX, clientY) {
+  if (!pipetteZoomLoupe) {
+    return;
+  }
+
+  pipetteZoomLoupe.style.left = `${String(clientX - pipetteZoomLoupe.width / 2)}px`;
+  pipetteZoomLoupe.style.top = `${String(clientY - pipetteZoomLoupe.height / 2)}px`;
+}
+
+// Render a local pixel loupe around the cursor when pipette mode is enabled.
 previewBody?.addEventListener('pointermove', (event) => {
   if (!pipetteMode || !pipetteCanvas || !image || !pipetteZoomLoupe || !virtualLoupeCtx) return;
   const imageRect = image.getBoundingClientRect();
@@ -329,8 +350,7 @@ previewBody?.addEventListener('pointermove', (event) => {
     loupeCtx.moveTo(0, center);
     loupeCtx.lineTo(pipetteZoomLoupe.width, center);
     loupeCtx.stroke();
-    pipetteZoomLoupe.style.left = (event.clientX - pipetteZoomLoupe.width / 2) + 'px';
-    pipetteZoomLoupe.style.top = (event.clientY - pipetteZoomLoupe.height / 2) + 'px';
+    positionLoupeAtPointer(event.clientX, event.clientY);
     pipetteZoomLoupe.style.display = 'block';
     return;
   }
@@ -408,7 +428,7 @@ previewBody?.addEventListener('pointermove', (event) => {
   const circleRadiusInPixels = LOUPE_VIRTUAL_RESOLUTION / 2;
   const circleRadiusInCanvas = circleRadiusInPixels * pixelSize;
 
-  // Masque en cercle pixelisé : supprime les pixels hors rayon.
+  // Pixelated circular mask: remove pixels outside the radius.
   for (let row = 0; row < LOUPE_VIRTUAL_RESOLUTION; row += 1) {
     for (let column = 0; column < LOUPE_VIRTUAL_RESOLUTION; column += 1) {
       const deltaX = column - centerPixelIndex;
@@ -431,30 +451,32 @@ previewBody?.addEventListener('pointermove', (event) => {
   loupeCtx.moveTo(center - circleRadiusInCanvas, center);
   loupeCtx.lineTo(center + circleRadiusInCanvas, center);
   loupeCtx.stroke();
-  pipetteZoomLoupe.style.left = (event.clientX - pipetteZoomLoupe.width / 2) + 'px';
-  pipetteZoomLoupe.style.top = (event.clientY - pipetteZoomLoupe.height / 2) + 'px';
+  positionLoupeAtPointer(event.clientX, event.clientY);
 });
-// Cache la loupe quand le curseur quitte la zone
+// Hide the loupe when the pointer leaves the preview area.
 previewBody?.addEventListener('pointerleave', () => {
-  if (pipetteZoomLoupe) pipetteZoomLoupe.style.display = 'none';
+  if (pipetteZoomLoupe) {
+    pipetteZoomLoupe.style.display = 'none';
+  }
   if (pipetteMode) {
     resetPipetteHoverInfo();
   }
 });
 previewBody?.addEventListener('pointerenter', () => {
-  if (pipetteMode && pipetteZoomLoupe) pipetteZoomLoupe.style.display = 'block';
+  if (pipetteMode && pipetteZoomLoupe) {
+    pipetteZoomLoupe.style.display = 'block';
+  }
 });
-// Gestion du bouton pipette
+// Toggle pipette mode from the toolbar button.
 pipetteButton?.addEventListener('click', (event) => {
-  event.preventDefault();
-  event.stopPropagation();
+  stopEvent(event);
   setPipetteMode(!pipetteMode);
 });
 
-// Gestion du clic pour la pipette
+// Pick a pixel color on click and copy it to the clipboard.
 previewBody?.addEventListener('click', (event) => {
   if (!pipetteMode || !pipetteCanvas || !image) return;
-  // Calculer la position du clic relative à l'image affichée
+  // Compute click coordinates in image space.
   const imageRect = image.getBoundingClientRect();
   const normalizedX = (event.clientX - imageRect.left) / imageRect.width;
   const normalizedY = (event.clientY - imageRect.top) / imageRect.height;
@@ -464,11 +486,11 @@ previewBody?.addEventListener('click', (event) => {
   const ctx = pipetteCanvas.getContext('2d');
   const pixel = ctx.getImageData(x, y, 1, 1).data;
   const hex = formatHexColor(pixel[0], pixel[1], pixel[2]);
-  // Copier dans le presse-papier
+  // Copy to clipboard.
   if (navigator.clipboard && window.isSecureContext) {
     navigator.clipboard.writeText(hex).catch(() => {});
   } else {
-    // Fallback pour vieux navigateurs : textarea caché
+    // Fallback for older browsers using a hidden textarea.
     const textarea = document.createElement('textarea');
     textarea.value = hex;
     textarea.style.position = 'fixed';
@@ -479,12 +501,12 @@ previewBody?.addEventListener('click', (event) => {
     try { document.execCommand('copy'); } catch {}
     document.body.removeChild(textarea);
   }
-  // Afficher le résultat
+  // Display copied color feedback near the cursor.
   if (pipetteColorResult) {
     clearPipetteColorResultTimers();
     pipetteColorResult.style.display = 'block';
     pipetteColorResult.style.opacity = '1';
-    // Décale la bulle à droite de la loupe (loupe centrée sur le curseur, 40px de marge)
+    // Place the bubble to the right of the loupe.
     pipetteColorResult.style.left = (event.clientX + 48) + 'px';
     pipetteColorResult.style.top = (event.clientY - 24) + 'px';
     pipetteColorResult.innerHTML = `<span style="display:inline-block;width:16px;height:16px;border-radius:50%;background:${hex};border:1px solid #ccc;vertical-align:middle;margin-right:6px;"></span><span style="vertical-align:middle;">${hex} <small>(copied)</small></span>`;
@@ -506,7 +528,7 @@ previewBody?.addEventListener('click', (event) => {
   }
 });
 
-// Désactive le mode pipette à l'ESC
+// Disable pipette mode with Escape.
 window.addEventListener('keydown', (event) => {
   if (pipetteMode && event.key === 'Escape') {
     setPipetteMode(false);
@@ -610,6 +632,18 @@ function finishSelection() {
   }
   selectionPointerId = null;
   hideSelectionBox();
+}
+
+function endPreviewDrag(pointerId) {
+  if (!preview || !previewBody) {
+    return;
+  }
+
+  isDragging = false;
+  preview.classList.remove('dragging');
+  if (previewBody.hasPointerCapture(pointerId)) {
+    previewBody.releasePointerCapture(pointerId);
+  }
 }
 
 function clamp(value, min, max) {
@@ -903,39 +937,27 @@ function endOverlayDrag() {
   saveInfoOverlayPosition();
 }
 
-zoomInButton?.addEventListener('click', (event) => {
-  event.preventDefault();
-  event.stopPropagation();
+bindClickAction(zoomInButton, () => {
   applyZoomDelta(ZOOM_STEP);
 });
 
-zoomOutButton?.addEventListener('click', (event) => {
-  event.preventDefault();
-  event.stopPropagation();
+bindClickAction(zoomOutButton, () => {
   applyZoomDelta(-ZOOM_STEP);
 });
 
-zoomResetButton?.addEventListener('click', (event) => {
-  event.preventDefault();
-  event.stopPropagation();
+bindClickAction(zoomResetButton, () => {
   resetZoom();
 });
 
-zoomFitButton?.addEventListener('click', (event) => {
-  event.preventDefault();
-  event.stopPropagation();
+bindClickAction(zoomFitButton, () => {
   setFitMode();
 });
 
-zoomSelectButton?.addEventListener('click', (event) => {
-  event.preventDefault();
-  event.stopPropagation();
+bindClickAction(zoomSelectButton, () => {
   setSelectionMode(!selectionMode);
 });
 
-infoToggleButton?.addEventListener('click', (event) => {
-  event.preventDefault();
-  event.stopPropagation();
+bindClickAction(infoToggleButton, () => {
   const isCurrentlyHidden = infoOverlay?.classList.contains('is-hidden') ?? true;
   setInfoOverlayVisible(isCurrentlyHidden);
 });
@@ -966,8 +988,7 @@ infoOverlayHandle?.addEventListener('pointerdown', (event) => {
 
   overlayDragPointerId = event.pointerId;
   infoOverlayHandle.setPointerCapture(event.pointerId);
-  event.preventDefault();
-  event.stopPropagation();
+  stopEvent(event);
 });
 
 window.addEventListener('pointermove', (event) => {
@@ -1077,15 +1098,7 @@ previewBody?.addEventListener('pointerup', (event) => {
     return;
   }
 
-  if (!preview) {
-    return;
-  }
-
-  isDragging = false;
-  preview.classList.remove('dragging');
-  if (previewBody.hasPointerCapture(event.pointerId)) {
-    previewBody.releasePointerCapture(event.pointerId);
-  }
+  endPreviewDrag(event.pointerId);
 });
 
 previewBody?.addEventListener('pointercancel', (event) => {
@@ -1094,15 +1107,7 @@ previewBody?.addEventListener('pointercancel', (event) => {
     return;
   }
 
-  if (!preview) {
-    return;
-  }
-
-  isDragging = false;
-  preview.classList.remove('dragging');
-  if (previewBody.hasPointerCapture(event.pointerId)) {
-    previewBody.releasePointerCapture(event.pointerId);
-  }
+  endPreviewDrag(event.pointerId);
 });
 
 window.addEventListener('keydown', (event) => {

@@ -55,6 +55,17 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
   private readonly refreshDebounceTimers = new Map<string, NodeJS.Timeout>();
 
   /**
+   * Builds a stable key used to debounce refreshes per panel/document pair.
+   *
+   * @param document Document currently rendered.
+   * @param webviewPanel Associated webview panel.
+   * @returns Unique key for refresh timer tracking.
+   */
+  private getRefreshTimerKey(document: ImageCustomDocument, webviewPanel: vscode.WebviewPanel): string {
+    return `${webviewPanel.viewType}${document.uri.toString()}`;
+  }
+
+  /**
    * Creates a provider instance.
    *
    * @param context Extension context used for subscription lifecycle.
@@ -88,10 +99,11 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
         this.activeDocument = undefined;
       }
 
-      const refreshTimer = this.refreshDebounceTimers.get(webviewPanel.viewType + document.uri.toString());
+      const timerKey = this.getRefreshTimerKey(document, webviewPanel);
+      const refreshTimer = this.refreshDebounceTimers.get(timerKey);
       if (refreshTimer) {
         clearTimeout(refreshTimer);
-        this.refreshDebounceTimers.delete(webviewPanel.viewType + document.uri.toString());
+        this.refreshDebounceTimers.delete(timerKey);
       }
 
       fileWatcher.dispose();
@@ -178,7 +190,7 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
     const watcher = vscode.workspace.createFileSystemWatcher(filePattern);
 
     const scheduleRefresh = () => {
-      const timerKey = webviewPanel.viewType + document.uri.toString();
+      const timerKey = this.getRefreshTimerKey(document, webviewPanel);
       const existingTimer = this.refreshDebounceTimers.get(timerKey);
       if (existingTimer) {
         clearTimeout(existingTimer);
@@ -192,17 +204,9 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
       this.refreshDebounceTimers.set(timerKey, refreshTimer);
     };
 
-    watcher.onDidChange(() => {
-      scheduleRefresh();
-    }, undefined, this.context.subscriptions);
-
-    watcher.onDidCreate(() => {
-      scheduleRefresh();
-    }, undefined, this.context.subscriptions);
-
-    watcher.onDidDelete(() => {
-      scheduleRefresh();
-    }, undefined, this.context.subscriptions);
+    watcher.onDidChange(scheduleRefresh, undefined, this.context.subscriptions);
+    watcher.onDidCreate(scheduleRefresh, undefined, this.context.subscriptions);
+    watcher.onDidDelete(scheduleRefresh, undefined, this.context.subscriptions);
 
     return watcher;
   }

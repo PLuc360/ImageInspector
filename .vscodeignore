@@ -1,6 +1,10 @@
 .vscode/**
 .vscode-test/**
 src/**
+.github/**
+scripts/**
+test-images/**
+*.vsix
 .gitignore
 tsconfig.json
 **/*.map

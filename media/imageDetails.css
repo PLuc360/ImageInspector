@@ -235,7 +235,7 @@ body {
   min-height: 22px;
 }
 
-/* Dégradés par extension */
+/* Extension-specific gradients */
 .badge-ext-png {
   background: linear-gradient(90deg, #3566a8 0%, #23406a 100%);
   color: #fff;
