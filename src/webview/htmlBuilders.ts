@@ -57,9 +57,20 @@ export function buildCustomEditorWebview(
   imageSource: string,
   details: ImageDetailsViewModel,
   extensionUri: vscode.Uri,
-  options?: { toolbarPosition?: string; icoVariants?: IcoVariantViewModel[] }
+  options?: {
+    toolbarPosition?: string;
+    icoVariants?: IcoVariantViewModel[];
+    pipetteLoupeDiameter?: number;
+    pipetteLoupeVirtualResolution?: number;
+    pipetteLoupeZoomAtMinImageZoom?: number;
+    pipetteLoupeZoomAtMaxImageZoom?: number;
+  }
 ): string {
   const toolbarPosition = options?.toolbarPosition || 'top';
+  const loupeDiameter = options?.pipetteLoupeDiameter ?? 96;
+  const loupeVirtualResolution = options?.pipetteLoupeVirtualResolution ?? 25;
+  const loupeZoomAtMinImageZoom = options?.pipetteLoupeZoomAtMinImageZoom ?? 6;
+  const loupeZoomAtMaxImageZoom = options?.pipetteLoupeZoomAtMaxImageZoom ?? 1;
   const nonce = createNonce();
   const styleContent = loadWebviewStyleContent(extensionUri);
   const scriptContent = loadWebviewScriptContent(extensionUri);
@@ -169,6 +180,17 @@ export function buildCustomEditorWebview(
           <span class="badge">${details.width} × ${details.height}</span>
           ${hasIcoGallery ? `<span id="selected-ico-size" class="badge">Taille sélectionnée: ${escapeHtml(initialIcoVariantLabel)}</span>` : ''}
         </div>
+        <div id="pipette-hover-info" class="pipette-hover-info is-hidden" aria-live="polite">
+          <div class="pipette-hover-row">
+            <span class="pipette-hover-label">Pixel</span>
+            <span id="pipette-hover-position">—</span>
+          </div>
+          <div class="pipette-hover-row">
+            <span class="pipette-hover-label">Color</span>
+            <span id="pipette-hover-color">—</span>
+            <span id="pipette-hover-swatch" class="pipette-hover-swatch" aria-hidden="true"></span>
+          </div>
+        </div>
         <table class="info-table">${tableRows}</table>
       </aside>
       <div class="preview-scroll">
@@ -176,7 +198,7 @@ export function buildCustomEditorWebview(
           <img id="preview-image" src="${imageSource}" alt="${escapeHtml(details.fileName)}" style="image-rendering: pixelated; image-rendering: crisp-edges; -ms-interpolation-mode: nearest-neighbor;" />
           <canvas id="pipette-canvas" style="display:none;"></canvas>
           <div id="pipette-color-result" style="display:none;position:absolute;z-index:10;background:#fff;padding:4px;border-radius:4px;border:1px solid #ccc;font-size:12px;"></div>
-          <canvas id="pipette-zoom-loupe" width="64" height="64" style="display:none;position:fixed;pointer-events:none;z-index:20;border-radius:50%;background:#fff;box-shadow:0 2px 8px #0003;"></canvas>
+          <canvas id="pipette-zoom-loupe" width="64" height="64" data-loupe-diameter="${String(loupeDiameter)}" data-loupe-virtual-resolution="${String(loupeVirtualResolution)}" data-loupe-zoom-at-min-image-zoom="${String(loupeZoomAtMinImageZoom)}" data-loupe-zoom-at-max-image-zoom="${String(loupeZoomAtMaxImageZoom)}" style="display:none;position:fixed;pointer-events:none;z-index:20;filter:drop-shadow(0 2px 6px #0006);"></canvas>
         </div>
       </div>
       ${icoGalleryMarkup}

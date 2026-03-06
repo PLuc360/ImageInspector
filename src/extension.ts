@@ -51,6 +51,7 @@ class ImageCustomDocument implements vscode.CustomDocument {
 class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorProvider<ImageCustomDocument> {
   static readonly viewType = 'imageInspector.previewEditor';
   private activePanel: vscode.WebviewPanel | undefined;
+  private activeDocument: ImageCustomDocument | undefined;
   private readonly refreshDebounceTimers = new Map<string, NodeJS.Timeout>();
 
   /**
@@ -78,11 +79,13 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
    */
   async resolveCustomEditor(document: ImageCustomDocument, webviewPanel: vscode.WebviewPanel): Promise<void> {
     this.activePanel = webviewPanel;
+    this.activeDocument = document;
     const fileWatcher = this.createDocumentFileWatcher(document, webviewPanel);
 
     webviewPanel.onDidDispose(() => {
       if (this.activePanel === webviewPanel) {
         this.activePanel = undefined;
+        this.activeDocument = undefined;
       }
 
       const refreshTimer = this.refreshDebounceTimers.get(webviewPanel.viewType + document.uri.toString());
@@ -97,6 +100,7 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
     webviewPanel.onDidChangeViewState((event) => {
       if (event.webviewPanel.active) {
         this.activePanel = event.webviewPanel;
+        this.activeDocument = document;
       }
     }, undefined, this.context.subscriptions);
 
@@ -131,14 +135,25 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
       }
 
       webviewPanel.title = details.fileName;
-      // Lecture de la config pour la position de la toolbar
-      const toolbarPosition = vscode.workspace.getConfiguration('imageInspector').get<string>('toolbarPosition', 'top');
+      const imageInspectorConfig = vscode.workspace.getConfiguration('imageInspector');
+      const toolbarPosition = imageInspectorConfig.get<string>('toolbarPosition', 'top');
+      const pipetteLoupeDiameter = imageInspectorConfig.get<number>('pipetteLoupeDiameter', 96);
+      const pipetteLoupeVirtualResolution = imageInspectorConfig.get<number>('pipetteLoupeVirtualResolution', 25);
+      const pipetteLoupeZoomAtMinImageZoom = imageInspectorConfig.get<number>('pipetteLoupeZoomAtMinImageZoom', 6);
+      const pipetteLoupeZoomAtMaxImageZoom = imageInspectorConfig.get<number>('pipetteLoupeZoomAtMaxImageZoom', 1);
       webviewPanel.webview.html = buildCustomEditorWebview(
         webviewPanel.webview,
         imageSource,
         details,
         this.context.extensionUri,
-        { toolbarPosition, icoVariants }
+        {
+          toolbarPosition,
+          icoVariants,
+          pipetteLoupeDiameter,
+          pipetteLoupeVirtualResolution,
+          pipetteLoupeZoomAtMinImageZoom,
+          pipetteLoupeZoomAtMaxImageZoom
+        }
       );
     } catch (error) {
       const message = getImageLoadErrorMessage(document.uri.fsPath, error);
@@ -204,6 +219,17 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
 
     await this.activePanel.webview.postMessage(message);
   }
+
+  /**
+   * Re-renders the active custom editor panel after configuration updates.
+   */
+  async refreshActivePanelFromConfiguration(): Promise<void> {
+    if (!this.activePanel || !this.activeDocument) {
+      return;
+    }
+
+    await this.renderDocument(this.activeDocument, this.activePanel);
+  }
 }
 
 /**
@@ -216,7 +242,12 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const providerDisposable = vscode.window.registerCustomEditorProvider(
     ImageDetailsCustomEditorProvider.viewType,
-    provider
+    provider,
+    {
+      webviewOptions: {
+        retainContextWhenHidden: true
+      }
+    }
   );
 
   const zoomInDisposable = vscode.commands.registerCommand('imageInspector.zoomIn', async () => {
@@ -235,12 +266,21 @@ export function activate(context: vscode.ExtensionContext): void {
     await provider.sendZoomMessage({ type: 'zoom-fit' });
   });
 
+  const configurationChangeDisposable = vscode.workspace.onDidChangeConfiguration((event) => {
+    if (!event.affectsConfiguration('imageInspector')) {
+      return;
+    }
+
+    void provider.refreshActivePanelFromConfiguration();
+  });
+
   context.subscriptions.push(
     providerDisposable,
     zoomInDisposable,
     zoomOutDisposable,
     zoomResetDisposable,
-    zoomFitDisposable
+    zoomFitDisposable,
+    configurationChangeDisposable
   );
 }
 

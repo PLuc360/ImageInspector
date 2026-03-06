@@ -51,6 +51,36 @@
           "enum": ["top", "bottom", "left", "right"],
           "default": "top",
           "description": "Position of the toolbar in the image inspector webview (top, bottom, left, right)."
+        },
+        "imageInspector.pipetteLoupeDiameter": {
+          "type": "number",
+          "default": 96,
+          "minimum": 48,
+          "maximum": 256,
+          "multipleOf": 1,
+          "description": "Outer diameter of the color picker loupe in screen pixels."
+        },
+        "imageInspector.pipetteLoupeVirtualResolution": {
+          "type": "number",
+          "default": 25,
+          "minimum": 5,
+          "maximum": 101,
+          "multipleOf": 1,
+          "description": "Target virtual resolution of the loupe grid (odd values recommended for a true center pixel)."
+        },
+        "imageInspector.pipetteLoupeZoomAtMinImageZoom": {
+          "type": "number",
+          "default": 6,
+          "minimum": 0.25,
+          "maximum": 100,
+          "description": "Loupe zoom target when image zoom is at its minimum (max zoom-out)."
+        },
+        "imageInspector.pipetteLoupeZoomAtMaxImageZoom": {
+          "type": "number",
+          "default": 1,
+          "minimum": 0.25,
+          "maximum": 100,
+          "description": "Loupe zoom target when image zoom is at its maximum (max zoom-in)."
         }
       }
     },

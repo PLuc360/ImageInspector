@@ -294,6 +294,43 @@ table {
   font-size: 0.78rem;
 }
 
+.pipette-hover-info {
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 6px;
+  background: var(--vscode-editor-background);
+  font-size: 0.76rem;
+}
+
+.pipette-hover-info.is-hidden {
+  display: none;
+}
+
+.pipette-hover-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pipette-hover-row + .pipette-hover-row {
+  margin-top: 4px;
+}
+
+.pipette-hover-label {
+  min-width: 38px;
+  color: var(--vscode-descriptionForeground);
+  font-weight: 600;
+}
+
+.pipette-hover-swatch {
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 3px;
+  background: transparent;
+}
+
 th,
 td {
   text-align: left;
@@ -317,6 +354,11 @@ th {
   box-shadow: 0 0 6px var(--vscode-terminal-ansiBrightGreen);
   pointer-events: none;
   z-index: 3;
+}
+
+#pipette-color-result {
+  opacity: 0;
+  transition: opacity 260ms ease;
 }
 
 .ico-gallery {
