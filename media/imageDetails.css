@@ -1,5 +1,5 @@
 .zoom-toolbar.toolbar-pos-top {
-  top: 18px;
+  top: 8px;
   left: 50%;
   right: auto;
   bottom: auto;
@@ -9,7 +9,7 @@
 }
 
 .zoom-toolbar.toolbar-pos-bottom {
-  bottom: 18px;
+  bottom: 8px;
   left: 50%;
   top: auto;
   right: auto;
@@ -20,29 +20,39 @@
 
 .zoom-toolbar.toolbar-pos-left {
   top: 50%;
-  left: 18px;
+  left: 8px;
   right: auto;
   bottom: auto;
   transform: translateY(-50%);
   flex-direction: column;
   border-radius: 18px;
+  padding: 6px 2px;
 }
 
 .zoom-toolbar.toolbar-pos-right {
   top: 50%;
-  right: 18px;
+  right: 8px;
   left: auto;
   bottom: auto;
   transform: translateY(-50%);
   flex-direction: column;
   border-radius: 18px;
+  padding: 6px 2px;
 }
 :root {
   color-scheme: light dark;
 }
 
+html,
 body {
+  width: 100%;
+  height: 100%;
   margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+body {
   color: var(--vscode-foreground);
   background: var(--vscode-editor-background);
   font-family: var(--vscode-font-family);
@@ -50,8 +60,9 @@ body {
 
 .layout {
   display: block;
-  height: 100vh;
-  min-height: 100vh;
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
 }
 
 .preview {
@@ -111,8 +122,8 @@ body {
 
 .zoom-toolbar {
   position: absolute;
-  top: 18px;
-  left: 18px;
+  top: 8px;
+  left: 8px;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -128,7 +139,7 @@ body {
   position: absolute;
   top: 18px;
   right: 18px;
-  width: min(280px, calc(100% - 36px));
+  width: min(265px, calc(100% - 36px));
   max-height: calc(100% - 36px);
   box-sizing: border-box;
   overflow: auto;

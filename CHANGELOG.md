@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
+## [1.4.1] - 2026-03-09
+### Changed
+- Improved image preview layout to better fill the available editor area by removing unintended lateral webview margins.
+- Moved the toolbar closer to editor borders.
+- Reduced the info panel width by 15px.
+- Reduced vertical toolbar width by 8px for a more compact side layout.
+- Added press-and-hold behavior on toolbar zoom buttons (`+` and `-`) to continuously zoom in/out while holding click.
+
+
 ## [1.4.0] - 2026-03-09
 ### Added
 - Added an overview thumbnail in the info panel with a visible viewport rectangle that represents the currently visible/zoomed area.

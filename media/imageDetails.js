@@ -2,6 +2,8 @@ const pipetteZoomLoupe = document.getElementById('pipette-zoom-loupe');
 const ZOOM_STEP = 0.1;
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 32;
+const HOLD_REPEAT_DELAY_MS = 250;
+const HOLD_REPEAT_INTERVAL_MS = 90;
 const DEFAULT_LOUPE_DIAMETER = 96;
 const DEFAULT_LOUPE_VIRTUAL_RESOLUTION = 25;
 const DEFAULT_LOUPE_ZOOM_AT_MIN_IMAGE_ZOOM = 6;
@@ -231,6 +233,88 @@ function bindClickAction(button, action) {
   button?.addEventListener('click', (event) => {
     stopEvent(event);
     action();
+  });
+}
+
+function bindPressAndHoldAction(button, action) {
+  if (!button) {
+    return;
+  }
+
+  let repeatTimeoutId = null;
+  let repeatIntervalId = null;
+  let activePointerId = null;
+  let hasRepeated = false;
+
+  const clearRepeatTimers = () => {
+    if (repeatTimeoutId !== null) {
+      clearTimeout(repeatTimeoutId);
+      repeatTimeoutId = null;
+    }
+
+    if (repeatIntervalId !== null) {
+      clearInterval(repeatIntervalId);
+      repeatIntervalId = null;
+    }
+  };
+
+  const endPress = (pointerId) => {
+    if (activePointerId !== null && pointerId !== null && activePointerId !== pointerId) {
+      return;
+    }
+
+    if (activePointerId !== null && button.hasPointerCapture(activePointerId)) {
+      button.releasePointerCapture(activePointerId);
+    }
+
+    activePointerId = null;
+    clearRepeatTimers();
+  };
+
+  button.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) {
+      return;
+    }
+
+    stopEvent(event);
+    hasRepeated = false;
+    activePointerId = event.pointerId;
+    button.setPointerCapture(event.pointerId);
+    clearRepeatTimers();
+
+    repeatTimeoutId = window.setTimeout(() => {
+      hasRepeated = true;
+      action();
+      repeatIntervalId = window.setInterval(() => {
+        action();
+      }, HOLD_REPEAT_INTERVAL_MS);
+    }, HOLD_REPEAT_DELAY_MS);
+  });
+
+  button.addEventListener('pointerup', (event) => {
+    endPress(event.pointerId);
+  });
+
+  button.addEventListener('pointercancel', (event) => {
+    endPress(event.pointerId);
+  });
+
+  button.addEventListener('lostpointercapture', () => {
+    endPress(null);
+  });
+
+  button.addEventListener('pointerleave', () => {
+    if (activePointerId === null) {
+      clearRepeatTimers();
+    }
+  });
+
+  button.addEventListener('click', (event) => {
+    stopEvent(event);
+    if (!hasRepeated) {
+      action();
+    }
+    hasRepeated = false;
   });
 }
 
@@ -1106,11 +1190,11 @@ function endOverlayDrag() {
   saveInfoOverlayPosition();
 }
 
-bindClickAction(zoomInButton, () => {
+bindPressAndHoldAction(zoomInButton, () => {
   applyZoomDelta(ZOOM_STEP);
 });
 
-bindClickAction(zoomOutButton, () => {
+bindPressAndHoldAction(zoomOutButton, () => {
   applyZoomDelta(-ZOOM_STEP);
 });
 
