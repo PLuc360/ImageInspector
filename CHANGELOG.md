@@ -15,6 +15,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Added a bounded ICO entries parsing cache.
 - Added a bounded ICO gallery variants cache.
 - Improved cache safety by preventing in-place mutation when selecting the primary ICO entry.
+- Improved toolbar visual feedback with a green halo effect when clicking a tool button.
+- Updated active state color for `Zoom to selection` and `Color picker` toolbar buttons to green for visual consistency.
+- Aligned the `Zoom to selection` rectangle color with the same green accent used by active toolbar tools.
+- Aligned the overview minimap viewport rectangle with the same green accent for full visual consistency.
 
 
 ## [1.4.1] - 2026-03-09

@@ -236,6 +236,17 @@ function bindClickAction(button, action) {
   });
 }
 
+function showToolbarClickHalo(button) {
+  if (!button || !button.classList) {
+    return;
+  }
+
+  button.classList.remove('click-halo');
+  // Force a reflow so the animation restarts on repeated clicks.
+  void button.offsetWidth;
+  button.classList.add('click-halo');
+}
+
 function bindPressAndHoldAction(button, action) {
   if (!button) {
     return;
@@ -1218,6 +1229,34 @@ bindClickAction(infoToggleButton, () => {
 zoomToolbar?.addEventListener('pointerdown', (event) => {
   event.stopPropagation();
 });
+
+zoomToolbar?.addEventListener('pointerdown', (event) => {
+  const toolbarButton = event.target instanceof Element
+    ? event.target.closest('button')
+    : null;
+
+  if (!toolbarButton) {
+    return;
+  }
+
+  showToolbarClickHalo(toolbarButton);
+}, true);
+
+zoomToolbar?.addEventListener('click', (event) => {
+  if (event.detail !== 0) {
+    return;
+  }
+
+  const toolbarButton = event.target instanceof Element
+    ? event.target.closest('button')
+    : null;
+
+  if (!toolbarButton) {
+    return;
+  }
+
+  showToolbarClickHalo(toolbarButton);
+}, true);
 
 infoOverlay?.addEventListener('pointerdown', (event) => {
   event.stopPropagation();
