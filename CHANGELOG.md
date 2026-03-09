@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
-## [Unreleased]
+## [1.4.2] - 2026-03-09
 ### Changed
 - Optimized extension activation by removing explicit startup activation and relying on contribution-driven lazy activation.
 - Reduced repeated webview media disk reads by caching `media/imageDetails.js` and `media/imageDetails.css` content in memory.
@@ -19,6 +19,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Updated active state color for `Zoom to selection` and `Color picker` toolbar buttons to green for visual consistency.
 - Aligned the `Zoom to selection` rectangle color with the same green accent used by active toolbar tools.
 - Aligned the overview minimap viewport rectangle with the same green accent for full visual consistency.
+- Added a new `imageInspector.themeAccentColor` setting (`#RRGGBB`) to let users customize the shared accent color used by active tools, halo, and selection/viewport rectangles.
+
+### Fixed
+- Fixed a missing command registration for `imageInspector.showImageDetails` that could trigger `command 'imageInspector.showImageDetails' not found` when using **Image Inspector: Open with Details**.
 
 
 ## [1.4.1] - 2026-03-09

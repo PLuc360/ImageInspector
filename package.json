@@ -2,7 +2,7 @@
   "name": "image-inspector",
   "displayName": "Image Inspector",
   "description": "Displays image information (dimensions, size, format, dominant colors).",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "publisher": "pierre-luc-guegan",
   "icon": "assets/icon.png",
   "repository": {
@@ -12,6 +12,8 @@
   "engines": {
     "vscode": "^1.90.0"
   },
+  "activationEvents": [
+  ],
   "categories": [
     "Other"
   ],
@@ -48,6 +50,12 @@
           "enum": ["top", "bottom", "left", "right"],
           "default": "top",
           "description": "Position of the toolbar in the image inspector webview (top, bottom, left, right)."
+        },
+        "imageInspector.themeAccentColor": {
+          "type": "string",
+          "default": "#00C86E",
+          "pattern": "^#([0-9a-fA-F]{6})$",
+          "description": "Accent color used by toolbar active tools, click halo, and selection rectangles (hex format: #RRGGBB)."
         },
         "imageInspector.pipetteLoupeDiameter": {
           "type": "number",

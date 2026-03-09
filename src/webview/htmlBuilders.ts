@@ -69,6 +69,7 @@ export function buildCustomEditorWebview(
   extensionUri: vscode.Uri,
   options?: {
     toolbarPosition?: string;
+    themeAccentRgb?: string;
     icoVariants?: IcoVariantViewModel[];
     pipetteLoupeDiameter?: number;
     pipetteLoupeVirtualResolution?: number;
@@ -77,6 +78,7 @@ export function buildCustomEditorWebview(
   }
 ): string {
   const toolbarPosition = options?.toolbarPosition || 'top';
+  const themeAccentRgb = options?.themeAccentRgb ?? '0,200,110';
   const loupeDiameter = options?.pipetteLoupeDiameter ?? 96;
   const loupeVirtualResolution = options?.pipetteLoupeVirtualResolution ?? 25;
   const loupeZoomAtMinImageZoom = options?.pipetteLoupeZoomAtMinImageZoom ?? 6;
@@ -149,7 +151,7 @@ export function buildCustomEditorWebview(
   <style>${styleContent}</style>
 </head>
 <body>
-  <div class="layout" style="--dominant-color: ${escapeHtml(details.dominantColorHex)};">
+  <div class="layout" style="--dominant-color: ${escapeHtml(details.dominantColorHex)}; --toolbar-green-accent-rgb: ${escapeHtml(themeAccentRgb)};">
     <section class="preview">
       <div class="${toolbarClass}" aria-label="Zoom controls">
         <button id="zoom-out" type="button" title="Zoom -" aria-label="Zoom -">

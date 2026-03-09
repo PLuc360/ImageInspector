@@ -30,6 +30,7 @@ type ZoomMessage = {
 
 const MAX_CONVERTED_PREVIEW_CACHE_ENTRIES = 12;
 const MAX_ICO_CACHE_ENTRIES = 24;
+const DEFAULT_THEME_ACCENT_HEX = '#00C86E';
 
 const convertedPreviewCache = new Map<string, string>();
 const icoEntriesCache = new Map<string, IcoImageEntry[]>();
@@ -223,6 +224,8 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
       webviewPanel.title = details.fileName;
       const imageInspectorConfig = vscode.workspace.getConfiguration('imageInspector');
       const toolbarPosition = imageInspectorConfig.get<string>('toolbarPosition', 'top');
+      const themeAccentColor = imageInspectorConfig.get<string>('themeAccentColor', DEFAULT_THEME_ACCENT_HEX);
+      const themeAccentRgb = resolveThemeAccentRgb(themeAccentColor);
       const pipetteLoupeDiameter = imageInspectorConfig.get<number>('pipetteLoupeDiameter', 96);
       const pipetteLoupeVirtualResolution = imageInspectorConfig.get<number>('pipetteLoupeVirtualResolution', 25);
       const pipetteLoupeZoomAtMinImageZoom = imageInspectorConfig.get<number>('pipetteLoupeZoomAtMinImageZoom', 6);
@@ -234,6 +237,7 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
         this.context.extensionUri,
         {
           toolbarPosition,
+          themeAccentRgb,
           icoVariants,
           pipetteLoupeDiameter,
           pipetteLoupeVirtualResolution,
@@ -344,6 +348,22 @@ export function activate(context: vscode.ExtensionContext): void {
     await provider.sendZoomMessage({ type: 'zoom-fit' });
   });
 
+  const showImageDetailsDisposable = vscode.commands.registerCommand(
+    'imageInspector.showImageDetails',
+    async (resource?: vscode.Uri) => {
+      const imageUri = await resolveImageUri(resource);
+      if (!imageUri) {
+        return;
+      }
+
+      await vscode.commands.executeCommand(
+        'vscode.openWith',
+        imageUri,
+        ImageDetailsCustomEditorProvider.viewType
+      );
+    }
+  );
+
   const configurationChangeDisposable = vscode.workspace.onDidChangeConfiguration((event) => {
     if (!event.affectsConfiguration('imageInspector')) {
       return;
@@ -354,6 +374,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     providerDisposable,
+    showImageDetailsDisposable,
     zoomInDisposable,
     zoomOutDisposable,
     zoomResetDisposable,
@@ -731,6 +752,37 @@ function formatBytes(bytes: number): string {
 function rgbToHex(r: number, g: number, b: number): string {
   const toHex = (value: number) => Math.max(0, Math.min(255, value)).toString(16).padStart(2, '0');
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`.toUpperCase();
+}
+
+/**
+ * Resolves a user-provided accent color to a safe RGB tuple string.
+ *
+ * @param candidateColor Hex color candidate from settings (#RRGGBB).
+ * @returns RGB tuple string usable in CSS variables (e.g. "0,200,110").
+ */
+function resolveThemeAccentRgb(candidateColor: string): string {
+  const normalizedColor = candidateColor.trim();
+  const colorPattern = /^#([0-9a-fA-F]{6})$/;
+  const match = colorPattern.exec(normalizedColor);
+
+  if (!match) {
+    return hexColorToRgbTuple(DEFAULT_THEME_ACCENT_HEX);
+  }
+
+  return hexColorToRgbTuple(`#${match[1].toUpperCase()}`);
+}
+
+/**
+ * Converts a hex color (#RRGGBB) to an RGB tuple string.
+ *
+ * @param hexColor Hex color value.
+ * @returns RGB tuple string (e.g. "255,0,0").
+ */
+function hexColorToRgbTuple(hexColor: string): string {
+  const red = Number.parseInt(hexColor.slice(1, 3), 16);
+  const green = Number.parseInt(hexColor.slice(3, 5), 16);
+  const blue = Number.parseInt(hexColor.slice(5, 7), 16);
+  return `${String(red)},${String(green)},${String(blue)}`;
 }
 
 /**
