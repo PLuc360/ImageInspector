@@ -171,6 +171,10 @@ export function buildCustomEditorWebview(
           <span class="badge">${details.width} × ${details.height}</span>
           ${hasIcoGallery ? `<span id="selected-ico-size" class="badge">Selected size: ${escapeHtml(initialIcoVariantLabel)}</span>` : ''}
         </div>
+        <div class="overview-map" aria-label="Image overview">
+          <img id="overview-map-image" src="${imageSource}" alt="Image overview thumbnail" />
+          <div id="overview-map-viewport" class="overview-map-viewport" aria-hidden="true"></div>
+        </div>
         <div id="pipette-hover-info" class="pipette-hover-info is-hidden" aria-live="polite">
           <div class="pipette-hover-row">
             <span class="pipette-hover-label">Pixel</span>

@@ -60,10 +60,15 @@ const pipetteHoverInfo = document.getElementById('pipette-hover-info');
 const pipetteHoverPosition = document.getElementById('pipette-hover-position');
 const pipetteHoverColor = document.getElementById('pipette-hover-color');
 const pipetteHoverSwatch = document.getElementById('pipette-hover-swatch');
+const overviewMapImage = document.getElementById('overview-map-image');
+const overviewMapViewport = document.getElementById('overview-map-viewport');
 const PIPETTE_RESULT_VISIBLE_DURATION_MS = 500;
 const PIPETTE_RESULT_FADE_DURATION_MS = 260;
 const selectedIcoSizeBadge = document.getElementById('selected-ico-size');
 const icoGalleryItems = Array.from(document.querySelectorAll('.ico-gallery-item'));
+let isDraggingOverviewMap = false;
+let overviewMapDragPointerId = null;
+let overviewMapViewportFrameId = null;
 let pipetteMode = false;
 let pipetteResultFadeTimeoutId = null;
 let pipetteResultHideTimeoutId = null;
@@ -289,11 +294,168 @@ function initializeIcoGallery() {
       }
 
       image.setAttribute('src', nextSource);
+      syncOverviewMapSource();
       scheduleInitialModeDecision();
     });
   }
 
   syncActiveIcoGalleryItemFromImage();
+}
+
+function syncOverviewMapSource() {
+  if (!overviewMapImage || !image) {
+    return;
+  }
+
+  const currentSource = image.getAttribute('src');
+  if (!currentSource) {
+    return;
+  }
+
+  overviewMapImage.setAttribute('src', currentSource);
+}
+
+function hideOverviewMapViewport() {
+  if (!overviewMapViewport) {
+    return;
+  }
+
+  overviewMapViewport.style.display = 'none';
+}
+
+function getOverviewMapContentRect() {
+  if (!overviewMapImage) {
+    return null;
+  }
+
+  const elementWidth = overviewMapImage.clientWidth;
+  const elementHeight = overviewMapImage.clientHeight;
+  if (elementWidth <= 0 || elementHeight <= 0) {
+    return null;
+  }
+
+  const naturalWidth = overviewMapImage.naturalWidth;
+  const naturalHeight = overviewMapImage.naturalHeight;
+  if (naturalWidth <= 0 || naturalHeight <= 0) {
+    return {
+      left: overviewMapImage.offsetLeft,
+      top: overviewMapImage.offsetTop,
+      width: elementWidth,
+      height: elementHeight
+    };
+  }
+
+  // Mirror object-fit: contain to get the actual painted image rect inside the element box.
+  const scale = Math.min(elementWidth / naturalWidth, elementHeight / naturalHeight);
+  const contentWidth = naturalWidth * scale;
+  const contentHeight = naturalHeight * scale;
+  const contentOffsetX = (elementWidth - contentWidth) / 2;
+  const contentOffsetY = (elementHeight - contentHeight) / 2;
+
+  return {
+    left: overviewMapImage.offsetLeft + contentOffsetX,
+    top: overviewMapImage.offsetTop + contentOffsetY,
+    width: contentWidth,
+    height: contentHeight
+  };
+}
+
+function updateOverviewMapViewport() {
+  if (!overviewMapImage || !overviewMapViewport || !image || !preview) {
+    return;
+  }
+
+  const mapContentRect = getOverviewMapContentRect();
+  const imageRect = image.getBoundingClientRect();
+  const previewRect = preview.getBoundingClientRect();
+
+  if (!mapContentRect || imageRect.width <= 0 || imageRect.height <= 0) {
+    hideOverviewMapViewport();
+    return;
+  }
+
+  const visibleLeftClient = Math.max(previewRect.left, imageRect.left);
+  const visibleTopClient = Math.max(previewRect.top, imageRect.top);
+  const visibleRightClient = Math.min(previewRect.right, imageRect.right);
+  const visibleBottomClient = Math.min(previewRect.bottom, imageRect.bottom);
+
+  const visibleWidth = Math.max(0, visibleRightClient - visibleLeftClient);
+  const visibleHeight = Math.max(0, visibleBottomClient - visibleTopClient);
+
+  if (visibleWidth <= 0 || visibleHeight <= 0) {
+    hideOverviewMapViewport();
+    return;
+  }
+
+  const visibleLeftInImage = visibleLeftClient - imageRect.left;
+  const visibleTopInImage = visibleTopClient - imageRect.top;
+  const normalizedLeft = clamp(visibleLeftInImage / imageRect.width, 0, 1);
+  const normalizedTop = clamp(visibleTopInImage / imageRect.height, 0, 1);
+  const normalizedWidth = clamp(visibleWidth / imageRect.width, 0, 1);
+  const normalizedHeight = clamp(visibleHeight / imageRect.height, 0, 1);
+
+  overviewMapViewport.style.display = 'block';
+  overviewMapViewport.style.left = `${String(mapContentRect.left + normalizedLeft * mapContentRect.width)}px`;
+  overviewMapViewport.style.top = `${String(mapContentRect.top + normalizedTop * mapContentRect.height)}px`;
+  overviewMapViewport.style.width = `${String(Math.max(1, normalizedWidth * mapContentRect.width))}px`;
+  overviewMapViewport.style.height = `${String(Math.max(1, normalizedHeight * mapContentRect.height))}px`;
+}
+
+function requestOverviewMapViewportUpdate() {
+  if (overviewMapViewportFrameId !== null) {
+    return;
+  }
+
+  overviewMapViewportFrameId = requestAnimationFrame(() => {
+    overviewMapViewportFrameId = null;
+    updateOverviewMapViewport();
+  });
+}
+
+function centerPreviewFromOverviewPointer(clientX, clientY) {
+  if (!overviewMapImage || !image || !preview) {
+    return;
+  }
+
+  const mapContainer = overviewMapImage.parentElement;
+  const mapContainerRect = mapContainer?.getBoundingClientRect();
+  const mapContentRect = getOverviewMapContentRect();
+  if (!mapContainerRect || !mapContentRect || mapContentRect.width <= 0 || mapContentRect.height <= 0) {
+    return;
+  }
+
+  const imageRect = image.getBoundingClientRect();
+  const previewRect = preview.getBoundingClientRect();
+  if (imageRect.width <= 0 || imageRect.height <= 0) {
+    return;
+  }
+
+  const contentClientLeft = mapContainerRect.left + mapContentRect.left;
+  const contentClientTop = mapContainerRect.top + mapContentRect.top;
+  const normalizedX = clamp((clientX - contentClientLeft) / mapContentRect.width, 0, 1);
+  const normalizedY = clamp((clientY - contentClientTop) / mapContentRect.height, 0, 1);
+
+  const targetClientX = imageRect.left + normalizedX * imageRect.width;
+  const targetClientY = imageRect.top + normalizedY * imageRect.height;
+  const previewCenterX = previewRect.left + preview.clientWidth / 2;
+  const previewCenterY = previewRect.top + preview.clientHeight / 2;
+
+  preview.scrollLeft += targetClientX - previewCenterX;
+  preview.scrollTop += targetClientY - previewCenterY;
+  requestOverviewMapViewportUpdate();
+}
+
+function endOverviewMapDrag(pointerId) {
+  if (!overviewMapImage || overviewMapDragPointerId !== pointerId) {
+    return;
+  }
+
+  if (overviewMapImage.hasPointerCapture(pointerId)) {
+    overviewMapImage.releasePointerCapture(pointerId);
+  }
+
+  isDraggingOverviewMap = false;
+  overviewMapDragPointerId = null;
 }
 
 function interpolateLogarithmic(value, fromValue, fromZoom, toValue, toZoom) {
@@ -694,6 +856,7 @@ function updateView() {
     });
 
     zoomLabel.textContent = 'Fit';
+    requestOverviewMapViewportUpdate();
     return;
   }
 
@@ -704,6 +867,7 @@ function updateView() {
     image.style.width = `${String(Math.round(image.naturalWidth * zoom))}px`;
   }
   zoomLabel.textContent = `${String(Math.round(zoom * 100))}%`;
+  requestOverviewMapViewportUpdate();
 }
 
 function setZoom(nextZoom) {
@@ -802,6 +966,11 @@ function setInfoOverlayVisible(isVisible) {
   }
 
   infoOverlay.classList.toggle('is-hidden', !isVisible);
+  if (isVisible) {
+    requestAnimationFrame(() => {
+      requestOverviewMapViewportUpdate();
+    });
+  }
   try {
     localStorage.setItem(INFO_OVERLAY_STORAGE_KEY, isVisible ? '1' : '0');
   } catch {
@@ -1149,7 +1318,9 @@ window.addEventListener('keydown', (event) => {
 image?.addEventListener('load', () => {
   image.setAttribute('draggable', 'false');
   syncActiveIcoGalleryItemFromImage();
+  syncOverviewMapSource();
   scheduleInitialModeDecision();
+  requestOverviewMapViewportUpdate();
 });
 
 window.addEventListener('message', (event) => {
@@ -1179,8 +1350,46 @@ window.addEventListener('message', (event) => {
 initializeInfoOverlayVisibility();
 initializeInfoOverlayPosition();
 initializeIcoGallery();
+syncOverviewMapSource();
 updateSelectionModeUi();
 updateView();
+
+preview?.addEventListener('scroll', () => {
+  requestOverviewMapViewportUpdate();
+});
+
+overviewMapImage?.addEventListener('load', () => {
+  requestOverviewMapViewportUpdate();
+});
+
+overviewMapImage?.addEventListener('pointerdown', (event) => {
+  if (event.button !== 0) {
+    return;
+  }
+
+  isDraggingOverviewMap = true;
+  overviewMapDragPointerId = event.pointerId;
+  overviewMapImage.setPointerCapture(event.pointerId);
+  centerPreviewFromOverviewPointer(event.clientX, event.clientY);
+  event.preventDefault();
+});
+
+overviewMapImage?.addEventListener('pointermove', (event) => {
+  if (!isDraggingOverviewMap || overviewMapDragPointerId !== event.pointerId) {
+    return;
+  }
+
+  centerPreviewFromOverviewPointer(event.clientX, event.clientY);
+  event.preventDefault();
+});
+
+overviewMapImage?.addEventListener('pointerup', (event) => {
+  endOverviewMapDrag(event.pointerId);
+});
+
+overviewMapImage?.addEventListener('pointercancel', (event) => {
+  endOverviewMapDrag(event.pointerId);
+});
 
 window.addEventListener('resize', () => {
   if (!infoOverlay) {
@@ -1194,4 +1403,6 @@ window.addEventListener('resize', () => {
   if (pendingInitialModeDecision) {
     scheduleInitialModeDecision();
   }
+
+  requestOverviewMapViewportUpdate();
 });

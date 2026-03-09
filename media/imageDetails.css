@@ -130,7 +130,9 @@ body {
   right: 18px;
   width: min(280px, calc(100% - 36px));
   max-height: calc(100% - 36px);
+  box-sizing: border-box;
   overflow: auto;
+  overflow-x: hidden;
   border: 1px solid var(--vscode-panel-border);
   border-radius: 8px;
   padding: 8px;
@@ -321,6 +323,42 @@ table {
   min-width: 38px;
   color: var(--vscode-descriptionForeground);
   font-weight: 600;
+}
+
+.overview-map {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  margin: 0 0 8px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 6px;
+  overflow: hidden;
+  box-sizing: border-box;
+  background: var(--vscode-editor-background);
+}
+
+.overview-map img {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  max-height: 140px;
+  object-fit: contain;
+  margin: 0 auto;
+  cursor: crosshair;
+}
+
+.overview-map-viewport {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  border: 1.5px solid var(--vscode-terminal-ansiBrightGreen);
+  background: rgba(110, 255, 110, 0.2);
+  box-sizing: border-box;
+  pointer-events: none;
+  z-index: 1;
 }
 
 .pipette-hover-swatch {

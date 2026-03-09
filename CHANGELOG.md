@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
+## [1.4.0] - 2026-03-09
+### Added
+- Added an overview thumbnail in the info panel with a visible viewport rectangle that represents the currently visible/zoomed area.
+- Added minimap interactions: click and drag on the thumbnail now recenter the main preview.
+
+
 ## [1.3.0] - 2026-03-06
 ### Added
 - Color picker loupe settings are now configurable from extension settings (diameter, virtual resolution, zoom at min image zoom, zoom at max image zoom).
