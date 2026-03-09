@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
+## [Unreleased]
+### Changed
+- Optimized extension activation by removing explicit startup activation and relying on contribution-driven lazy activation.
+- Reduced repeated webview media disk reads by caching `media/imageDetails.js` and `media/imageDetails.css` content in memory.
+- Reduced duplicate ICO file processing by reusing already-loaded buffers when building ICO gallery variants.
+- Added bounded runtime caches for expensive image operations.
+- Added a bounded converted preview cache for HEIC/HEIF/TIFF to PNG rendering.
+- Added a bounded ICO entries parsing cache.
+- Added a bounded ICO gallery variants cache.
+- Improved cache safety by preventing in-place mutation when selecting the primary ICO entry.
+
+
 ## [1.4.1] - 2026-03-09
 ### Changed
 - Improved image preview layout to better fill the available editor area by removing unintended lateral webview margins.

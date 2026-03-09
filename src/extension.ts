@@ -22,9 +22,83 @@ type IcoImageEntry = {
   isPng: boolean;
 };
 
+type IcoSource = string | Buffer;
+
 type ZoomMessage = {
   type: 'zoom-in' | 'zoom-out' | 'zoom-reset' | 'zoom-fit';
 };
+
+const MAX_CONVERTED_PREVIEW_CACHE_ENTRIES = 12;
+const MAX_ICO_CACHE_ENTRIES = 24;
+
+const convertedPreviewCache = new Map<string, string>();
+const icoEntriesCache = new Map<string, IcoImageEntry[]>();
+const icoGalleryCache = new Map<string, IcoVariantViewModel[]>();
+
+/**
+ * Builds a stable cache key for a file version.
+ *
+ * @param filePath Absolute file path.
+ * @param size File size in bytes.
+ * @param mtimeMs Last modified time in milliseconds.
+ * @returns Cache key identifying one file version.
+ */
+function buildFileVersionKey(filePath: string, size: number, mtimeMs: number): string {
+  return `${filePath}::${String(size)}::${String(Math.trunc(mtimeMs))}`;
+}
+
+/**
+ * Resolves a cache key for the current version of a file.
+ *
+ * @param filePath Absolute file path.
+ * @returns Cache key based on file size and mtime.
+ */
+async function getFileVersionKey(filePath: string): Promise<string> {
+  const stats = await fs.stat(filePath);
+  return buildFileVersionKey(filePath, stats.size, stats.mtimeMs);
+}
+
+/**
+ * Gets and touches a cache entry to keep it hot (LRU behavior).
+ *
+ * @param cache Cache map.
+ * @param key Cache key.
+ * @returns Cached value when present.
+ */
+function getCachedValue<T>(cache: Map<string, T>, key: string): T | undefined {
+  const value = cache.get(key);
+  if (value === undefined) {
+    return undefined;
+  }
+
+  cache.delete(key);
+  cache.set(key, value);
+  return value;
+}
+
+/**
+ * Inserts a value in a bounded cache and evicts oldest entries.
+ *
+ * @param cache Cache map.
+ * @param key Cache key.
+ * @param value Cached value.
+ * @param maxEntries Maximum number of entries to keep.
+ */
+function setBoundedCachedValue<T>(cache: Map<string, T>, key: string, value: T, maxEntries: number): void {
+  if (cache.has(key)) {
+    cache.delete(key);
+  }
+
+  cache.set(key, value);
+  while (cache.size > maxEntries) {
+    const oldestKey = cache.keys().next().value;
+    if (oldestKey === undefined) {
+      return;
+    }
+
+    cache.delete(oldestKey);
+  }
+}
 
 /**
  * Represents a readonly image document handled by the custom editor.
@@ -430,7 +504,7 @@ async function getIcoPrimaryEntry(filePath: string): Promise<IcoImageEntry | und
     return undefined;
   }
 
-  return entries.sort((entryA, entryB) => {
+  return entries.slice().sort((entryA, entryB) => {
     const areaDifference = entryB.width * entryB.height - entryA.width * entryA.height;
     if (areaDifference !== 0) {
       return areaDifference;
@@ -443,11 +517,24 @@ async function getIcoPrimaryEntry(filePath: string): Promise<IcoImageEntry | und
 /**
  * Parses ICO directory entries from a file.
  *
- * @param filePath Absolute ICO file path.
+ * @param source Absolute ICO file path or preloaded ICO buffer.
  * @returns Parsed icon entries in file order.
  */
-async function parseIcoEntries(filePath: string): Promise<IcoImageEntry[]> {
-  const buffer = await fs.readFile(filePath);
+async function parseIcoEntries(source: IcoSource): Promise<IcoImageEntry[]> {
+  if (typeof source === 'string') {
+    const cacheKey = await getFileVersionKey(source);
+    const cachedEntries = getCachedValue(icoEntriesCache, cacheKey);
+    if (cachedEntries) {
+      return cachedEntries;
+    }
+
+    const buffer = await fs.readFile(source);
+    const parsedEntries = await parseIcoEntries(buffer);
+    setBoundedCachedValue(icoEntriesCache, cacheKey, parsedEntries, MAX_ICO_CACHE_ENTRIES);
+    return parsedEntries;
+  }
+
+  const buffer = source;
 
   if (buffer.length < 6) {
     return [];
@@ -502,10 +589,16 @@ async function parseIcoEntries(filePath: string): Promise<IcoImageEntry[]> {
  * @returns Clickable icon variants for webview display.
  */
 async function getIcoGalleryItems(filePath: string): Promise<IcoVariantViewModel[]> {
-  const buffer = await fs.readFile(filePath);
-  const entries = await parseIcoEntries(filePath);
+  const cacheKey = await getFileVersionKey(filePath);
+  const cachedGalleryItems = getCachedValue(icoGalleryCache, cacheKey);
+  if (cachedGalleryItems) {
+    return cachedGalleryItems;
+  }
 
-  return entries
+  const buffer = await fs.readFile(filePath);
+  const entries = await parseIcoEntries(buffer);
+
+  const variants = entries
     .map((entry, index) => {
       const imageEndOffset = entry.imageOffset + entry.bytesInResource;
       if (!entry.isPng || entry.imageOffset >= buffer.length || imageEndOffset > buffer.length) {
@@ -524,6 +617,9 @@ async function getIcoGalleryItems(filePath: string): Promise<IcoVariantViewModel
       } satisfies IcoVariantViewModel;
     })
     .filter((variant): variant is IcoVariantViewModel => Boolean(variant));
+
+  setBoundedCachedValue(icoGalleryCache, cacheKey, variants, MAX_ICO_CACHE_ENTRIES);
+  return variants;
 }
 
 /**
@@ -593,11 +689,18 @@ async function getWebviewImageSource(
     return `${webview.asWebviewUri(originalUri).toString()}?t=${cacheBuster}`;
   }
 
+  const cacheKey = await getFileVersionKey(filePath);
+  const cachedPreviewSource = getCachedValue(convertedPreviewCache, cacheKey);
+  if (cachedPreviewSource) {
+    return cachedPreviewSource;
+  }
+
   const previewBuffer = await sharp(filePath)
     .png()
     .toBuffer();
-
-  return `data:image/png;base64,${previewBuffer.toString('base64')}`;
+  const previewSource = `data:image/png;base64,${previewBuffer.toString('base64')}`;
+  setBoundedCachedValue(convertedPreviewCache, cacheKey, previewSource, MAX_CONVERTED_PREVIEW_CACHE_ENTRIES);
+  return previewSource;
 }
 
 /**

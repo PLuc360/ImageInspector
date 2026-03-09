@@ -2,6 +2,25 @@ import * as vscode from 'vscode';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
+let cachedMediaRoot: string | undefined;
+let cachedScriptContent: string | undefined;
+let cachedStyleContent: string | undefined;
+
+/**
+ * Resets media caches when the extension root changes.
+ *
+ * @param extensionUri Extension root URI.
+ */
+function ensureMediaCacheRoot(extensionUri: vscode.Uri): void {
+  if (cachedMediaRoot === extensionUri.fsPath) {
+    return;
+  }
+
+  cachedMediaRoot = extensionUri.fsPath;
+  cachedScriptContent = undefined;
+  cachedStyleContent = undefined;
+}
+
 /**
  * Represents the metadata displayed in the custom image editor.
  */
@@ -273,12 +292,20 @@ function createNonce(): string {
  * @returns Script content safe for inline injection.
  */
 function loadWebviewScriptContent(extensionUri: vscode.Uri): string {
+  ensureMediaCacheRoot(extensionUri);
+
+  if (cachedMediaRoot === extensionUri.fsPath && cachedScriptContent !== undefined) {
+    return cachedScriptContent;
+  }
+
   const scriptPath = path.join(extensionUri.fsPath, 'media', 'imageDetails.js');
 
   try {
     const script = fs.readFileSync(scriptPath, 'utf8');
-    return script.replace(/<\/script>/gi, '<\\/script>');
+    cachedScriptContent = script.replace(/<\/script>/gi, '<\\/script>');
+    return cachedScriptContent;
   } catch {
+    cachedScriptContent = '';
     return '';
   }
 }
@@ -290,11 +317,19 @@ function loadWebviewScriptContent(extensionUri: vscode.Uri): string {
  * @returns Stylesheet content safe for inline injection.
  */
 function loadWebviewStyleContent(extensionUri: vscode.Uri): string {
+  ensureMediaCacheRoot(extensionUri);
+
+  if (cachedMediaRoot === extensionUri.fsPath && cachedStyleContent !== undefined) {
+    return cachedStyleContent;
+  }
+
   const stylePath = path.join(extensionUri.fsPath, 'media', 'imageDetails.css');
 
   try {
-    return fs.readFileSync(stylePath, 'utf8');
+    cachedStyleContent = fs.readFileSync(stylePath, 'utf8');
+    return cachedStyleContent;
   } catch {
+    cachedStyleContent = '';
     return '';
   }
 }
