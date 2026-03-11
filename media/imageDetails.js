@@ -1,4 +1,5 @@
 const vscode = typeof acquireVsCodeApi === 'function' ? acquireVsCodeApi() : undefined;
+const layoutElement = document.querySelector('.layout');
 const pipetteZoomLoupe = document.getElementById('pipette-zoom-loupe');
 const ZOOM_STEP = 0.1;
 const MIN_ZOOM = 0.1;
@@ -9,37 +10,17 @@ const DEFAULT_LOUPE_DIAMETER = 96;
 const DEFAULT_LOUPE_VIRTUAL_RESOLUTION = 25;
 const DEFAULT_LOUPE_ZOOM_AT_MIN_IMAGE_ZOOM = 6;
 const DEFAULT_LOUPE_ZOOM_AT_MAX_IMAGE_ZOOM = 1;
-const parsedLoupeDiameter = Number.parseInt(pipetteZoomLoupe?.dataset.loupeDiameter ?? '', 10);
-const parsedLoupeVirtualResolution = Number.parseInt(pipetteZoomLoupe?.dataset.loupeVirtualResolution ?? '', 10);
-const parsedLoupeZoomAtMinImageZoom = Number.parseFloat(pipetteZoomLoupe?.dataset.loupeZoomAtMinImageZoom ?? '');
-const parsedLoupeZoomAtMaxImageZoom = Number.parseFloat(pipetteZoomLoupe?.dataset.loupeZoomAtMaxImageZoom ?? '');
-const LOUPE_DIAMETER = Number.isFinite(parsedLoupeDiameter)
-  ? Math.max(48, Math.min(256, parsedLoupeDiameter))
-  : DEFAULT_LOUPE_DIAMETER;
-const resolvedVirtualResolution = Number.isFinite(parsedLoupeVirtualResolution)
-  ? Math.max(5, Math.min(101, parsedLoupeVirtualResolution))
-  : DEFAULT_LOUPE_VIRTUAL_RESOLUTION;
-const LOUPE_VIRTUAL_RESOLUTION = resolvedVirtualResolution % 2 === 0
-  ? resolvedVirtualResolution - 1
-  : resolvedVirtualResolution;
-const LOUPE_ZOOM_AT_MIN_IMAGE_ZOOM = Number.isFinite(parsedLoupeZoomAtMinImageZoom)
-  ? Math.max(0.25, Math.min(100, parsedLoupeZoomAtMinImageZoom))
-  : DEFAULT_LOUPE_ZOOM_AT_MIN_IMAGE_ZOOM;
-const LOUPE_ZOOM_AT_MAX_IMAGE_ZOOM = Number.isFinite(parsedLoupeZoomAtMaxImageZoom)
-  ? Math.max(0.25, Math.min(100, parsedLoupeZoomAtMaxImageZoom))
-  : DEFAULT_LOUPE_ZOOM_AT_MAX_IMAGE_ZOOM;
-const LOUPE_DYNAMIC_ZOOM_MIN = Math.min(
-  LOUPE_ZOOM_AT_MIN_IMAGE_ZOOM,
-  LOUPE_ZOOM_AT_MAX_IMAGE_ZOOM
-);
-const LOUPE_DYNAMIC_ZOOM_MAX = Math.max(
-  LOUPE_ZOOM_AT_MIN_IMAGE_ZOOM,
-  LOUPE_ZOOM_AT_MAX_IMAGE_ZOOM
-);
-const virtualLoupeCanvas = document.createElement('canvas');
-virtualLoupeCanvas.width = LOUPE_VIRTUAL_RESOLUTION;
-virtualLoupeCanvas.height = LOUPE_VIRTUAL_RESOLUTION;
-const virtualLoupeCtx = virtualLoupeCanvas.getContext('2d');
+const TOOLBAR_POSITION_CLASSES = ['toolbar-pos-top', 'toolbar-pos-bottom', 'toolbar-pos-left', 'toolbar-pos-right'];
+
+let loupeDiameter = DEFAULT_LOUPE_DIAMETER;
+let loupeVirtualResolution = DEFAULT_LOUPE_VIRTUAL_RESOLUTION;
+let loupeZoomAtMinImageZoom = DEFAULT_LOUPE_ZOOM_AT_MIN_IMAGE_ZOOM;
+let loupeZoomAtMaxImageZoom = DEFAULT_LOUPE_ZOOM_AT_MAX_IMAGE_ZOOM;
+let loupeDynamicZoomMin = Math.min(loupeZoomAtMinImageZoom, loupeZoomAtMaxImageZoom);
+let loupeDynamicZoomMax = Math.max(loupeZoomAtMinImageZoom, loupeZoomAtMaxImageZoom);
+let virtualLoupeCanvas = null;
+let virtualLoupeCtx = null;
+let pipetteImageCtx = null;
 
 const image = document.getElementById('preview-image');
 const previewContainer = document.querySelector('.preview');
@@ -71,6 +52,8 @@ const pipetteHoverInfo = document.getElementById('pipette-hover-info');
 const pipetteHoverPosition = document.getElementById('pipette-hover-position');
 const pipetteHoverColor = document.getElementById('pipette-hover-color');
 const pipetteHoverSwatch = document.getElementById('pipette-hover-swatch');
+const dominantColorMeta = document.getElementById('dominant-color-meta');
+const dominantColorTable = document.getElementById('dominant-color-table');
 const overviewMapImage = document.getElementById('overview-map-image');
 const overviewMapViewport = document.getElementById('overview-map-viewport');
 const PIPETTE_RESULT_VISIBLE_DURATION_MS = 500;
@@ -87,7 +70,7 @@ const INFO_OVERLAY_STORAGE_KEY = 'imageDetails.infoOverlayVisible';
 const INFO_OVERLAY_POSITION_STORAGE_KEY = 'imageDetails.infoOverlayPosition';
 
 let zoom = 1;
-let fitMode = true;
+let fitMode = false;
 let isDragging = false;
 let dragStartX = 0;
 let dragStartY = 0;
@@ -98,8 +81,6 @@ let overlayPointerOffsetX = 0;
 let overlayPointerOffsetY = 0;
 let overlayDragPointerId = null;
 let fitReflowFrameId = null;
-let pendingInitialModeDecision = false;
-let pendingInitialModeFrameId = null;
 let selectionMode = false;
 let isSelectingZoomArea = false;
 let selectionPointerId = null;
@@ -110,8 +91,133 @@ let compareSplitPercent = 50;
 let compareOrientation = 'vertical';
 let isDraggingCompareDivider = false;
 let compareDividerPointerId = null;
+let compareDividerDragFrameId = null;
+let pendingCompareDragClientX = null;
+let pendingCompareDragClientY = null;
+let initialViewModeDecisionToken = 0;
 const COMPARE_ORIENTATION_VERTICAL_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:inline;vertical-align:middle"><rect x="3" y="3" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.4"/><path d="M10 4v12" stroke="currentColor" stroke-width="1.4"/></svg>';
 const COMPARE_ORIENTATION_HORIZONTAL_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:inline;vertical-align:middle"><rect x="3" y="3" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.4"/><path d="M4 10h12" stroke="currentColor" stroke-width="1.4"/></svg>';
+
+function toClampedNumber(value, min, max, fallbackValue) {
+  const numericValue = Number.parseFloat(String(value));
+  if (!Number.isFinite(numericValue)) {
+    return fallbackValue;
+  }
+
+  return clamp(numericValue, min, max);
+}
+
+function toClampedInteger(value, min, max, fallbackValue) {
+  return Math.round(toClampedNumber(value, min, max, fallbackValue));
+}
+
+function applyLoupeSettings(nextSettings) {
+  const nextDiameter = toClampedInteger(nextSettings?.diameter, 48, 256, DEFAULT_LOUPE_DIAMETER);
+  const nextVirtualResolutionCandidate = toClampedInteger(nextSettings?.virtualResolution, 5, 101, DEFAULT_LOUPE_VIRTUAL_RESOLUTION);
+  const nextVirtualResolution = nextVirtualResolutionCandidate % 2 === 0
+    ? nextVirtualResolutionCandidate - 1
+    : nextVirtualResolutionCandidate;
+  const nextZoomAtMin = toClampedNumber(nextSettings?.zoomAtMinImageZoom, 0.25, 100, DEFAULT_LOUPE_ZOOM_AT_MIN_IMAGE_ZOOM);
+  const nextZoomAtMax = toClampedNumber(nextSettings?.zoomAtMaxImageZoom, 0.25, 100, DEFAULT_LOUPE_ZOOM_AT_MAX_IMAGE_ZOOM);
+
+  const didResolutionChange = loupeVirtualResolution !== nextVirtualResolution;
+  loupeDiameter = nextDiameter;
+  loupeVirtualResolution = nextVirtualResolution;
+  loupeZoomAtMinImageZoom = nextZoomAtMin;
+  loupeZoomAtMaxImageZoom = nextZoomAtMax;
+  loupeDynamicZoomMin = Math.min(loupeZoomAtMinImageZoom, loupeZoomAtMaxImageZoom);
+  loupeDynamicZoomMax = Math.max(loupeZoomAtMinImageZoom, loupeZoomAtMaxImageZoom);
+
+  if (didResolutionChange || virtualLoupeCanvas === null || virtualLoupeCtx === null) {
+    virtualLoupeCanvas = document.createElement('canvas');
+    virtualLoupeCanvas.width = loupeVirtualResolution;
+    virtualLoupeCanvas.height = loupeVirtualResolution;
+    virtualLoupeCtx = virtualLoupeCanvas.getContext('2d');
+  }
+}
+
+function initializeLoupeSettingsFromDom() {
+  applyLoupeSettings({
+    diameter: layoutElement?.dataset.loupeDiameter,
+    virtualResolution: layoutElement?.dataset.loupeVirtualResolution,
+    zoomAtMinImageZoom: layoutElement?.dataset.loupeZoomAtMinImageZoom,
+    zoomAtMaxImageZoom: layoutElement?.dataset.loupeZoomAtMaxImageZoom
+  });
+}
+
+function ensurePipetteBufferContext() {
+  if (!pipetteCanvas) {
+    return null;
+  }
+
+  if (!pipetteImageCtx) {
+    pipetteImageCtx = pipetteCanvas.getContext('2d');
+  }
+
+  return pipetteImageCtx;
+}
+
+function refreshPipetteImageBuffer() {
+  if (!image || !pipetteCanvas) {
+    return;
+  }
+
+  const bufferContext = ensurePipetteBufferContext();
+  if (!bufferContext || image.naturalWidth <= 0 || image.naturalHeight <= 0) {
+    return;
+  }
+
+  pipetteCanvas.width = image.naturalWidth;
+  pipetteCanvas.height = image.naturalHeight;
+  pipetteCanvas.style.display = 'none';
+  bufferContext.clearRect(0, 0, pipetteCanvas.width, pipetteCanvas.height);
+  bufferContext.drawImage(image, 0, 0);
+}
+
+function applyToolbarPosition(toolbarPosition) {
+  if (!zoomToolbar) {
+    return;
+  }
+
+  for (const toolbarClass of TOOLBAR_POSITION_CLASSES) {
+    zoomToolbar.classList.remove(toolbarClass);
+  }
+
+  if (TOOLBAR_POSITION_CLASSES.includes(`toolbar-pos-${toolbarPosition}`)) {
+    zoomToolbar.classList.add(`toolbar-pos-${toolbarPosition}`);
+  }
+}
+
+function applyThemeAccentRgb(accentRgb) {
+  if (!layoutElement || typeof accentRgb !== 'string' || accentRgb.trim().length === 0) {
+    return;
+  }
+
+  layoutElement.style.setProperty('--toolbar-green-accent-rgb', accentRgb.trim());
+}
+
+function applyDominantColor(hexColor, rgbColor) {
+  if (!layoutElement || typeof hexColor !== 'string' || hexColor.trim().length === 0) {
+    return;
+  }
+
+  const normalizedHex = hexColor.trim();
+  const normalizedRgb = typeof rgbColor === 'string' && rgbColor.trim().length > 0
+    ? rgbColor.trim()
+    : '';
+
+  layoutElement.style.setProperty('--dominant-color', normalizedHex);
+
+  if (dominantColorMeta) {
+    dominantColorMeta.textContent = normalizedHex;
+  }
+
+  if (dominantColorTable) {
+    dominantColorTable.textContent = normalizedRgb
+      ? `${normalizedHex} (${normalizedRgb})`
+      : normalizedHex;
+  }
+}
 
 function updateSelectionModeUi() {
   if (!preview || !zoomSelectButton) {
@@ -251,6 +357,37 @@ function updateCompareSplitFromClientPosition(clientX, clientY) {
   applyCompareSplit();
 }
 
+function scheduleCompareDividerSplitUpdate(clientX, clientY) {
+  pendingCompareDragClientX = clientX;
+  pendingCompareDragClientY = clientY;
+
+  if (compareDividerDragFrameId !== null) {
+    return;
+  }
+
+  compareDividerDragFrameId = requestAnimationFrame(() => {
+    compareDividerDragFrameId = null;
+
+    if (pendingCompareDragClientX === null || pendingCompareDragClientY === null) {
+      return;
+    }
+
+    updateCompareSplitFromClientPosition(pendingCompareDragClientX, pendingCompareDragClientY);
+    pendingCompareDragClientX = null;
+    pendingCompareDragClientY = null;
+  });
+}
+
+function clearPendingCompareDividerSplitUpdate() {
+  if (compareDividerDragFrameId !== null) {
+    cancelAnimationFrame(compareDividerDragFrameId);
+    compareDividerDragFrameId = null;
+  }
+
+  pendingCompareDragClientX = null;
+  pendingCompareDragClientY = null;
+}
+
 function endCompareDividerDrag(pointerId) {
   if (!isDraggingCompareDivider) {
     return;
@@ -266,6 +403,7 @@ function endCompareDividerDrag(pointerId) {
 
   isDraggingCompareDivider = false;
   compareDividerPointerId = null;
+  clearPendingCompareDividerSplitUpdate();
 }
 
 function setCompareEnabled(isEnabled) {
@@ -303,6 +441,7 @@ function clearComparisonImage() {
   endCompareDividerDrag();
   compareImageLabel.textContent = 'No comparison image';
   compareEnabled = false;
+  clearPendingCompareDividerSplitUpdate();
   updateCompareControlsUi();
 }
 
@@ -313,14 +452,7 @@ function setPipetteMode(isEnabled) {
     pipetteButton.setAttribute('aria-pressed', pipetteMode ? 'true' : 'false');
   }
   if (pipetteMode) {
-    if (pipetteCanvas && image) {
-      pipetteCanvas.width = image.naturalWidth;
-      pipetteCanvas.height = image.naturalHeight;
-      pipetteCanvas.style.display = 'none';
-      const ctx = pipetteCanvas.getContext('2d');
-      ctx.clearRect(0, 0, pipetteCanvas.width, pipetteCanvas.height);
-      ctx.drawImage(image, 0, 0);
-    }
+    refreshPipetteImageBuffer();
     if (previewBody) {
       previewBody.style.cursor = 'none';
     }
@@ -579,7 +711,7 @@ function initializeIcoGallery() {
 
       image.setAttribute('src', nextSource);
       syncOverviewMapSource();
-      scheduleInitialModeDecision();
+      updateView();
     });
   }
 
@@ -756,9 +888,9 @@ function getDynamicLoupeZoom(displayedZoom) {
   return interpolateLogarithmic(
     normalizedImageZoom,
     MIN_ZOOM,
-    LOUPE_ZOOM_AT_MIN_IMAGE_ZOOM,
+    loupeZoomAtMinImageZoom,
     MAX_ZOOM,
-    LOUPE_ZOOM_AT_MAX_IMAGE_ZOOM
+    loupeZoomAtMaxImageZoom
   );
 }
 
@@ -773,7 +905,12 @@ function positionLoupeAtPointer(clientX, clientY) {
 
 // Render a local pixel loupe around the cursor when pipette mode is enabled.
 previewBody?.addEventListener('pointermove', (event) => {
-  if (!pipetteMode || !pipetteCanvas || !image || !pipetteZoomLoupe || !virtualLoupeCtx) return;
+  if (!pipetteMode || !pipetteCanvas || !image || !pipetteZoomLoupe || !virtualLoupeCtx || !virtualLoupeCanvas) return;
+  const pipetteCtx = ensurePipetteBufferContext();
+  if (!pipetteCtx) {
+    return;
+  }
+
   const imageRect = image.getBoundingClientRect();
   const isPointerInsideImage =
     event.clientX >= imageRect.left &&
@@ -781,7 +918,7 @@ previewBody?.addEventListener('pointermove', (event) => {
     event.clientY >= imageRect.top &&
     event.clientY < imageRect.bottom;
 
-  pipetteZoomLoupe.width = pipetteZoomLoupe.height = LOUPE_DIAMETER;
+  pipetteZoomLoupe.width = pipetteZoomLoupe.height = loupeDiameter;
   const loupeCtx = pipetteZoomLoupe.getContext('2d');
 
   if (!isPointerInsideImage || imageRect.width <= 0 || imageRect.height <= 0) {
@@ -808,14 +945,13 @@ previewBody?.addEventListener('pointermove', (event) => {
   const sourcePointerY = clamp(normalizedY * image.naturalHeight, 0, image.naturalHeight);
   const x = clamp(Math.floor(normalizedX * image.naturalWidth), 0, image.naturalWidth - 1);
   const y = clamp(Math.floor(normalizedY * image.naturalHeight), 0, image.naturalHeight - 1);
-  const pipetteCtx = pipetteCanvas.getContext('2d');
   const hoveredPixelData = pipetteCtx.getImageData(x, y, 1, 1).data;
   updatePipetteHoverInfo(x, y, hoveredPixelData);
   const displayedZoom = Math.max(0.0001, imageRect.width / image.naturalWidth);
-  const loupeRelativeZoom = clamp(getDynamicLoupeZoom(displayedZoom), LOUPE_DYNAMIC_ZOOM_MIN, LOUPE_DYNAMIC_ZOOM_MAX);
+  const loupeRelativeZoom = clamp(getDynamicLoupeZoom(displayedZoom), loupeDynamicZoomMin, loupeDynamicZoomMax);
   const adjustedLoupeZoom = displayedZoom * loupeRelativeZoom;
   const maxSourceSpan = Math.max(1, Math.min(image.naturalWidth, image.naturalHeight));
-  const sourceSpan = clamp(LOUPE_DIAMETER / adjustedLoupeZoom, 1, maxSourceSpan);
+  const sourceSpan = clamp(loupeDiameter / adjustedLoupeZoom, 1, maxSourceSpan);
   loupeCtx.clearRect(0, 0, pipetteZoomLoupe.width, pipetteZoomLoupe.height);
   // Keep a sub-pixel source window so zoom changes remain continuous.
   const halfSourceSpan = sourceSpan / 2;
@@ -835,12 +971,12 @@ previewBody?.addEventListener('pointermove', (event) => {
   const clippedSourceWidth = Math.max(0, clippedSourceRight - clippedSourceLeft);
   const clippedSourceHeight = Math.max(0, clippedSourceBottom - clippedSourceTop);
 
-  const destinationLeft = ((clippedSourceLeft - sourceLeft) / sourceSpan) * LOUPE_VIRTUAL_RESOLUTION;
-  const destinationTop = ((clippedSourceTop - sourceTop) / sourceSpan) * LOUPE_VIRTUAL_RESOLUTION;
-  const destinationWidth = (clippedSourceWidth / sourceSpan) * LOUPE_VIRTUAL_RESOLUTION;
-  const destinationHeight = (clippedSourceHeight / sourceSpan) * LOUPE_VIRTUAL_RESOLUTION;
+  const destinationLeft = ((clippedSourceLeft - sourceLeft) / sourceSpan) * loupeVirtualResolution;
+  const destinationTop = ((clippedSourceTop - sourceTop) / sourceSpan) * loupeVirtualResolution;
+  const destinationWidth = (clippedSourceWidth / sourceSpan) * loupeVirtualResolution;
+  const destinationHeight = (clippedSourceHeight / sourceSpan) * loupeVirtualResolution;
 
-  virtualLoupeCtx.clearRect(0, 0, LOUPE_VIRTUAL_RESOLUTION, LOUPE_VIRTUAL_RESOLUTION);
+  virtualLoupeCtx.clearRect(0, 0, loupeVirtualResolution, loupeVirtualResolution);
   virtualLoupeCtx.imageSmoothingEnabled = false;
   if (clippedSourceWidth > 0 && clippedSourceHeight > 0 && destinationWidth > 0 && destinationHeight > 0) {
     virtualLoupeCtx.drawImage(
@@ -861,22 +997,22 @@ previewBody?.addEventListener('pointermove', (event) => {
     virtualLoupeCanvas,
     0,
     0,
-    LOUPE_VIRTUAL_RESOLUTION,
-    LOUPE_VIRTUAL_RESOLUTION,
+    loupeVirtualResolution,
+    loupeVirtualResolution,
     0,
     0,
     pipetteZoomLoupe.width,
     pipetteZoomLoupe.height
   );
 
-  const pixelSize = pipetteZoomLoupe.width / LOUPE_VIRTUAL_RESOLUTION;
-  const centerPixelIndex = Math.floor(LOUPE_VIRTUAL_RESOLUTION / 2);
-  const circleRadiusInPixels = LOUPE_VIRTUAL_RESOLUTION / 2;
+  const pixelSize = pipetteZoomLoupe.width / loupeVirtualResolution;
+  const centerPixelIndex = Math.floor(loupeVirtualResolution / 2);
+  const circleRadiusInPixels = loupeVirtualResolution / 2;
   const circleRadiusInCanvas = circleRadiusInPixels * pixelSize;
 
   // Pixelated circular mask: remove pixels outside the radius.
-  for (let row = 0; row < LOUPE_VIRTUAL_RESOLUTION; row += 1) {
-    for (let column = 0; column < LOUPE_VIRTUAL_RESOLUTION; column += 1) {
+  for (let row = 0; row < loupeVirtualResolution; row += 1) {
+    for (let column = 0; column < loupeVirtualResolution; column += 1) {
       const deltaX = column - centerPixelIndex;
       const deltaY = row - centerPixelIndex;
       const distance = Math.hypot(deltaX, deltaY);
@@ -887,7 +1023,7 @@ previewBody?.addEventListener('pointermove', (event) => {
     }
   }
 
-  // Dessine une croix au centre
+  // Draw a crosshair at the center.
   loupeCtx.strokeStyle = '#f00';
   loupeCtx.lineWidth = 0.5;
   loupeCtx.beginPath();
@@ -922,6 +1058,11 @@ pipetteButton?.addEventListener('click', (event) => {
 // Pick a pixel color on click and copy it to the clipboard.
 previewBody?.addEventListener('click', (event) => {
   if (!pipetteMode || !pipetteCanvas || !image) return;
+  const bufferContext = ensurePipetteBufferContext();
+  if (!bufferContext) {
+    return;
+  }
+
   // Compute click coordinates in image space.
   const imageRect = image.getBoundingClientRect();
   const normalizedX = (event.clientX - imageRect.left) / imageRect.width;
@@ -929,8 +1070,7 @@ previewBody?.addEventListener('click', (event) => {
   const x = clamp(Math.floor(normalizedX * image.naturalWidth), 0, image.naturalWidth - 1);
   const y = clamp(Math.floor(normalizedY * image.naturalHeight), 0, image.naturalHeight - 1);
   if (x < 0 || y < 0 || x >= image.naturalWidth || y >= image.naturalHeight) return;
-  const ctx = pipetteCanvas.getContext('2d');
-  const pixel = ctx.getImageData(x, y, 1, 1).data;
+  const pixel = bufferContext.getImageData(x, y, 1, 1).data;
   const hex = formatHexColor(pixel[0], pixel[1], pixel[2]);
   // Copy to clipboard.
   if (navigator.clipboard && window.isSecureContext) {
@@ -971,13 +1111,6 @@ previewBody?.addEventListener('click', (event) => {
       hidePipetteColorResult();
       pipetteResultFadeTimeoutId = null;
     }, PIPETTE_RESULT_VISIBLE_DURATION_MS);
-  }
-});
-
-// Disable pipette mode with Escape.
-window.addEventListener('keydown', (event) => {
-  if (pipetteMode && event.key === 'Escape') {
-    setPipetteMode(false);
   }
 });
 
@@ -1199,9 +1332,9 @@ function setFitMode() {
   updateView();
 }
 
-function initializeImageViewMode() {
-  if (!image || !preview) {
-    return false;
+function applyInitialViewModeForCurrentImage(token, attempt = 0) {
+  if (token !== initialViewModeDecisionToken || !image || !preview) {
+    return;
   }
 
   const naturalWidth = image.naturalWidth;
@@ -1210,48 +1343,30 @@ function initializeImageViewMode() {
   const viewportHeight = preview.clientHeight;
 
   if (naturalWidth <= 0 || naturalHeight <= 0 || viewportWidth <= 0 || viewportHeight <= 0) {
-    return false;
+    if (attempt >= 12) {
+      // Safe fallback when layout info is still unavailable.
+      fitMode = true;
+      zoom = 1;
+      updateView();
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      applyInitialViewModeForCurrentImage(token, attempt + 1);
+    });
+    return;
   }
 
-  const imageFitsViewport = naturalWidth <= viewportWidth && naturalHeight <= viewportHeight;
-  if (imageFitsViewport) {
-    fitMode = false;
-    zoom = 1;
-    return true;
-  }
-
-  fitMode = true;
-  return true;
+  const shouldUse100Percent = naturalWidth <= viewportWidth && naturalHeight <= viewportHeight;
+  fitMode = !shouldUse100Percent;
+  zoom = 1;
+  updateView();
 }
 
-function evaluateInitialModeDecision() {
-  if (!pendingInitialModeDecision) {
-    return;
-  }
-
-  const initialized = initializeImageViewMode();
-  if (initialized) {
-    pendingInitialModeDecision = false;
-    pendingInitialModeFrameId = null;
-    updateView();
-    return;
-  }
-
-  pendingInitialModeFrameId = requestAnimationFrame(() => {
-    evaluateInitialModeDecision();
-  });
-}
-
-function scheduleInitialModeDecision() {
-  pendingInitialModeDecision = true;
-
-  if (pendingInitialModeFrameId !== null) {
-    return;
-  }
-
-  pendingInitialModeFrameId = requestAnimationFrame(() => {
-    evaluateInitialModeDecision();
-  });
+function scheduleInitialViewModeDecision() {
+  initialViewModeDecisionToken += 1;
+  const decisionToken = initialViewModeDecisionToken;
+  applyInitialViewModeForCurrentImage(decisionToken, 0);
 }
 
 function setInfoOverlayVisible(isVisible) {
@@ -1476,7 +1591,7 @@ compareDivider?.addEventListener('pointermove', (event) => {
     return;
   }
 
-  updateCompareSplitFromClientPosition(event.clientX, event.clientY);
+  scheduleCompareDividerSplitUpdate(event.clientX, event.clientY);
   stopEvent(event);
 });
 
@@ -1722,6 +1837,12 @@ window.addEventListener('keydown', (event) => {
   const code = event.code;
   const hasCtrlOrMeta = event.ctrlKey || event.metaKey;
 
+  if (pipetteMode && key === 'Escape') {
+    event.preventDefault();
+    setPipetteMode(false);
+    return;
+  }
+
   if ((hasCtrlOrMeta && (key === '+' || key === '=' || code === 'NumpadAdd')) || key === '+') {
     event.preventDefault();
     applyZoomDelta(ZOOM_STEP);
@@ -1757,7 +1878,10 @@ image?.addEventListener('load', () => {
   image.setAttribute('draggable', 'false');
   syncActiveIcoGalleryItemFromImage();
   syncOverviewMapSource();
-  scheduleInitialModeDecision();
+  if (pipetteMode) {
+    refreshPipetteImageBuffer();
+  }
+  scheduleInitialViewModeDecision();
   requestOverviewMapViewportUpdate();
 });
 
@@ -1794,11 +1918,33 @@ window.addEventListener('message', (event) => {
     case 'clear-compare-image':
       clearComparisonImage();
       break;
+    case 'set-dominant-color':
+      if (typeof message.hexColor === 'string') {
+        applyDominantColor(message.hexColor, typeof message.rgbColor === 'string' ? message.rgbColor : '');
+      }
+      break;
+    case 'update-settings':
+      if (message.settings && typeof message.settings === 'object') {
+        applyToolbarPosition(typeof message.settings.toolbarPosition === 'string' ? message.settings.toolbarPosition : 'top');
+        applyThemeAccentRgb(typeof message.settings.themeAccentRgb === 'string' ? message.settings.themeAccentRgb : '');
+        applyLoupeSettings({
+          diameter: message.settings.pipetteLoupeDiameter,
+          virtualResolution: message.settings.pipetteLoupeVirtualResolution,
+          zoomAtMinImageZoom: message.settings.pipetteLoupeZoomAtMinImageZoom,
+          zoomAtMaxImageZoom: message.settings.pipetteLoupeZoomAtMaxImageZoom
+        });
+
+        if (pipetteMode) {
+          refreshPipetteImageBuffer();
+        }
+      }
+      break;
     default:
       break;
   }
 });
 
+initializeLoupeSettingsFromDom();
 initializeInfoOverlayVisibility();
 initializeInfoOverlayPosition();
 initializeIcoGallery();
@@ -1813,6 +1959,10 @@ if (compareSlider) {
 }
 updateSelectionModeUi();
 updateView();
+
+if (image?.complete && image.naturalWidth > 0 && image.naturalHeight > 0) {
+  scheduleInitialViewModeDecision();
+}
 
 preview?.addEventListener('scroll', () => {
   requestOverviewMapViewportUpdate();
@@ -1859,10 +2009,6 @@ window.addEventListener('resize', () => {
   const left = Number.parseFloat(infoOverlay.style.left || '0');
   const top = Number.parseFloat(infoOverlay.style.top || '0');
   applyInfoOverlayPosition(left, top);
-
-  if (pendingInitialModeDecision) {
-    scheduleInitialModeDecision();
-  }
 
   requestOverviewMapViewportUpdate();
 });

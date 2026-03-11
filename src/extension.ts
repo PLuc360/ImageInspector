@@ -43,15 +43,52 @@ type WebviewOutboundMessage =
   }
   | {
     type: 'clear-compare-image';
+  }
+  | {
+    type: 'set-dominant-color';
+    hexColor: string;
+    rgbColor: string;
+  }
+  | {
+    type: 'update-settings';
+    settings: ImageInspectorSettings;
   };
+
+type DominantColorQuality = 'fast' | 'full';
+
+type ImageInspectorSettings = {
+  toolbarPosition: string;
+  themeAccentRgb: string;
+  pipetteLoupeDiameter: number;
+  pipetteLoupeVirtualResolution: number;
+  pipetteLoupeZoomAtMinImageZoom: number;
+  pipetteLoupeZoomAtMaxImageZoom: number;
+  dominantColorQuality: DominantColorQuality;
+  dominantColorFastSampleSize: number;
+};
+
+type GetImageDetailsOptions = {
+  includeDominantColor: boolean;
+  dominantColorQuality: DominantColorQuality;
+  dominantColorFastSampleSize: number;
+};
 
 const MAX_CONVERTED_PREVIEW_CACHE_ENTRIES = 12;
 const MAX_ICO_CACHE_ENTRIES = 24;
+const MAX_IMAGE_DETAILS_CACHE_ENTRIES = 32;
 const DEFAULT_THEME_ACCENT_HEX = '#00C86E';
+const DEFAULT_DOMINANT_COLOR_QUALITY: DominantColorQuality = 'full';
+const DEFAULT_DOMINANT_COLOR_FAST_SAMPLE_SIZE = 64;
 
 const convertedPreviewCache = new Map<string, string>();
 const icoEntriesCache = new Map<string, IcoImageEntry[]>();
 const icoGalleryCache = new Map<string, IcoVariantViewModel[]>();
+const imageDetailsCache = new Map<string, ImageDetailsViewModel>();
+
+type FileVersionInfo = {
+  key: string;
+  sizeBytes: number;
+};
 
 /**
  * Builds a stable cache key for a file version.
@@ -74,6 +111,21 @@ function buildFileVersionKey(filePath: string, size: number, mtimeMs: number): s
 async function getFileVersionKey(filePath: string): Promise<string> {
   const stats = await fs.stat(filePath);
   return buildFileVersionKey(filePath, stats.size, stats.mtimeMs);
+}
+
+/**
+ * Resolves file stats and a version key in one pass.
+ *
+ * @param filePath Absolute file path.
+ * @returns File stats and corresponding cache key.
+ */
+async function getFileVersionInfo(filePath: string): Promise<FileVersionInfo> {
+  const stats = await fs.stat(filePath);
+  const sizeBytes = typeof stats.size === 'bigint' ? Number(stats.size) : stats.size;
+  return {
+    key: buildFileVersionKey(filePath, sizeBytes, stats.mtimeMs),
+    sizeBytes
+  };
 }
 
 /**
@@ -146,6 +198,7 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
   private activeDocument: ImageCustomDocument | undefined;
   private readonly refreshDebounceTimers = new Map<string, NodeJS.Timeout>();
   private readonly comparisonImageByDocumentUri = new Map<string, vscode.Uri>();
+  private readonly renderSequenceByViewKey = new Map<string, number>();
 
   /**
    * Builds a stable key used to debounce refreshes per panel/document pair.
@@ -156,6 +209,29 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
    */
   private getRefreshTimerKey(document: ImageCustomDocument, webviewPanel: vscode.WebviewPanel): string {
     return `${webviewPanel.viewType}${document.uri.toString()}`;
+  }
+
+  /**
+   * Starts a new render sequence for one panel/document pair.
+   *
+   * @param viewKey Stable panel/document key.
+   * @returns Sequence number for this render request.
+   */
+  private beginRenderSequence(viewKey: string): number {
+    const nextSequence = (this.renderSequenceByViewKey.get(viewKey) ?? 0) + 1;
+    this.renderSequenceByViewKey.set(viewKey, nextSequence);
+    return nextSequence;
+  }
+
+  /**
+   * Checks whether a render request is still current.
+   *
+   * @param viewKey Stable panel/document key.
+   * @param sequence Sequence number to validate.
+   * @returns True when the sequence is still the latest one.
+   */
+  private isRenderSequenceCurrent(viewKey: string, sequence: number): boolean {
+    return this.renderSequenceByViewKey.get(viewKey) === sequence;
   }
 
   /**
@@ -199,6 +275,8 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
         this.refreshDebounceTimers.delete(timerKey);
       }
 
+      this.renderSequenceByViewKey.delete(timerKey);
+
       fileWatcher.dispose();
     }, undefined, this.context.subscriptions);
 
@@ -237,11 +315,32 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
    * @param webviewPanel Target webview panel.
    */
   private async renderDocument(document: ImageCustomDocument, webviewPanel: vscode.WebviewPanel): Promise<void> {
-    const cacheBuster = Date.now();
+    const viewKey = this.getRefreshTimerKey(document, webviewPanel);
+    const renderSequence = this.beginRenderSequence(viewKey);
 
     try {
-      const details = await getImageDetails(document.uri.fsPath);
-      let imageSource = await getWebviewImageSource(document.uri.fsPath, document.uri, webviewPanel.webview, cacheBuster);
+      const imageInspectorSettings = getImageInspectorSettings();
+      const primaryFileVersion = await getFileVersionInfo(document.uri.fsPath);
+      const details = await getImageDetails(
+        document.uri.fsPath,
+        primaryFileVersion,
+        {
+          includeDominantColor: false,
+          dominantColorQuality: imageInspectorSettings.dominantColorQuality,
+          dominantColorFastSampleSize: imageInspectorSettings.dominantColorFastSampleSize
+        }
+      );
+
+      if (!this.isRenderSequenceCurrent(viewKey, renderSequence)) {
+        return;
+      }
+
+      let imageSource = await getWebviewImageSource(
+        document.uri.fsPath,
+        document.uri,
+        webviewPanel.webview,
+        primaryFileVersion.key
+      );
       const comparisonImageUri = this.comparisonImageByDocumentUri.get(document.uri.toString());
       const extension = path.extname(document.uri.fsPath).toLowerCase();
       const icoVariants = extension === '.ico' ? await getIcoGalleryItems(document.uri.fsPath) : [];
@@ -253,45 +352,97 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
       }
 
       if (comparisonImageUri) {
+        const comparisonFileVersion = await getFileVersionInfo(comparisonImageUri.fsPath);
         comparisonImageSource = await getWebviewImageSource(
           comparisonImageUri.fsPath,
           comparisonImageUri,
           webviewPanel.webview,
-          cacheBuster
+          comparisonFileVersion.key
         );
         comparisonImageLabel = path.basename(comparisonImageUri.fsPath);
       }
 
+      if (!this.isRenderSequenceCurrent(viewKey, renderSequence)) {
+        return;
+      }
+
       webviewPanel.title = details.fileName;
-      const imageInspectorConfig = vscode.workspace.getConfiguration('imageInspector');
-      const toolbarPosition = imageInspectorConfig.get<string>('toolbarPosition', 'top');
-      const themeAccentColor = imageInspectorConfig.get<string>('themeAccentColor', DEFAULT_THEME_ACCENT_HEX);
-      const themeAccentRgb = resolveThemeAccentRgb(themeAccentColor);
-      const pipetteLoupeDiameter = imageInspectorConfig.get<number>('pipetteLoupeDiameter', 96);
-      const pipetteLoupeVirtualResolution = imageInspectorConfig.get<number>('pipetteLoupeVirtualResolution', 25);
-      const pipetteLoupeZoomAtMinImageZoom = imageInspectorConfig.get<number>('pipetteLoupeZoomAtMinImageZoom', 6);
-      const pipetteLoupeZoomAtMaxImageZoom = imageInspectorConfig.get<number>('pipetteLoupeZoomAtMaxImageZoom', 1);
       webviewPanel.webview.html = buildCustomEditorWebview(
         webviewPanel.webview,
         imageSource,
         details,
         this.context.extensionUri,
         {
-          toolbarPosition,
-          themeAccentRgb,
+          toolbarPosition: imageInspectorSettings.toolbarPosition,
+          themeAccentRgb: imageInspectorSettings.themeAccentRgb,
           icoVariants,
           comparisonImageSource,
           comparisonImageLabel,
-          pipetteLoupeDiameter,
-          pipetteLoupeVirtualResolution,
-          pipetteLoupeZoomAtMinImageZoom,
-          pipetteLoupeZoomAtMaxImageZoom
+          pipetteLoupeDiameter: imageInspectorSettings.pipetteLoupeDiameter,
+          pipetteLoupeVirtualResolution: imageInspectorSettings.pipetteLoupeVirtualResolution,
+          pipetteLoupeZoomAtMinImageZoom: imageInspectorSettings.pipetteLoupeZoomAtMinImageZoom,
+          pipetteLoupeZoomAtMaxImageZoom: imageInspectorSettings.pipetteLoupeZoomAtMaxImageZoom
         }
       );
+
+      void this.pushDominantColorUpdate(
+        document,
+        webviewPanel,
+        viewKey,
+        renderSequence,
+        primaryFileVersion,
+        imageInspectorSettings
+      );
     } catch (error) {
+      if (!this.isRenderSequenceCurrent(viewKey, renderSequence)) {
+        return;
+      }
+
       const message = getImageLoadErrorMessage(document.uri.fsPath, error);
       webviewPanel.webview.html = buildErrorWebview(message);
     }
+  }
+
+  /**
+   * Computes and sends dominant color update asynchronously.
+   *
+   * @param document Active document.
+   * @param webviewPanel Target panel.
+   * @param viewKey Stable panel/document key.
+   * @param renderSequence Render sequence to validate.
+   * @param knownFileVersion Optional file version info reused from render.
+   * @param settings Current extension settings.
+   */
+  private async pushDominantColorUpdate(
+    document: ImageCustomDocument,
+    webviewPanel: vscode.WebviewPanel,
+    viewKey: string,
+    renderSequence: number,
+    knownFileVersion: FileVersionInfo | undefined,
+    settings: ImageInspectorSettings
+  ): Promise<void> {
+    const resolvedFileVersion = knownFileVersion ?? await getFileVersionInfo(document.uri.fsPath);
+    const details = await getImageDetails(
+      document.uri.fsPath,
+      resolvedFileVersion,
+      {
+        includeDominantColor: true,
+        dominantColorQuality: settings.dominantColorQuality,
+        dominantColorFastSampleSize: settings.dominantColorFastSampleSize
+      }
+    );
+
+    if (!this.isRenderSequenceCurrent(viewKey, renderSequence)) {
+      return;
+    }
+
+    const outboundMessage: WebviewOutboundMessage = {
+      type: 'set-dominant-color',
+      hexColor: details.dominantColorHex,
+      rgbColor: details.dominantColorRgb
+    };
+
+    await webviewPanel.webview.postMessage(outboundMessage);
   }
 
   /**
@@ -402,9 +553,22 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
       return;
     }
 
+    const [primaryFileVersion, comparisonFileVersion] = await Promise.all([
+      getFileVersionInfo(document.uri.fsPath),
+      getFileVersionInfo(comparisonUri.fsPath)
+    ]);
+
     const [primaryDetails, comparisonDetails] = await Promise.all([
-      getImageDetails(document.uri.fsPath),
-      getImageDetails(comparisonUri.fsPath)
+      getImageDetails(document.uri.fsPath, primaryFileVersion, {
+        includeDominantColor: false,
+        dominantColorQuality: DEFAULT_DOMINANT_COLOR_QUALITY,
+        dominantColorFastSampleSize: DEFAULT_DOMINANT_COLOR_FAST_SAMPLE_SIZE
+      }),
+      getImageDetails(comparisonUri.fsPath, comparisonFileVersion, {
+        includeDominantColor: false,
+        dominantColorQuality: DEFAULT_DOMINANT_COLOR_QUALITY,
+        dominantColorFastSampleSize: DEFAULT_DOMINANT_COLOR_FAST_SAMPLE_SIZE
+      })
     ]);
 
     if (primaryDetails.width !== comparisonDetails.width || primaryDetails.height !== comparisonDetails.height) {
@@ -420,7 +584,7 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
       comparisonUri.fsPath,
       comparisonUri,
       webviewPanel.webview,
-      Date.now()
+      comparisonFileVersion.key
     );
 
     this.comparisonImageByDocumentUri.set(document.uri.toString(), comparisonUri);
@@ -456,12 +620,33 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
   /**
    * Re-renders the active custom editor panel after configuration updates.
    */
-  async refreshActivePanelFromConfiguration(): Promise<void> {
+  async refreshActivePanelFromConfiguration(event: vscode.ConfigurationChangeEvent): Promise<void> {
     if (!this.activePanel || !this.activeDocument) {
       return;
     }
 
-    await this.renderDocument(this.activeDocument, this.activePanel);
+    const settings = getImageInspectorSettings();
+    const settingsMessage: WebviewOutboundMessage = {
+      type: 'update-settings',
+      settings
+    };
+    await this.activePanel.webview.postMessage(settingsMessage);
+
+    if (
+      event.affectsConfiguration('imageInspector.dominantColorQuality')
+      || event.affectsConfiguration('imageInspector.dominantColorFastSampleSize')
+    ) {
+      const viewKey = this.getRefreshTimerKey(this.activeDocument, this.activePanel);
+      const renderSequence = this.renderSequenceByViewKey.get(viewKey) ?? 0;
+      void this.pushDominantColorUpdate(
+        this.activeDocument,
+        this.activePanel,
+        viewKey,
+        renderSequence,
+        undefined,
+        settings
+      );
+    }
   }
 }
 
@@ -527,7 +712,7 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
 
-    void provider.refreshActivePanelFromConfiguration();
+    void provider.refreshActivePanelFromConfiguration(event);
   });
 
   context.subscriptions.push(
@@ -609,27 +794,42 @@ function getImageLoadErrorMessage(filePath: string, error: unknown): string {
  * @param filePath Absolute file system path.
  * @returns Consolidated image details.
  */
-async function getImageDetails(filePath: string): Promise<ImageDetailsViewModel> {
-  const stats = await fs.stat(filePath);
+async function getImageDetails(
+  filePath: string,
+  fileVersionInfo?: FileVersionInfo,
+  options?: GetImageDetailsOptions
+): Promise<ImageDetailsViewModel> {
+  const resolvedFileVersion = fileVersionInfo ?? await getFileVersionInfo(filePath);
+  const resolvedOptions = resolveImageDetailsOptions(options);
+  const detailsCacheKey = buildImageDetailsCacheKey(resolvedFileVersion.key, resolvedOptions);
+  const cachedDetails = getCachedValue(imageDetailsCache, detailsCacheKey);
+  if (cachedDetails) {
+    return cachedDetails;
+  }
 
   try {
-    const [metadata, imageStats] = await Promise.all([
-      sharp(filePath).metadata(),
-      sharp(filePath).stats()
-    ]);
+    const metadata = await sharp(filePath).metadata();
 
     const width = metadata.width ?? 0;
     const height = metadata.height ?? 0;
+    let dominantColorHex = '#808080';
+    let dominantColorRgb = 'rgb(128, 128, 128)';
 
-    const dominant = imageStats.dominant;
-    const dominantColorHex = rgbToHex(dominant.r, dominant.g, dominant.b);
-    const dominantColorRgb = `rgb(${dominant.r}, ${dominant.g}, ${dominant.b})`;
+    if (resolvedOptions.includeDominantColor) {
+      const dominant = await computeDominantColor(
+        filePath,
+        resolvedOptions.dominantColorQuality,
+        resolvedOptions.dominantColorFastSampleSize
+      );
+      dominantColorHex = rgbToHex(dominant.r, dominant.g, dominant.b);
+      dominantColorRgb = `rgb(${dominant.r}, ${dominant.g}, ${dominant.b})`;
+    }
 
-    return {
+    const details: ImageDetailsViewModel = {
       fileName: path.basename(filePath),
       absolutePath: filePath,
-      sizeBytes: stats.size,
-      sizeText: formatBytes(stats.size),
+      sizeBytes: resolvedFileVersion.sizeBytes,
+      sizeText: formatBytes(resolvedFileVersion.sizeBytes),
       width,
       height,
       megapixels: ((width * height) / 1_000_000).toFixed(2),
@@ -641,6 +841,9 @@ async function getImageDetails(filePath: string): Promise<ImageDetailsViewModel>
       dominantColorHex,
       dominantColorRgb
     };
+
+    setBoundedCachedValue(imageDetailsCache, detailsCacheKey, details, MAX_IMAGE_DETAILS_CACHE_ENTRIES);
+    return details;
   } catch (error) {
     const extension = path.extname(filePath).toLowerCase();
     if (extension !== '.ico') {
@@ -652,11 +855,11 @@ async function getImageDetails(filePath: string): Promise<ImageDetailsViewModel>
     const height = icoEntry?.height ?? 0;
     const estimatedChannels = Math.max(1, Math.ceil((icoEntry?.bitCount ?? 0) / 8));
 
-    return {
+    const details: ImageDetailsViewModel = {
       fileName: path.basename(filePath),
       absolutePath: filePath,
-      sizeBytes: stats.size,
-      sizeText: formatBytes(stats.size),
+      sizeBytes: resolvedFileVersion.sizeBytes,
+      sizeText: formatBytes(resolvedFileVersion.sizeBytes),
       width,
       height,
       megapixels: ((width * height) / 1_000_000).toFixed(2),
@@ -668,7 +871,135 @@ async function getImageDetails(filePath: string): Promise<ImageDetailsViewModel>
       dominantColorHex: '#808080',
       dominantColorRgb: 'rgb(128, 128, 128)'
     };
+
+    setBoundedCachedValue(imageDetailsCache, detailsCacheKey, details, MAX_IMAGE_DETAILS_CACHE_ENTRIES);
+    return details;
   }
+}
+
+/**
+ * Resolves image details options with safe defaults.
+ *
+ * @param options Candidate options.
+ * @returns Normalized options.
+ */
+function resolveImageDetailsOptions(options?: GetImageDetailsOptions): GetImageDetailsOptions {
+  return {
+    includeDominantColor: options?.includeDominantColor ?? true,
+    dominantColorQuality: options?.dominantColorQuality ?? DEFAULT_DOMINANT_COLOR_QUALITY,
+    dominantColorFastSampleSize: clampInteger(
+      options?.dominantColorFastSampleSize ?? DEFAULT_DOMINANT_COLOR_FAST_SAMPLE_SIZE,
+      16,
+      512
+    )
+  };
+}
+
+/**
+ * Builds a cache key for image details according to extraction options.
+ *
+ * @param fileVersionKey Stable file version key.
+ * @param options Normalized extraction options.
+ * @returns Cache key.
+ */
+function buildImageDetailsCacheKey(fileVersionKey: string, options: GetImageDetailsOptions): string {
+  if (!options.includeDominantColor) {
+    return `${fileVersionKey}::details::meta`;
+  }
+
+  return `${fileVersionKey}::details::dominant::${options.dominantColorQuality}::${String(options.dominantColorFastSampleSize)}`;
+}
+
+/**
+ * Computes dominant color for one image using full or fast mode.
+ *
+ * @param filePath Absolute image path.
+ * @param quality Dominant color quality mode.
+ * @param fastSampleSize Sampled size used in fast mode.
+ * @returns Dominant color channels.
+ */
+async function computeDominantColor(
+  filePath: string,
+  quality: DominantColorQuality,
+  fastSampleSize: number
+): Promise<{ r: number; g: number; b: number }> {
+  const imagePipeline = sharp(filePath, { limitInputPixels: false });
+  const stats = quality === 'fast'
+    ? await imagePipeline
+      .resize(fastSampleSize, fastSampleSize, { fit: 'inside', withoutEnlargement: true })
+      .stats()
+    : await imagePipeline.stats();
+
+  return stats.dominant;
+}
+
+/**
+ * Reads extension settings used by the webview and image analysis pipeline.
+ *
+ * @returns Normalized extension settings.
+ */
+function getImageInspectorSettings(): ImageInspectorSettings {
+  const imageInspectorConfig = vscode.workspace.getConfiguration('imageInspector');
+  const themeAccentColor = imageInspectorConfig.get<string>('themeAccentColor', DEFAULT_THEME_ACCENT_HEX);
+
+  const dominantColorQualityCandidate = imageInspectorConfig.get<string>(
+    'dominantColorQuality',
+    DEFAULT_DOMINANT_COLOR_QUALITY
+  );
+  const dominantColorQuality: DominantColorQuality = dominantColorQualityCandidate === 'fast'
+    ? 'fast'
+    : DEFAULT_DOMINANT_COLOR_QUALITY;
+
+  return {
+    toolbarPosition: imageInspectorConfig.get<string>('toolbarPosition', 'top'),
+    themeAccentRgb: resolveThemeAccentRgb(themeAccentColor),
+    pipetteLoupeDiameter: clampInteger(imageInspectorConfig.get<number>('pipetteLoupeDiameter', 96), 48, 256),
+    pipetteLoupeVirtualResolution: clampInteger(
+      imageInspectorConfig.get<number>('pipetteLoupeVirtualResolution', 25),
+      5,
+      101
+    ),
+    pipetteLoupeZoomAtMinImageZoom: clampNumber(
+      imageInspectorConfig.get<number>('pipetteLoupeZoomAtMinImageZoom', 6),
+      0.25,
+      100
+    ),
+    pipetteLoupeZoomAtMaxImageZoom: clampNumber(
+      imageInspectorConfig.get<number>('pipetteLoupeZoomAtMaxImageZoom', 1),
+      0.25,
+      100
+    ),
+    dominantColorQuality,
+    dominantColorFastSampleSize: clampInteger(
+      imageInspectorConfig.get<number>('dominantColorFastSampleSize', DEFAULT_DOMINANT_COLOR_FAST_SAMPLE_SIZE),
+      16,
+      512
+    )
+  };
+}
+
+/**
+ * Clamps a numeric value to a min/max range.
+ *
+ * @param value Candidate value.
+ * @param min Minimum allowed value.
+ * @param max Maximum allowed value.
+ * @returns Clamped value.
+ */
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+/**
+ * Clamps and rounds a numeric value to an integer range.
+ *
+ * @param value Candidate value.
+ * @param min Minimum allowed value.
+ * @param max Maximum allowed value.
+ * @returns Clamped integer value.
+ */
+function clampInteger(value: number, min: number, max: number): number {
+  return Math.round(clampNumber(value, min, max));
 }
 
 /**
@@ -860,17 +1191,16 @@ async function getWebviewImageSource(
   filePath: string,
   originalUri: vscode.Uri,
   webview: vscode.Webview,
-  cacheBuster: number
+  fileVersionKey: string
 ): Promise<string> {
   const extension = path.extname(filePath).toLowerCase();
   const needsConversion = extension === '.tif' || extension === '.tiff' || extension === '.heic' || extension === '.heif';
 
   if (!needsConversion) {
-    return `${webview.asWebviewUri(originalUri).toString()}?t=${cacheBuster}`;
+    return `${webview.asWebviewUri(originalUri).toString()}?v=${encodeURIComponent(fileVersionKey)}`;
   }
 
-  const cacheKey = await getFileVersionKey(filePath);
-  const cachedPreviewSource = getCachedValue(convertedPreviewCache, cacheKey);
+  const cachedPreviewSource = getCachedValue(convertedPreviewCache, fileVersionKey);
   if (cachedPreviewSource) {
     return cachedPreviewSource;
   }
@@ -879,7 +1209,7 @@ async function getWebviewImageSource(
     .png()
     .toBuffer();
   const previewSource = `data:image/png;base64,${previewBuffer.toString('base64')}`;
-  setBoundedCachedValue(convertedPreviewCache, cacheKey, previewSource, MAX_CONVERTED_PREVIEW_CACHE_ENTRIES);
+  setBoundedCachedValue(convertedPreviewCache, fileVersionKey, previewSource, MAX_CONVERTED_PREVIEW_CACHE_ENTRIES);
   return previewSource;
 }
 

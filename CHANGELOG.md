@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
+## [1.5.2] - 2026-03-11
+### Added
+- Added two dominant color performance settings:
+	- `imageInspector.dominantColorQuality` (`full` or `fast`)
+	- `imageInspector.dominantColorFastSampleSize` (sample size used in fast mode).
+
+### Changed
+- Improved first paint performance by splitting metadata rendering from dominant color extraction (dominant color is now updated asynchronously after initial view render).
+- Improved runtime stability by ignoring stale async render results when a newer render request is already in progress.
+- Improved settings update responsiveness by applying toolbar/accent/loupe changes via incremental webview messages instead of full HTML re-render.
+- Improved webview loading by serving script and style as external webview resources instead of injecting full inline file contents.
+- Improved pipette startup cost by lazily initializing/rebuilding heavy pixel buffer resources when needed.
+- Improved image source cache-busting strategy by switching from timestamp-based query params to file-version keys (size + mtime).
+- Improved cache efficiency by adding image details caching and reusing file version info across metadata/preview flows.
+
+
 ## [1.5.1] - 2026-03-11
 ### Added
 - Added icon-only comparison control buttons (pick image and split orientation) for a cleaner toolbar.

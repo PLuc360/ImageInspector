@@ -1,25 +1,4 @@
 import * as vscode from 'vscode';
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-
-let cachedMediaRoot: string | undefined;
-let cachedScriptContent: string | undefined;
-let cachedStyleContent: string | undefined;
-
-/**
- * Resets media caches when the extension root changes.
- *
- * @param extensionUri Extension root URI.
- */
-function ensureMediaCacheRoot(extensionUri: vscode.Uri): void {
-  if (cachedMediaRoot === extensionUri.fsPath) {
-    return;
-  }
-
-  cachedMediaRoot = extensionUri.fsPath;
-  cachedScriptContent = undefined;
-  cachedStyleContent = undefined;
-}
 
 /**
  * Represents the metadata displayed in the custom image editor.
@@ -88,9 +67,9 @@ export function buildCustomEditorWebview(
   const comparisonImageSource = options?.comparisonImageSource ?? '';
   const comparisonImageLabel = options?.comparisonImageLabel ?? '';
   const hasComparisonImage = comparisonImageSource.length > 0;
-  const nonce = createNonce();
-  const styleContent = loadWebviewStyleContent(extensionUri);
-  const scriptContent = loadWebviewScriptContent(extensionUri);
+  const mediaRootUri = vscode.Uri.joinPath(extensionUri, 'media');
+  const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(mediaRootUri, 'imageDetails.css'));
+  const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(mediaRootUri, 'imageDetails.js'));
 
   const rows = [
     ['Name', details.fileName],
@@ -101,19 +80,18 @@ export function buildCustomEditorWebview(
     ['Color space', details.space],
     ['Channels', String(details.channels)],
     ['Alpha channel', details.hasAlpha ? 'Yes' : 'No'],
-    ['DPI', details.density ? String(details.density) : 'N/A'],
-    ['Dominant color', `${details.dominantColorHex} (${details.dominantColorRgb})`]
+    ['DPI', details.density ? String(details.density) : 'N/A']
   ];
 
-  const tableRows = rows
+  const tableRows = `${rows
     .map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(value)}</td></tr>`)
-    .join('');
+    .join('')}<tr><th>Dominant color</th><td id="dominant-color-table">${escapeHtml(details.dominantColorHex)} (${escapeHtml(details.dominantColorRgb)})</td></tr>`;
 
   const contentSecurityPolicy = [
     "default-src 'none'",
     `img-src ${webview.cspSource} data:`,
     `style-src ${webview.cspSource} 'unsafe-inline'`,
-    `script-src 'nonce-${nonce}'`
+    `script-src ${webview.cspSource}`
   ].join('; ');
 
   // Extract the file extension with a leading dot (lowercase).
@@ -153,10 +131,17 @@ export function buildCustomEditorWebview(
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Content-Security-Policy" content="${contentSecurityPolicy}" />
   <title>Image Details</title>
-  <style>${styleContent}</style>
+  <link rel="stylesheet" href="${escapeHtml(styleUri.toString())}" />
 </head>
 <body>
-  <div class="layout" style="--dominant-color: ${escapeHtml(details.dominantColorHex)}; --toolbar-green-accent-rgb: ${escapeHtml(themeAccentRgb)};">
+  <div
+    class="layout"
+    style="--dominant-color: ${escapeHtml(details.dominantColorHex)}; --toolbar-green-accent-rgb: ${escapeHtml(themeAccentRgb)};"
+    data-loupe-diameter="${String(loupeDiameter)}"
+    data-loupe-virtual-resolution="${String(loupeVirtualResolution)}"
+    data-loupe-zoom-at-min-image-zoom="${String(loupeZoomAtMinImageZoom)}"
+    data-loupe-zoom-at-max-image-zoom="${String(loupeZoomAtMaxImageZoom)}"
+  >
     <section class="preview">
       <div class="${toolbarClass}" aria-label="Zoom controls">
         <button id="zoom-out" type="button" title="Zoom -" aria-label="Zoom -">
@@ -215,7 +200,7 @@ export function buildCustomEditorWebview(
           <span class="drag-title">Image info</span>
         </div>
         <div class="meta-row compact">
-          <span><span class="color-chip"></span>${escapeHtml(details.dominantColorHex)}</span>
+          <span><span class="color-chip"></span><span id="dominant-color-meta">${escapeHtml(details.dominantColorHex)}</span></span>
           <span class="badge ${extClass}">${extLabel}</span>
           <span class="badge">${details.width} × ${details.height}</span>
           ${hasIcoGallery ? `<span id="selected-ico-size" class="badge">Selected size: ${escapeHtml(initialIcoVariantLabel)}</span>` : ''}
@@ -244,14 +229,14 @@ export function buildCustomEditorWebview(
           <div id="compare-divider" class="compare-divider${hasComparisonImage ? '' : ' is-hidden'}" aria-hidden="true"></div>
           <canvas id="pipette-canvas" style="display:none;"></canvas>
           <div id="pipette-color-result" style="display:none;position:absolute;z-index:10;background:#fff;padding:4px;border-radius:4px;border:1px solid #ccc;font-size:12px;"></div>
-          <canvas id="pipette-zoom-loupe" width="64" height="64" data-loupe-diameter="${String(loupeDiameter)}" data-loupe-virtual-resolution="${String(loupeVirtualResolution)}" data-loupe-zoom-at-min-image-zoom="${String(loupeZoomAtMinImageZoom)}" data-loupe-zoom-at-max-image-zoom="${String(loupeZoomAtMaxImageZoom)}" style="display:none;position:fixed;pointer-events:none;z-index:20;filter:drop-shadow(0 2px 6px #0006);"></canvas>
+          <canvas id="pipette-zoom-loupe" width="64" height="64" style="display:none;position:fixed;pointer-events:none;z-index:20;filter:drop-shadow(0 2px 6px #0006);"></canvas>
         </div>
       </div>
       ${icoGalleryMarkup}
       <div id="zoom-selection-box" class="zoom-selection-box" aria-hidden="true"></div>
     </section>
   </div>
-  <script nonce="${nonce}">${scriptContent}</script>
+  <script src="${escapeHtml(scriptUri.toString())}"></script>
 </body>
 </html>`;
 }
@@ -300,68 +285,3 @@ function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;');
 }
 
-/**
- * Creates a random nonce value for CSP script authorization.
- *
- * @returns Nonce string.
- */
-function createNonce(): string {
-  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let nonce = '';
-
-  for (let index = 0; index < 32; index += 1) {
-    const randomIndex = Math.floor(Math.random() * alphabet.length);
-    nonce += alphabet[randomIndex];
-  }
-
-  return nonce;
-}
-
-/**
- * Loads the webview JavaScript from the extension media folder.
- *
- * @param extensionUri Extension root URI.
- * @returns Script content safe for inline injection.
- */
-function loadWebviewScriptContent(extensionUri: vscode.Uri): string {
-  ensureMediaCacheRoot(extensionUri);
-
-  if (cachedMediaRoot === extensionUri.fsPath && cachedScriptContent !== undefined) {
-    return cachedScriptContent;
-  }
-
-  const scriptPath = path.join(extensionUri.fsPath, 'media', 'imageDetails.js');
-
-  try {
-    const script = fs.readFileSync(scriptPath, 'utf8');
-    cachedScriptContent = script.replace(/<\/script>/gi, '<\\/script>');
-    return cachedScriptContent;
-  } catch {
-    cachedScriptContent = '';
-    return '';
-  }
-}
-
-/**
- * Loads the webview stylesheet from the extension media folder.
- *
- * @param extensionUri Extension root URI.
- * @returns Stylesheet content safe for inline injection.
- */
-function loadWebviewStyleContent(extensionUri: vscode.Uri): string {
-  ensureMediaCacheRoot(extensionUri);
-
-  if (cachedMediaRoot === extensionUri.fsPath && cachedStyleContent !== undefined) {
-    return cachedStyleContent;
-  }
-
-  const stylePath = path.join(extensionUri.fsPath, 'media', 'imageDetails.css');
-
-  try {
-    cachedStyleContent = fs.readFileSync(stylePath, 'utf8');
-    return cachedStyleContent;
-  } catch {
-    cachedStyleContent = '';
-    return '';
-  }
-}
