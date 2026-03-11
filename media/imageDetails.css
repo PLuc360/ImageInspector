@@ -151,11 +151,19 @@ body {
   position: absolute;
   top: 0;
   left: 0;
-  width: 2px;
+  width: 8px;
   height: 0;
-  background: var(--vscode-focusBorder);
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
-  pointer-events: none;
+  background: linear-gradient(
+    to right,
+    transparent calc(50% - 1px),
+    rgb(var(--toolbar-green-accent-rgb)) calc(50% - 1px),
+    rgb(var(--toolbar-green-accent-rgb)) calc(50% + 1px),
+    transparent calc(50% + 1px)
+  );
+  box-shadow: 0 0 0 1px rgba(var(--toolbar-green-accent-rgb), 0.28);
+  pointer-events: auto;
+  touch-action: none;
+  cursor: col-resize;
   z-index: 3;
 }
 
@@ -163,7 +171,15 @@ body {
   left: 0;
   top: 0;
   width: 0;
-  height: 2px;
+  height: 8px;
+  background: linear-gradient(
+    to bottom,
+    transparent calc(50% - 1px),
+    rgb(var(--toolbar-green-accent-rgb)) calc(50% - 1px),
+    rgb(var(--toolbar-green-accent-rgb)) calc(50% + 1px),
+    transparent calc(50% + 1px)
+  );
+  cursor: row-resize;
 }
 
 .compare-divider.is-hidden {
@@ -331,8 +347,47 @@ body {
   color: var(--vscode-button-secondaryForeground);
   border-radius: 999px;
   height: 26px;
-  padding: 0 10px;
+  width: 26px;
+  padding: 0;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.compare-controls .icon {
+  font-size: 0.82rem;
+  line-height: 1;
+}
+
+.compare-controls .icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.compare-pick-button:hover,
+.compare-orientation-button:hover {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.compare-pick-button:focus-visible,
+.compare-orientation-button:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+}
+
+.compare-orientation-button.is-active {
+  background: var(--toolbar-green-accent-bg);
+  border-color: var(--toolbar-green-accent-border);
+  color: var(--vscode-foreground);
+}
+
+.compare-orientation-button.is-active:hover {
+  background: var(--toolbar-green-accent-bg-hover);
+}
+
+.compare-controls button.click-halo {
+  animation: toolbar-click-halo 240ms ease-out;
 }
 
 .compare-controls input[type='range'] {

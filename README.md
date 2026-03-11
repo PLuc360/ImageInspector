@@ -1,62 +1,419 @@
-# ImageInspector
+# Image Inspector (English)
 
-VS Code extension to inspect images directly in the editor.
+Image Inspector is a VS Code extension that opens images in a dedicated custom editor to inspect visual content and metadata side by side.
 
-## Main Features
-- Display image metadata (dimensions, size, format, color space, alpha, dominant color)
-- Quick preview in an integrated webview
-- Advanced zoom (toolbar, selection, keyboard shortcuts)
-- Generate test images via a Node.js script
+Current version: 1.5.0
+
+## Highlights
+
+- Integrated image preview in a VS Code custom editor
+- Key metadata: dimensions, file size, format, color space, channels, alpha, DPI, dominant color
+- Advanced zoom workflow: toolbar, keyboard shortcuts, wheel zoom, fit mode, selection zoom
+- Color picker tool with pixel loupe and live pixel info (position + color)
+- Overview minimap with current viewport rectangle and click/drag recentering
+- Before/after comparison mode with an interactive split divider
+- Advanced ICO support with internal variant gallery when available
+- Automatic webview refresh when the source image file changes
+- User customization options (toolbar position, accent color, loupe settings)
+
+## Supported formats
+
+Supported extensions:
+
+- png
+- jpg
+- jpeg
+- webp
+- gif
+- bmp
+- tif
+- tiff
+- avif
+- ico
+- svg
+- heic
+- heif
+
+Compatibility notes:
+
+- tif/tiff/heic/heif files are converted to PNG for webview rendering.
+- HEIC/HEIF decoding depends on native sharp support available on your environment.
 
 ## Installation
+
+### From source
+
 1. Clone the repository:
-	```sh
-	git clone <repo-url>
-	cd ImageInspector
-	```
-2. Install dependencies:
-	```sh
-	npm install
-	```
-3. Build the extension:
-	```sh
-	npm run compile
-	```
-4. Open in VS Code and launch the extension in development mode (`F5`).
 
-## Usage
-1. Open a supported image (`png`, `jpg`, `jpeg`, `webp`, `gif`, `bmp`, `tif`, `tiff`, `avif`, `ico`, `svg`, `heic`, `heif`).
-2. The custom editor opens by default with the image on the left and details on the right.
-
-Available command: **Image Inspector: Open with Details**.
-
-## Zoom
-- Toolbar buttons: `+`, `-`, `100%`, `Fit`
-- Selection zoom: click the `▭` button then drag a region
-- Mouse wheel + `Ctrl`: zoom in/out
-- Keyboard shortcuts: `Ctrl/Cmd +`, `Ctrl/Cmd -`, `Ctrl/Cmd 0`
-- `F` key: return to `Fit` mode
-
-## Generate test images
-A script is provided to generate test images in the `test-images/` folder:
 ```sh
-node scripts/generate-test-images.mjs
+git clone https://github.com/PLuc360/ImageInspector.git
+cd ImageInspector
 ```
 
-## Project structure
-- `src/extension.ts`: extension entry point
-- `src/webview/`: webview logic (display, HTML builders)
-- `media/`: static resources (JS, CSS)
-- `assets/`: other resources
-- `scripts/`: utility scripts (image generation)
-- `test-images/`: test images
+2. Install dependencies:
 
-## Development
 ```sh
 npm install
+```
+
+3. Build the extension:
+
+```sh
 npm run compile
 ```
-Then press `F5` to launch an Extension Development Host window.
+
+4. Press F5 in VS Code to start an Extension Development Host.
+
+### From local VSIX package
+
+The workspace also includes a local VSIX package (example: image-inspector-1.5.0.vsix) that can be installed directly from VS Code.
+
+## Usage
+
+1. Open a supported image from the VS Code Explorer.
+2. The Image Inspector custom editor opens by default.
+3. Use the toolbar to zoom, enable the color picker, toggle the info panel, or compare with another image.
+
+Main command:
+
+- Image Inspector: Open with Details
+
+## Available commands
+
+- Image Inspector: Open with Details
+- Image Inspector: Zoom +
+- Image Inspector: Zoom -
+- Image Inspector: Zoom 100%
+- Image Inspector: Zoom Fit
+- Image Inspector: Set Comparison Image
+
+## Keyboard shortcuts
+
+Active when the Image Inspector custom editor is focused:
+
+- Ctrl/Cmd + = or Numpad Add: zoom in
+- Ctrl/Cmd + - or Numpad Subtract: zoom out
+- Ctrl/Cmd + 0: reset zoom to 100%
+
+Webview shortcut:
+
+- F: return to fit mode
+
+## Detailed features
+
+### Zoom and navigation
+
+- Incremental zoom with + and - controls
+- Press-and-hold on + and - for continuous zoom
+- Panning when zoom exceeds visible area
+- Rectangle-based zoom selection
+- Fit / Reset 100%
+
+### Info panel
+
+- Draggable metadata panel
+- Local persistence for panel visibility and position
+- Overview minimap of visible image area
+
+### Color picker
+
+- Reads pixel color under cursor
+- Magnified loupe around pointer
+- Live display of coordinates (x, y) and picked color
+
+### Before/after comparison
+
+- Pick a comparison image from the toolbar or dedicated command
+- Interactive split slider
+- Vertical/horizontal split orientation
+- Safety check: comparison requires matching width and height
+
+### ICO handling
+
+- ICO entry parsing support
+- Variant gallery when ICO internal entries are PNG payloads
+- Variant selection updates the main preview
+
+## Configuration
+
+Available user settings:
+
+- imageInspector.toolbarPosition
+  - Values: top, bottom, left, right
+  - Default: top
+- imageInspector.themeAccentColor
+  - Format: #RRGGBB
+  - Default: #00C86E
+- imageInspector.pipetteLoupeDiameter
+  - Default: 96
+  - Min/Max: 48 / 256
+- imageInspector.pipetteLoupeVirtualResolution
+  - Default: 25
+  - Min/Max: 5 / 101
+- imageInspector.pipetteLoupeZoomAtMinImageZoom
+  - Default: 6
+- imageInspector.pipetteLoupeZoomAtMaxImageZoom
+  - Default: 1
+
+## Project architecture
+
+- src/extension.ts
+  - Extension activation
+  - Custom editor and command registration
+  - Image metadata extraction via sharp
+  - Runtime preview conversion for specific formats
+  - Bounded runtime caches (converted previews and ICO data)
+- src/webview/htmlBuilders.ts
+  - Webview HTML builders
+- media/imageDetails.js
+  - UI interactions (zoom, picker, comparison, minimap, overlay)
+- media/imageDetails.css
+  - Webview styles
+
+## Development
+
+Prerequisites:
+
+- Node.js (version compatible with project dependencies)
+- VS Code 1.90.0+
+
+Scripts:
+
+```sh
+npm run compile
+npm run watch
+npm run lint
+```
+
+Recommended flow:
+
+1. npm install
+2. npm run compile
+3. Press F5 in VS Code to start Extension Development Host
+
+## Recent updates
+
+Version 1.5.0 notably includes:
+
+- before/after comparison mode
+- Set Comparison Image command
+- bounded performance caches (converted previews and ICO)
+- customizable accent color
+- Open with Details command registration fix
+
+See CHANGELOG.md for full release notes.
 
 ## License
-See LICENSE file.
+
+This project is distributed under the MIT License. See LICENSE.
+
+---
+
+# Image Inspector
+
+Image Inspector est une extension VS Code qui ouvre les images dans un éditeur personnalisé pour inspecter visuellement les fichiers et leurs métadonnées.
+
+Version actuelle: 1.5.0
+
+## Points forts
+
+- Aperçu image intégré dans un custom editor VS Code
+- Métadonnées principales: dimensions, taille, format, espace colorimétrique, canaux, alpha, DPI, couleur dominante
+- Zoom avancé: boutons, raccourcis clavier, molette, fit, zoom de sélection
+- Outil pipette avec loupe pixel et informations en direct (coordonnées + couleur)
+- Mini-carte (overview) avec rectangle de viewport et recentrage par clic/glisser
+- Mode comparaison avant/après avec séparateur interactif
+- Support ICO avancé: galerie des variantes internes quand disponibles
+- Rafraîchissement automatique du webview lors de la modification du fichier image
+- Paramètres de personnalisation (position toolbar, couleur d'accent, réglages de loupe)
+
+## Formats supportés
+
+Extensions prises en charge:
+
+- png
+- jpg
+- jpeg
+- webp
+- gif
+- bmp
+- tif
+- tiff
+- avif
+- ico
+- svg
+- heic
+- heif
+
+Notes de compatibilité:
+
+- Les fichiers tif/tiff/heic/heif sont convertis en PNG pour l'aperçu webview.
+- Le décodage HEIC/HEIF dépend des bibliothèques natives disponibles pour sharp selon l'environnement.
+
+## Installation
+
+### Depuis les sources
+
+1. Cloner le dépôt:
+
+```sh
+git clone https://github.com/PLuc360/ImageInspector.git
+cd ImageInspector
+```
+
+2. Installer les dépendances:
+
+```sh
+npm install
+```
+
+3. Compiler:
+
+```sh
+npm run compile
+```
+
+4. Lancer en mode développement dans VS Code avec F5.
+
+### Depuis un package VSIX local
+
+Le projet contient aussi un package VSIX local (exemple: image-inspector-1.5.0.vsix) qui peut être installé via VS Code.
+
+## Utilisation
+
+1. Ouvrir une image supportée depuis l'explorateur VS Code.
+2. L'éditeur personnalisé Image Inspector s'ouvre (priorité par défaut).
+3. Utiliser la toolbar pour zoomer, activer la pipette, afficher/masquer le panneau info, ou comparer deux images.
+
+Commande principale:
+
+- Image Inspector: Open with Details
+
+## Commandes disponibles
+
+- Image Inspector: Open with Details
+- Image Inspector: Zoom +
+- Image Inspector: Zoom -
+- Image Inspector: Zoom 100%
+- Image Inspector: Zoom Fit
+- Image Inspector: Set Comparison Image
+
+## Raccourcis clavier
+
+Actifs quand le custom editor Image Inspector est focus:
+
+- Ctrl/Cmd + = ou Numpad Add: zoom avant
+- Ctrl/Cmd + - ou Numpad Subtract: zoom arrière
+- Ctrl/Cmd + 0: zoom 100%
+
+Raccourcis dans le webview:
+
+- F: retour en mode Fit
+
+## Fonctionnalités détaillées
+
+### Zoom et navigation
+
+- Zoom progressif avec boutons + et -
+- Press-and-hold sur + et - pour zoom continu
+- Pan (déplacement) dans l'image quand le zoom dépasse la zone visible
+- Zoom de sélection via rectangle
+- Fit / Reset 100%
+
+### Panneau d'information
+
+- Panneau draggable affichant les métadonnées
+- Mémorisation locale de la visibilité et de la position du panneau
+- Aperçu mini-carte de la zone visible (overview map)
+
+### Pipette
+
+- Lecture couleur pixel sous le curseur
+- Loupe zoomée autour du curseur
+- Affichage en direct de la position (x, y) et de la valeur couleur
+
+### Comparaison avant/après
+
+- Sélection d'une image de comparaison depuis la toolbar ou la commande dédiée
+- Slider de séparation interactif
+- Orientation verticale ou horizontale
+- Vérification de sécurité: dimensions identiques requises entre image principale et image de comparaison
+
+### Gestion ICO
+
+- Détection des entrées ICO
+- Galerie des variantes quand les entrées internes sont en PNG
+- Sélection de variante avec mise à jour de l'aperçu
+
+## Configuration
+
+Paramètres utilisateur disponibles:
+
+- imageInspector.toolbarPosition
+  - Valeurs: top, bottom, left, right
+  - Défaut: top
+- imageInspector.themeAccentColor
+  - Format: #RRGGBB
+  - Défaut: #00C86E
+- imageInspector.pipetteLoupeDiameter
+  - Défaut: 96
+  - Min/Max: 48 / 256
+- imageInspector.pipetteLoupeVirtualResolution
+  - Défaut: 25
+  - Min/Max: 5 / 101
+- imageInspector.pipetteLoupeZoomAtMinImageZoom
+  - Défaut: 6
+- imageInspector.pipetteLoupeZoomAtMaxImageZoom
+  - Défaut: 1
+
+## Architecture du projet
+
+- src/extension.ts
+  - Activation de l'extension
+  - Enregistrement du custom editor et des commandes
+  - Lecture des métadonnées image via sharp
+  - Conversion d'aperçu pour certains formats
+  - Mise en cache bornée (aperçus convertis et données ICO)
+- src/webview/htmlBuilders.ts
+  - Construction HTML du webview
+- media/imageDetails.js
+  - Interactions UI (zoom, pipette, comparaison, minimap, overlay)
+- media/imageDetails.css
+  - Styles du webview
+
+## Développement
+
+Prérequis:
+
+- Node.js (version compatible avec les dépendances du projet)
+- VS Code 1.90.0 ou plus
+
+Scripts:
+
+```sh
+npm run compile
+npm run watch
+npm run lint
+```
+
+Cycle recommandé:
+
+1. npm install
+2. npm run compile
+3. F5 dans VS Code pour ouvrir un Extension Development Host
+
+## Historique récent
+
+La version 1.5.0 apporte notamment:
+
+- mode comparaison avant/après
+- commande Set Comparison Image
+- caches bornés pour performances (aperçus convertis et ICO)
+- personnalisation de la couleur d'accent
+- correctif de la commande Open with Details
+
+Consulter CHANGELOG.md pour le détail complet.
+
+## Licence
+
+Ce projet est distribué sous licence MIT. Voir LICENSE.

@@ -108,6 +108,10 @@ let selectionStartClientY = 0;
 let compareEnabled = false;
 let compareSplitPercent = 50;
 let compareOrientation = 'vertical';
+let isDraggingCompareDivider = false;
+let compareDividerPointerId = null;
+const COMPARE_ORIENTATION_VERTICAL_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:inline;vertical-align:middle"><rect x="3" y="3" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.4"/><path d="M10 4v12" stroke="currentColor" stroke-width="1.4"/></svg>';
+const COMPARE_ORIENTATION_HORIZONTAL_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:inline;vertical-align:middle"><rect x="3" y="3" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.4"/><path d="M4 10h12" stroke="currentColor" stroke-width="1.4"/></svg>';
 
 function updateSelectionModeUi() {
   if (!preview || !zoomSelectButton) {
@@ -133,6 +137,20 @@ function hasComparisonImage() {
   return Boolean(compareImage?.getAttribute('src'));
 }
 
+function getCompareOrientationButtonState() {
+  if (compareOrientation === 'vertical') {
+    return {
+      iconSvg: COMPARE_ORIENTATION_VERTICAL_ICON_SVG,
+      title: 'Switch to horizontal split'
+    };
+  }
+
+  return {
+    iconSvg: COMPARE_ORIENTATION_HORIZONTAL_ICON_SVG,
+    title: 'Switch to vertical split'
+  };
+}
+
 function updateCompareControlsUi() {
   const available = hasComparisonImage();
   const shouldShowControls = available || compareEnabled;
@@ -144,7 +162,15 @@ function updateCompareControlsUi() {
   }
 
   if (compareOrientationButton) {
-    compareOrientationButton.textContent = compareOrientation === 'vertical' ? 'Vertical' : 'Horizontal';
+    const orientationButtonState = getCompareOrientationButtonState();
+    compareOrientationButton.dataset.orientation = compareOrientation;
+    compareOrientationButton.setAttribute('aria-label', orientationButtonState.title);
+    compareOrientationButton.classList.toggle('is-active', compareOrientation === 'horizontal');
+
+    const iconElement = compareOrientationButton.querySelector('.icon');
+    if (iconElement) {
+      iconElement.innerHTML = orientationButtonState.iconSvg;
+    }
   }
 }
 
@@ -175,22 +201,71 @@ function applyCompareSplit() {
   compareImage.style.height = `${String(renderedHeight)}px`;
 
   const clampedSplit = clamp(compareSplitPercent, 0, 100);
+  const dividerHitSize = 8;
+  const halfDividerHitSize = dividerHitSize / 2;
   const splitX = image.offsetLeft + (renderedWidth * clampedSplit) / 100;
   const splitY = image.offsetTop + (renderedHeight * clampedSplit) / 100;
 
   if (compareOrientation === 'vertical') {
     compareImage.style.clipPath = `inset(0 ${String(100 - clampedSplit)}% 0 0)`;
-    compareDivider.style.left = `${String(splitX)}px`;
+    compareDivider.style.left = `${String(splitX - halfDividerHitSize)}px`;
     compareDivider.style.top = `${String(image.offsetTop)}px`;
     compareDivider.style.height = `${String(renderedHeight)}px`;
-    compareDivider.style.width = '2px';
+    compareDivider.style.width = `${String(dividerHitSize)}px`;
   } else {
     compareImage.style.clipPath = `inset(0 0 ${String(100 - clampedSplit)}% 0)`;
-    compareDivider.style.top = `${String(splitY)}px`;
+    compareDivider.style.top = `${String(splitY - halfDividerHitSize)}px`;
     compareDivider.style.left = `${String(image.offsetLeft)}px`;
     compareDivider.style.width = `${String(renderedWidth)}px`;
-    compareDivider.style.height = '2px';
+    compareDivider.style.height = `${String(dividerHitSize)}px`;
   }
+}
+
+function syncCompareSliderToSplitPercent() {
+  if (!compareSlider) {
+    return;
+  }
+
+  compareSlider.value = String(Math.round(clamp(compareSplitPercent, 0, 100)));
+}
+
+function updateCompareSplitFromClientPosition(clientX, clientY) {
+  if (!image || !compareEnabled || !hasComparisonImage()) {
+    return;
+  }
+
+  const imageRect = image.getBoundingClientRect();
+  if (imageRect.width <= 0 || imageRect.height <= 0) {
+    return;
+  }
+
+  let nextSplitPercent = compareSplitPercent;
+  if (compareOrientation === 'vertical') {
+    nextSplitPercent = ((clientX - imageRect.left) / imageRect.width) * 100;
+  } else {
+    nextSplitPercent = ((clientY - imageRect.top) / imageRect.height) * 100;
+  }
+
+  compareSplitPercent = clamp(nextSplitPercent, 0, 100);
+  syncCompareSliderToSplitPercent();
+  applyCompareSplit();
+}
+
+function endCompareDividerDrag(pointerId) {
+  if (!isDraggingCompareDivider) {
+    return;
+  }
+
+  if (compareDividerPointerId !== null && compareDivider?.hasPointerCapture(compareDividerPointerId)) {
+    compareDivider.releasePointerCapture(compareDividerPointerId);
+  }
+
+  if (pointerId !== undefined && compareDividerPointerId !== pointerId) {
+    return;
+  }
+
+  isDraggingCompareDivider = false;
+  compareDividerPointerId = null;
 }
 
 function setCompareEnabled(isEnabled) {
@@ -225,6 +300,7 @@ function clearComparisonImage() {
   compareImage.style.clipPath = '';
   compareImage.classList.add('is-hidden');
   compareDivider?.classList.add('is-hidden');
+  endCompareDividerDrag();
   compareImageLabel.textContent = 'No comparison image';
   compareEnabled = false;
   updateCompareControlsUi();
@@ -1383,6 +1459,56 @@ compareSlider?.addEventListener('input', () => {
   applyCompareSplit();
 });
 
+compareDivider?.addEventListener('pointerdown', (event) => {
+  if (event.button !== 0 || !compareEnabled || !hasComparisonImage()) {
+    return;
+  }
+
+  isDraggingCompareDivider = true;
+  compareDividerPointerId = event.pointerId;
+  compareDivider.setPointerCapture(event.pointerId);
+  updateCompareSplitFromClientPosition(event.clientX, event.clientY);
+  stopEvent(event);
+});
+
+compareDivider?.addEventListener('pointermove', (event) => {
+  if (!isDraggingCompareDivider || compareDividerPointerId !== event.pointerId) {
+    return;
+  }
+
+  updateCompareSplitFromClientPosition(event.clientX, event.clientY);
+  stopEvent(event);
+});
+
+compareDivider?.addEventListener('pointerup', (event) => {
+  if (!isDraggingCompareDivider || compareDividerPointerId !== event.pointerId) {
+    return;
+  }
+
+  endCompareDividerDrag(event.pointerId);
+  stopEvent(event);
+});
+
+compareDivider?.addEventListener('pointercancel', (event) => {
+  if (!isDraggingCompareDivider || compareDividerPointerId !== event.pointerId) {
+    return;
+  }
+
+  endCompareDividerDrag(event.pointerId);
+  stopEvent(event);
+});
+
+compareDivider?.addEventListener('dblclick', (event) => {
+  if (!compareEnabled || !hasComparisonImage()) {
+    return;
+  }
+
+  compareSplitPercent = 50;
+  syncCompareSliderToSplitPercent();
+  applyCompareSplit();
+  stopEvent(event);
+});
+
 zoomToolbar?.addEventListener('pointerdown', (event) => {
   event.stopPropagation();
 });
@@ -1413,6 +1539,34 @@ zoomToolbar?.addEventListener('click', (event) => {
   }
 
   showToolbarClickHalo(toolbarButton);
+}, true);
+
+compareControls?.addEventListener('pointerdown', (event) => {
+  const compareButton = event.target instanceof Element
+    ? event.target.closest('button')
+    : null;
+
+  if (!compareButton) {
+    return;
+  }
+
+  showToolbarClickHalo(compareButton);
+}, true);
+
+compareControls?.addEventListener('click', (event) => {
+  if (event.detail !== 0) {
+    return;
+  }
+
+  const compareButton = event.target instanceof Element
+    ? event.target.closest('button')
+    : null;
+
+  if (!compareButton) {
+    return;
+  }
+
+  showToolbarClickHalo(compareButton);
 }, true);
 
 infoOverlay?.addEventListener('pointerdown', (event) => {
@@ -1467,6 +1621,10 @@ window.addEventListener('pointercancel', (event) => {
 window.addEventListener('blur', () => {
   if (isDraggingOverlay) {
     endOverlayDrag();
+  }
+
+  if (isDraggingCompareDivider) {
+    endCompareDividerDrag();
   }
 });
 

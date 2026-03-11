@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
+## [1.5.1] - 2026-03-11
+### Added
+- Added icon-only comparison control buttons (pick image and split orientation) for a cleaner toolbar.
+- Added direct drag interaction on the comparison divider: click and hold the divider on the image to move the split.
+- Added divider double-click behavior to quickly reset split position to 50%.
+
+### Changed
+- Updated comparison controls button visuals to match the main toolbar behavior (hover/focus/active states and click halo).
+- Updated comparison orientation icon rendering to switch dynamically between vertical and horizontal split states.
+- Enlarged the divider hit area for easier grabbing while keeping a thin visible separation line.
+- Aligned comparison divider color with the extension theme accent color.
+
+
 ## [1.5.0] - 2026-03-10
 ### Added
 - Added a before/after comparison mode in the image webview with a split slider and a visual divider.

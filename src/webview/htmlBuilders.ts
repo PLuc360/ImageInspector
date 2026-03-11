@@ -190,8 +190,22 @@ export function buildCustomEditorWebview(
         <span id="zoom-label" class="zoom-label">Fit</span>
       </div>
       <div id="compare-controls" class="compare-controls${hasComparisonImage ? '' : ' is-hidden'}" aria-label="Comparison controls">
-        <button id="compare-pick" type="button" class="compare-pick-button" title="Choose comparison image" aria-label="Choose comparison image">Pick</button>
-        <button id="compare-orientation" type="button" class="compare-orientation-button" title="Toggle split orientation" aria-label="Toggle split orientation">Vertical</button>
+        <button id="compare-pick" type="button" class="compare-pick-button" aria-label="Choose comparison image">
+          <span class="icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:inline;vertical-align:middle">
+              <path d="M3.25 5.75a1.5 1.5 0 0 1 1.5-1.5h4.1l1.2 1.5h5.2a1.5 1.5 0 0 1 1.5 1.5v7a1.5 1.5 0 0 1-1.5 1.5H4.75a1.5 1.5 0 0 1-1.5-1.5v-8.5z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+              <path d="M10 8.1v4M8 10.1h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+            </svg>
+          </span>
+        </button>
+        <button id="compare-orientation" type="button" class="compare-orientation-button" aria-label="Switch to horizontal split" data-orientation="vertical">
+          <span class="icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:inline;vertical-align:middle">
+              <rect x="3" y="3" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.4"/>
+              <path d="M10 4v12" stroke="currentColor" stroke-width="1.4"/>
+            </svg>
+          </span>
+        </button>
         <input id="compare-slider" type="range" min="0" max="100" value="50" step="1" aria-label="Comparison split" />
         <span id="compare-image-label" class="compare-image-label">${hasComparisonImage ? escapeHtml(comparisonImageLabel) : 'No comparison image'}</span>
       </div>
