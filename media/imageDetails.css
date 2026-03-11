@@ -110,6 +110,7 @@ body {
 }
 
 .preview-body {
+  position: relative;
   min-height: 100%;
   min-width: 100%;
   width: max-content;
@@ -132,6 +133,41 @@ body {
   flex-shrink: 0;
   max-width: none;
   max-height: none;
+}
+
+.compare-image {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.compare-image.is-hidden {
+  display: none;
+}
+
+.compare-divider {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 2px;
+  height: 0;
+  background: var(--vscode-focusBorder);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  z-index: 3;
+}
+
+.compare-divider.is-horizontal {
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 2px;
+}
+
+.compare-divider.is-hidden {
+  display: none;
 }
 
 .zoom-toolbar {
@@ -222,14 +258,18 @@ body {
 }
 
 .zoom-toolbar #zoom-select.is-active,
-.zoom-toolbar #pipette-tool.is-active {
+.zoom-toolbar #pipette-tool.is-active,
+.zoom-toolbar #compare-tool.is-active,
+.zoom-toolbar #info-toggle.is-active {
   background: var(--toolbar-green-accent-bg);
   border-color: var(--toolbar-green-accent-border);
   color: var(--vscode-foreground);
 }
 
 .zoom-toolbar #zoom-select.is-active:hover,
-.zoom-toolbar #pipette-tool.is-active:hover {
+.zoom-toolbar #pipette-tool.is-active:hover,
+.zoom-toolbar #compare-tool.is-active:hover,
+.zoom-toolbar #info-toggle.is-active:hover {
   background: var(--toolbar-green-accent-bg-hover);
 }
 
@@ -262,6 +302,113 @@ body {
   color: var(--vscode-descriptionForeground);
   font-variant-numeric: tabular-nums;
   font-size: 0.82rem;
+}
+
+.compare-controls {
+  position: absolute;
+  left: 50%;
+  top: 48px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(820px, calc(100% - 32px));
+  padding: 6px 10px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 999px;
+  background: var(--vscode-editorWidget-background);
+  z-index: 4;
+}
+
+.compare-controls.is-hidden {
+  display: none;
+}
+
+.compare-pick-button,
+.compare-orientation-button {
+  border: 1px solid var(--vscode-button-border, transparent);
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+  border-radius: 999px;
+  height: 26px;
+  padding: 0 10px;
+  cursor: pointer;
+}
+
+.compare-controls input[type='range'] {
+  width: min(280px, 36vw);
+  accent-color: rgb(var(--toolbar-green-accent-rgb));
+  appearance: none;
+  -webkit-appearance: none;
+  height: 18px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.compare-controls input[type='range']:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 2px;
+  border-radius: 999px;
+}
+
+/* WebKit / Chromium */
+.compare-controls input[type='range']::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    rgba(var(--toolbar-green-accent-rgb), 0.95) 0%,
+    rgba(var(--toolbar-green-accent-rgb), 0.75) 100%
+  );
+}
+
+.compare-controls input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border: 1px solid rgba(var(--toolbar-green-accent-rgb), 0.9);
+  border-radius: 50%;
+  background: var(--vscode-editor-background);
+  box-shadow: 0 0 0 2px rgba(var(--toolbar-green-accent-rgb), 0.28);
+}
+
+.compare-controls input[type='range']:hover::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px rgba(var(--toolbar-green-accent-rgb), 0.32);
+}
+
+/* Firefox */
+.compare-controls input[type='range']::-moz-range-track {
+  height: 4px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    rgba(var(--toolbar-green-accent-rgb), 0.95) 0%,
+    rgba(var(--toolbar-green-accent-rgb), 0.75) 100%
+  );
+}
+
+.compare-controls input[type='range']::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 1px solid rgba(var(--toolbar-green-accent-rgb), 0.9);
+  border-radius: 50%;
+  background: var(--vscode-editor-background);
+  box-shadow: 0 0 0 2px rgba(var(--toolbar-green-accent-rgb), 0.28);
+}
+
+.compare-controls input[type='range']:hover::-moz-range-thumb {
+  box-shadow: 0 0 0 3px rgba(var(--toolbar-green-accent-rgb), 0.32);
+}
+
+.compare-image-label {
+  color: var(--vscode-descriptionForeground);
+  font-size: 0.78rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: min(200px, 28vw);
 }
 
 .meta-row {

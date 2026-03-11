@@ -71,6 +71,8 @@ export function buildCustomEditorWebview(
     toolbarPosition?: string;
     themeAccentRgb?: string;
     icoVariants?: IcoVariantViewModel[];
+    comparisonImageSource?: string;
+    comparisonImageLabel?: string;
     pipetteLoupeDiameter?: number;
     pipetteLoupeVirtualResolution?: number;
     pipetteLoupeZoomAtMinImageZoom?: number;
@@ -83,6 +85,9 @@ export function buildCustomEditorWebview(
   const loupeVirtualResolution = options?.pipetteLoupeVirtualResolution ?? 25;
   const loupeZoomAtMinImageZoom = options?.pipetteLoupeZoomAtMinImageZoom ?? 6;
   const loupeZoomAtMaxImageZoom = options?.pipetteLoupeZoomAtMaxImageZoom ?? 1;
+  const comparisonImageSource = options?.comparisonImageSource ?? '';
+  const comparisonImageLabel = options?.comparisonImageLabel ?? '';
+  const hasComparisonImage = comparisonImageSource.length > 0;
   const nonce = createNonce();
   const styleContent = loadWebviewStyleContent(extensionUri);
   const scriptContent = loadWebviewScriptContent(extensionUri);
@@ -179,7 +184,16 @@ export function buildCustomEditorWebview(
         <button id="info-toggle" type="button" title="Show/Hide info" aria-label="Show/Hide info">
           <span class="icon" aria-hidden="true">?</span>
         </button>
+        <button id="compare-tool" type="button" title="Before/after compare" aria-label="Before/after compare" aria-pressed="false">
+          <span class="icon" aria-hidden="true">⇆</span>
+        </button>
         <span id="zoom-label" class="zoom-label">Fit</span>
+      </div>
+      <div id="compare-controls" class="compare-controls${hasComparisonImage ? '' : ' is-hidden'}" aria-label="Comparison controls">
+        <button id="compare-pick" type="button" class="compare-pick-button" title="Choose comparison image" aria-label="Choose comparison image">Pick</button>
+        <button id="compare-orientation" type="button" class="compare-orientation-button" title="Toggle split orientation" aria-label="Toggle split orientation">Vertical</button>
+        <input id="compare-slider" type="range" min="0" max="100" value="50" step="1" aria-label="Comparison split" />
+        <span id="compare-image-label" class="compare-image-label">${hasComparisonImage ? escapeHtml(comparisonImageLabel) : 'No comparison image'}</span>
       </div>
       <aside id="info-overlay" class="info-overlay is-hidden" aria-label="Image information">
         <div id="info-overlay-handle" class="info-overlay-handle" title="Move">
@@ -212,6 +226,8 @@ export function buildCustomEditorWebview(
       <div class="preview-scroll">
         <div class="preview-body">
           <img id="preview-image" src="${imageSource}" alt="${escapeHtml(details.fileName)}" style="image-rendering: pixelated; image-rendering: crisp-edges; -ms-interpolation-mode: nearest-neighbor;" />
+          <img id="compare-image" class="compare-image${hasComparisonImage ? '' : ' is-hidden'}" src="${hasComparisonImage ? escapeHtml(comparisonImageSource) : ''}" alt="Comparison image" style="image-rendering: pixelated; image-rendering: crisp-edges; -ms-interpolation-mode: nearest-neighbor;" />
+          <div id="compare-divider" class="compare-divider${hasComparisonImage ? '' : ' is-hidden'}" aria-hidden="true"></div>
           <canvas id="pipette-canvas" style="display:none;"></canvas>
           <div id="pipette-color-result" style="display:none;position:absolute;z-index:10;background:#fff;padding:4px;border-radius:4px;border:1px solid #ccc;font-size:12px;"></div>
           <canvas id="pipette-zoom-loupe" width="64" height="64" data-loupe-diameter="${String(loupeDiameter)}" data-loupe-virtual-resolution="${String(loupeVirtualResolution)}" data-loupe-zoom-at-min-image-zoom="${String(loupeZoomAtMinImageZoom)}" data-loupe-zoom-at-max-image-zoom="${String(loupeZoomAtMaxImageZoom)}" style="display:none;position:fixed;pointer-events:none;z-index:20;filter:drop-shadow(0 2px 6px #0006);"></canvas>

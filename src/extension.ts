@@ -28,6 +28,23 @@ type ZoomMessage = {
   type: 'zoom-in' | 'zoom-out' | 'zoom-reset' | 'zoom-fit';
 };
 
+type WebviewInboundMessage = {
+  type: 'pick-compare-image';
+} | {
+  type: 'clear-compare-image';
+};
+
+type WebviewOutboundMessage =
+  | ZoomMessage
+  | {
+    type: 'set-compare-image';
+    source: string;
+    label: string;
+  }
+  | {
+    type: 'clear-compare-image';
+  };
+
 const MAX_CONVERTED_PREVIEW_CACHE_ENTRIES = 12;
 const MAX_ICO_CACHE_ENTRIES = 24;
 const DEFAULT_THEME_ACCENT_HEX = '#00C86E';
@@ -128,6 +145,7 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
   private activePanel: vscode.WebviewPanel | undefined;
   private activeDocument: ImageCustomDocument | undefined;
   private readonly refreshDebounceTimers = new Map<string, NodeJS.Timeout>();
+  private readonly comparisonImageByDocumentUri = new Map<string, vscode.Uri>();
 
   /**
    * Builds a stable key used to debounce refreshes per panel/document pair.
@@ -195,9 +213,19 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
       enableScripts: true,
       localResourceRoots: [
         vscode.Uri.joinPath(this.context.extensionUri, 'media'),
-        vscode.Uri.file(path.dirname(document.uri.fsPath))
+        vscode.Uri.file(path.dirname(document.uri.fsPath)),
+        vscode.Uri.file(path.parse(document.uri.fsPath).root)
       ]
     };
+
+    webviewPanel.webview.onDidReceiveMessage((rawMessage: unknown) => {
+      if (!rawMessage || typeof rawMessage !== 'object' || !('type' in rawMessage)) {
+        return;
+      }
+
+      const message = rawMessage as WebviewInboundMessage;
+      void this.handleWebviewMessage(document, webviewPanel, message);
+    }, undefined, this.context.subscriptions);
 
     await this.renderDocument(document, webviewPanel);
   }
@@ -214,11 +242,24 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
     try {
       const details = await getImageDetails(document.uri.fsPath);
       let imageSource = await getWebviewImageSource(document.uri.fsPath, document.uri, webviewPanel.webview, cacheBuster);
+      const comparisonImageUri = this.comparisonImageByDocumentUri.get(document.uri.toString());
       const extension = path.extname(document.uri.fsPath).toLowerCase();
       const icoVariants = extension === '.ico' ? await getIcoGalleryItems(document.uri.fsPath) : [];
+      let comparisonImageSource = '';
+      let comparisonImageLabel = '';
 
       if (icoVariants.length > 0) {
         imageSource = getDefaultIcoVariantSource(icoVariants);
+      }
+
+      if (comparisonImageUri) {
+        comparisonImageSource = await getWebviewImageSource(
+          comparisonImageUri.fsPath,
+          comparisonImageUri,
+          webviewPanel.webview,
+          cacheBuster
+        );
+        comparisonImageLabel = path.basename(comparisonImageUri.fsPath);
       }
 
       webviewPanel.title = details.fileName;
@@ -239,6 +280,8 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
           toolbarPosition,
           themeAccentRgb,
           icoVariants,
+          comparisonImageSource,
+          comparisonImageLabel,
           pipetteLoupeDiameter,
           pipetteLoupeVirtualResolution,
           pipetteLoupeZoomAtMinImageZoom,
@@ -303,6 +346,114 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
   }
 
   /**
+   * Prompts the user to pick a comparison image for the active custom editor.
+   */
+  async promptComparisonImageForActivePanel(): Promise<void> {
+    if (!this.activePanel || !this.activeDocument) {
+      void vscode.window.showInformationMessage('Open an image in Image Inspector first.');
+      return;
+    }
+
+    await this.pickComparisonImage(this.activeDocument, this.activePanel);
+  }
+
+  /**
+   * Handles webview-to-extension messages.
+   *
+   * @param document Active custom document.
+   * @param webviewPanel Active webview panel.
+   * @param message Inbound message payload.
+   */
+  private async handleWebviewMessage(
+    document: ImageCustomDocument,
+    webviewPanel: vscode.WebviewPanel,
+    message: WebviewInboundMessage
+  ): Promise<void> {
+    if (message.type === 'pick-compare-image') {
+      await this.pickComparisonImage(document, webviewPanel);
+      return;
+    }
+
+    if (message.type === 'clear-compare-image') {
+      await this.clearComparisonImage(document, webviewPanel);
+    }
+  }
+
+  /**
+   * Opens a picker and sends a comparison image source to the webview.
+   *
+   * @param document Active custom document.
+   * @param webviewPanel Active webview panel.
+   */
+  private async pickComparisonImage(
+    document: ImageCustomDocument,
+    webviewPanel: vscode.WebviewPanel
+  ): Promise<void> {
+    const selected = await vscode.window.showOpenDialog({
+      canSelectMany: false,
+      openLabel: 'Choose comparison image',
+      filters: {
+        Images: SUPPORTED_IMAGE_FILTER_EXTENSIONS
+      }
+    });
+
+    const comparisonUri = selected?.[0];
+    if (!comparisonUri) {
+      return;
+    }
+
+    const [primaryDetails, comparisonDetails] = await Promise.all([
+      getImageDetails(document.uri.fsPath),
+      getImageDetails(comparisonUri.fsPath)
+    ]);
+
+    if (primaryDetails.width !== comparisonDetails.width || primaryDetails.height !== comparisonDetails.height) {
+      const primarySize = `${String(primaryDetails.width)}x${String(primaryDetails.height)}`;
+      const compareSize = `${String(comparisonDetails.width)}x${String(comparisonDetails.height)}`;
+      void vscode.window.showWarningMessage(
+        `Comparison requires matching dimensions. Current: ${primarySize}, selected: ${compareSize}.`
+      );
+      return;
+    }
+
+    const comparisonSource = await getWebviewImageSource(
+      comparisonUri.fsPath,
+      comparisonUri,
+      webviewPanel.webview,
+      Date.now()
+    );
+
+    this.comparisonImageByDocumentUri.set(document.uri.toString(), comparisonUri);
+
+    const outboundMessage: WebviewOutboundMessage = {
+      type: 'set-compare-image',
+      source: comparisonSource,
+      label: path.basename(comparisonUri.fsPath)
+    };
+
+    await webviewPanel.webview.postMessage(outboundMessage);
+  }
+
+  /**
+   * Clears any currently selected comparison image for one document.
+   *
+   * @param document Active custom document.
+   * @param webviewPanel Active webview panel.
+   */
+  private async clearComparisonImage(
+    document: ImageCustomDocument,
+    webviewPanel: vscode.WebviewPanel
+  ): Promise<void> {
+    this.comparisonImageByDocumentUri.delete(document.uri.toString());
+
+    const outboundMessage: WebviewOutboundMessage = {
+      type: 'clear-compare-image'
+    };
+
+    await webviewPanel.webview.postMessage(outboundMessage);
+  }
+
+  /**
    * Re-renders the active custom editor panel after configuration updates.
    */
   async refreshActivePanelFromConfiguration(): Promise<void> {
@@ -348,6 +499,13 @@ export function activate(context: vscode.ExtensionContext): void {
     await provider.sendZoomMessage({ type: 'zoom-fit' });
   });
 
+  const selectComparisonImageDisposable = vscode.commands.registerCommand(
+    'imageInspector.selectComparisonImage',
+    async () => {
+      await provider.promptComparisonImageForActivePanel();
+    }
+  );
+
   const showImageDetailsDisposable = vscode.commands.registerCommand(
     'imageInspector.showImageDetails',
     async (resource?: vscode.Uri) => {
@@ -379,6 +537,7 @@ export function activate(context: vscode.ExtensionContext): void {
     zoomOutDisposable,
     zoomResetDisposable,
     zoomFitDisposable,
+    selectComparisonImageDisposable,
     configurationChangeDisposable
   );
 }

@@ -1,3 +1,4 @@
+const vscode = typeof acquireVsCodeApi === 'function' ? acquireVsCodeApi() : undefined;
 const pipetteZoomLoupe = document.getElementById('pipette-zoom-loupe');
 const ZOOM_STEP = 0.1;
 const MIN_ZOOM = 0.1;
@@ -54,6 +55,14 @@ const zoomResetButton = document.getElementById('zoom-reset');
 const zoomFitButton = document.getElementById('zoom-fit');
 const zoomSelectButton = document.getElementById('zoom-select');
 const infoToggleButton = document.getElementById('info-toggle');
+const compareToolButton = document.getElementById('compare-tool');
+const comparePickButton = document.getElementById('compare-pick');
+const compareOrientationButton = document.getElementById('compare-orientation');
+const compareControls = document.getElementById('compare-controls');
+const compareSlider = document.getElementById('compare-slider');
+const compareImageLabel = document.getElementById('compare-image-label');
+const compareImage = document.getElementById('compare-image');
+const compareDivider = document.getElementById('compare-divider');
 const zoomSelectionBox = document.getElementById('zoom-selection-box');
 const pipetteButton = document.getElementById('pipette-tool');
 const pipetteCanvas = document.getElementById('pipette-canvas');
@@ -96,6 +105,9 @@ let isSelectingZoomArea = false;
 let selectionPointerId = null;
 let selectionStartClientX = 0;
 let selectionStartClientY = 0;
+let compareEnabled = false;
+let compareSplitPercent = 50;
+let compareOrientation = 'vertical';
 
 function updateSelectionModeUi() {
   if (!preview || !zoomSelectButton) {
@@ -115,6 +127,107 @@ function setSelectionMode(isEnabled) {
   }
 
   updateSelectionModeUi();
+}
+
+function hasComparisonImage() {
+  return Boolean(compareImage?.getAttribute('src'));
+}
+
+function updateCompareControlsUi() {
+  const available = hasComparisonImage();
+  const shouldShowControls = available || compareEnabled;
+  compareControls?.classList.toggle('is-hidden', !shouldShowControls);
+
+  if (compareToolButton) {
+    compareToolButton.classList.toggle('is-active', compareEnabled);
+    compareToolButton.setAttribute('aria-pressed', compareEnabled ? 'true' : 'false');
+  }
+
+  if (compareOrientationButton) {
+    compareOrientationButton.textContent = compareOrientation === 'vertical' ? 'Vertical' : 'Horizontal';
+  }
+}
+
+function applyCompareSplit() {
+  if (!compareImage || !compareDivider || !previewBody || !image || !hasComparisonImage()) {
+    return;
+  }
+
+  if (!compareEnabled) {
+    compareImage.classList.add('is-hidden');
+    compareDivider.classList.add('is-hidden');
+    return;
+  }
+
+  compareImage.classList.remove('is-hidden');
+  compareDivider.classList.remove('is-hidden');
+  compareDivider.classList.toggle('is-horizontal', compareOrientation === 'horizontal');
+
+  const renderedWidth = image.clientWidth;
+  const renderedHeight = image.clientHeight;
+  if (renderedWidth <= 0 || renderedHeight <= 0) {
+    return;
+  }
+
+  compareImage.style.left = `${String(image.offsetLeft)}px`;
+  compareImage.style.top = `${String(image.offsetTop)}px`;
+  compareImage.style.width = `${String(renderedWidth)}px`;
+  compareImage.style.height = `${String(renderedHeight)}px`;
+
+  const clampedSplit = clamp(compareSplitPercent, 0, 100);
+  const splitX = image.offsetLeft + (renderedWidth * clampedSplit) / 100;
+  const splitY = image.offsetTop + (renderedHeight * clampedSplit) / 100;
+
+  if (compareOrientation === 'vertical') {
+    compareImage.style.clipPath = `inset(0 ${String(100 - clampedSplit)}% 0 0)`;
+    compareDivider.style.left = `${String(splitX)}px`;
+    compareDivider.style.top = `${String(image.offsetTop)}px`;
+    compareDivider.style.height = `${String(renderedHeight)}px`;
+    compareDivider.style.width = '2px';
+  } else {
+    compareImage.style.clipPath = `inset(0 0 ${String(100 - clampedSplit)}% 0)`;
+    compareDivider.style.top = `${String(splitY)}px`;
+    compareDivider.style.left = `${String(image.offsetLeft)}px`;
+    compareDivider.style.width = `${String(renderedWidth)}px`;
+    compareDivider.style.height = '2px';
+  }
+}
+
+function setCompareEnabled(isEnabled) {
+  if (!hasComparisonImage()) {
+    compareEnabled = false;
+    updateCompareControlsUi();
+    applyCompareSplit();
+    return;
+  }
+
+  compareEnabled = isEnabled;
+  updateCompareControlsUi();
+  applyCompareSplit();
+}
+
+function setComparisonImage(source, label) {
+  if (!compareImage || !compareImageLabel) {
+    return;
+  }
+
+  compareImage.setAttribute('src', source);
+  compareImageLabel.textContent = label || 'Comparison image';
+  setCompareEnabled(true);
+}
+
+function clearComparisonImage() {
+  if (!compareImage || !compareImageLabel) {
+    return;
+  }
+
+  compareImage.removeAttribute('src');
+  compareImage.style.clipPath = '';
+  compareImage.classList.add('is-hidden');
+  compareDivider?.classList.add('is-hidden');
+  compareImageLabel.textContent = 'No comparison image';
+  compareEnabled = false;
+  updateCompareControlsUi();
 }
 
 function setPipetteMode(isEnabled) {
@@ -928,6 +1041,9 @@ function applyFitSizing() {
   previewBody.style.width = '100%';
   previewBody.style.height = '100%';
   image.style.width = `${String(fitWidth)}px`;
+  if (compareImage) {
+    compareImage.style.width = `${String(fitWidth)}px`;
+  }
 }
 
 function updateView() {
@@ -947,10 +1063,12 @@ function updateView() {
     }
     fitReflowFrameId = requestAnimationFrame(() => {
       applyFitSizing();
+      applyCompareSplit();
       fitReflowFrameId = null;
     });
 
     zoomLabel.textContent = 'Fit';
+    applyCompareSplit();
     requestOverviewMapViewportUpdate();
     return;
   }
@@ -959,9 +1077,14 @@ function updateView() {
   previewBody.style.height = 'max-content';
   preview.classList.add('pan-enabled');
   if (image.naturalWidth > 0) {
-    image.style.width = `${String(Math.round(image.naturalWidth * zoom))}px`;
+    const renderedWidth = Math.round(image.naturalWidth * zoom);
+    image.style.width = `${String(renderedWidth)}px`;
+    if (compareImage) {
+      compareImage.style.width = `${String(renderedWidth)}px`;
+    }
   }
   zoomLabel.textContent = `${String(Math.round(zoom * 100))}%`;
+  applyCompareSplit();
   requestOverviewMapViewportUpdate();
 }
 
@@ -1061,6 +1184,10 @@ function setInfoOverlayVisible(isVisible) {
   }
 
   infoOverlay.classList.toggle('is-hidden', !isVisible);
+  if (infoToggleButton) {
+    infoToggleButton.classList.toggle('is-active', isVisible);
+    infoToggleButton.setAttribute('aria-pressed', isVisible ? 'true' : 'false');
+  }
   if (isVisible) {
     requestAnimationFrame(() => {
       requestOverviewMapViewportUpdate();
@@ -1224,6 +1351,36 @@ bindClickAction(zoomSelectButton, () => {
 bindClickAction(infoToggleButton, () => {
   const isCurrentlyHidden = infoOverlay?.classList.contains('is-hidden') ?? true;
   setInfoOverlayVisible(isCurrentlyHidden);
+});
+
+bindClickAction(compareToolButton, () => {
+  if (!hasComparisonImage()) {
+    vscode?.postMessage({ type: 'pick-compare-image' });
+    return;
+  }
+
+  vscode?.postMessage({ type: 'clear-compare-image' });
+  clearComparisonImage();
+});
+
+bindClickAction(comparePickButton, () => {
+  vscode?.postMessage({ type: 'pick-compare-image' });
+});
+
+bindClickAction(compareOrientationButton, () => {
+  compareOrientation = compareOrientation === 'vertical' ? 'horizontal' : 'vertical';
+  updateCompareControlsUi();
+  applyCompareSplit();
+});
+
+compareSlider?.addEventListener('input', () => {
+  const nextValue = Number.parseFloat(compareSlider.value);
+  if (!Number.isFinite(nextValue)) {
+    return;
+  }
+
+  compareSplitPercent = clamp(nextValue, 0, 100);
+  applyCompareSplit();
 });
 
 zoomToolbar?.addEventListener('pointerdown', (event) => {
@@ -1446,6 +1603,11 @@ image?.addEventListener('load', () => {
   requestOverviewMapViewportUpdate();
 });
 
+compareImage?.addEventListener('load', () => {
+  compareImage.setAttribute('draggable', 'false');
+  applyCompareSplit();
+});
+
 window.addEventListener('message', (event) => {
   const message = event.data;
   if (!message || typeof message.type !== 'string') {
@@ -1465,6 +1627,15 @@ window.addEventListener('message', (event) => {
     case 'zoom-fit':
       setFitMode();
       break;
+    case 'set-compare-image':
+      if (typeof message.source === 'string') {
+        setComparisonImage(message.source, typeof message.label === 'string' ? message.label : 'Comparison image');
+        updateView();
+      }
+      break;
+    case 'clear-compare-image':
+      clearComparisonImage();
+      break;
     default:
       break;
   }
@@ -1474,6 +1645,14 @@ initializeInfoOverlayVisibility();
 initializeInfoOverlayPosition();
 initializeIcoGallery();
 syncOverviewMapSource();
+if (hasComparisonImage()) {
+  setCompareEnabled(true);
+} else {
+  updateCompareControlsUi();
+}
+if (compareSlider) {
+  compareSlider.value = String(compareSplitPercent);
+}
 updateSelectionModeUi();
 updateView();
 

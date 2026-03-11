@@ -5,8 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
-## [1.4.2] - 2026-03-09
+## [1.5.0] - 2026-03-10
+### Added
+- Added a before/after comparison mode in the image webview with a split slider and a visual divider.
+- Added comparison orientation toggle (vertical/horizontal) in comparison controls.
+- Added support for selecting a comparison image from the command palette via `Image Inspector: Set Comparison Image`.
+- Added dimension safety checks for comparison images (comparison requires identical width and height).
+- Added `scripts/generate-color-variants.mjs` to generate subtle color-shifted test images.
+- Added test image variant generation in multiple formats (`png`, `webp`, `avif`) for comparison validation.
+
 ### Changed
+- Updated the comparison interaction model: pressing the toolbar compare button now clears the current comparison when one is active.
+- Updated toolbar active-state styling so the compare button uses the shared theme accent color.
+- Updated info toggle behavior so it remains theme-accented while the info overlay is visible.
+- Updated comparison slider styling to use the theme accent color consistently across WebKit/Chromium and Firefox.
+- Moved comparison controls closer to the main toolbar for tighter visual alignment.
+- Renamed command label from `Image Inspector: Select Comparison Image` to `Image Inspector: Set Comparison Image`.
 - Optimized extension activation by removing explicit startup activation and relying on contribution-driven lazy activation.
 - Reduced repeated webview media disk reads by caching `media/imageDetails.js` and `media/imageDetails.css` content in memory.
 - Reduced duplicate ICO file processing by reusing already-loaded buffers when building ICO gallery variants.
