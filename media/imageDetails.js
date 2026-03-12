@@ -37,13 +37,21 @@ const zoomFitButton = document.getElementById('zoom-fit');
 const zoomSelectButton = document.getElementById('zoom-select');
 const infoToggleButton = document.getElementById('info-toggle');
 const compareToolButton = document.getElementById('compare-tool');
+const compareSideBySideButton = document.getElementById('compare-side-by-side');
 const comparePickButton = document.getElementById('compare-pick');
 const compareOrientationButton = document.getElementById('compare-orientation');
 const compareControls = document.getElementById('compare-controls');
 const compareSlider = document.getElementById('compare-slider');
+const compareDiffPrevButton = document.getElementById('compare-diff-prev');
+const compareDiffNextButton = document.getElementById('compare-diff-next');
+const compareDiffIndexLabel = document.getElementById('compare-diff-index');
+const compareDiffTargetButton = document.getElementById('compare-diff-target');
+const compareDiffAutoCenterButton = document.getElementById('compare-diff-autocenter');
 const compareImageLabel = document.getElementById('compare-image-label');
 const compareImage = document.getElementById('compare-image');
 const compareDivider = document.getElementById('compare-divider');
+const compareDiffOverlay = document.getElementById('compare-diff-overlay');
+const compareDiffOverlaySecondary = document.getElementById('compare-diff-overlay-secondary');
 const zoomSelectionBox = document.getElementById('zoom-selection-box');
 const pipetteButton = document.getElementById('pipette-tool');
 const pipetteCanvas = document.getElementById('pipette-canvas');
@@ -68,6 +76,11 @@ let pipetteResultFadeTimeoutId = null;
 let pipetteResultHideTimeoutId = null;
 const INFO_OVERLAY_STORAGE_KEY = 'imageDetails.infoOverlayVisible';
 const INFO_OVERLAY_POSITION_STORAGE_KEY = 'imageDetails.infoOverlayPosition';
+const DIFF_ANALYSIS_MAX_DIMENSION = 1024;
+const DIFF_PIXEL_THRESHOLD = 14;
+const DIFF_REGION_MIN_PIXELS = 10;
+const DIFF_REGION_MAX_ITEMS = 24;
+const DIFF_REGION_MERGE_GAP_PX = 8;
 
 let zoom = 1;
 let fitMode = false;
@@ -89,14 +102,26 @@ let selectionStartClientY = 0;
 let compareEnabled = false;
 let compareSplitPercent = 50;
 let compareOrientation = 'vertical';
+let compareViewMode = 'split';
 let isDraggingCompareDivider = false;
 let compareDividerPointerId = null;
 let compareDividerDragFrameId = null;
 let pendingCompareDragClientX = null;
 let pendingCompareDragClientY = null;
+let enableSideBySideOnNextComparePick = false;
+let compareDiffAnalysisToken = 0;
+let compareDiffOverlayCtx = null;
+let compareDiffOverlaySecondaryCtx = null;
+let compareDiffRegions = [];
+let compareDiffCurrentIndex = -1;
+let compareDiffOverlayTarget = 'left';
+let compareDiffAutoCenterEnabled = false;
 let initialViewModeDecisionToken = 0;
 const COMPARE_ORIENTATION_VERTICAL_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:inline;vertical-align:middle"><rect x="3" y="3" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.4"/><path d="M10 4v12" stroke="currentColor" stroke-width="1.4"/></svg>';
 const COMPARE_ORIENTATION_HORIZONTAL_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:inline;vertical-align:middle"><rect x="3" y="3" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.4"/><path d="M4 10h12" stroke="currentColor" stroke-width="1.4"/></svg>';
+const COMPARE_DIFF_TARGET_LEFT_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:inline;vertical-align:middle"><rect x="2.5" y="3.5" width="7.5" height="13" rx="1.6" fill="currentColor" fill-opacity="0.18" stroke="currentColor" stroke-width="1.2"/><rect x="10" y="3.5" width="7.5" height="13" rx="1.6" stroke="currentColor" stroke-width="1.2"/></svg>';
+const COMPARE_DIFF_TARGET_RIGHT_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:inline;vertical-align:middle"><rect x="2.5" y="3.5" width="7.5" height="13" rx="1.6" stroke="currentColor" stroke-width="1.2"/><rect x="10" y="3.5" width="7.5" height="13" rx="1.6" fill="currentColor" fill-opacity="0.18" stroke="currentColor" stroke-width="1.2"/></svg>';
+const COMPARE_DIFF_TARGET_BOTH_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:inline;vertical-align:middle"><rect x="2.5" y="3.5" width="7.5" height="13" rx="1.6" fill="currentColor" fill-opacity="0.14" stroke="currentColor" stroke-width="1.2"/><rect x="10" y="3.5" width="7.5" height="13" rx="1.6" fill="currentColor" fill-opacity="0.14" stroke="currentColor" stroke-width="1.2"/></svg>';
 
 function toClampedNumber(value, min, max, fallbackValue) {
   const numericValue = Number.parseFloat(String(value));
@@ -243,6 +268,522 @@ function hasComparisonImage() {
   return Boolean(compareImage?.getAttribute('src'));
 }
 
+function isSideBySideCompareActive() {
+  return compareViewMode === 'side-by-side' && hasComparisonImage();
+}
+
+function ensureCompareDiffOverlayContext() {
+  if (!compareDiffOverlay) {
+    return null;
+  }
+
+  if (!compareDiffOverlayCtx) {
+    compareDiffOverlayCtx = compareDiffOverlay.getContext('2d');
+  }
+
+  return compareDiffOverlayCtx;
+}
+
+function ensureCompareDiffOverlaySecondaryContext() {
+  if (!compareDiffOverlaySecondary) {
+    return null;
+  }
+
+  if (!compareDiffOverlaySecondaryCtx) {
+    compareDiffOverlaySecondaryCtx = compareDiffOverlaySecondary.getContext('2d');
+  }
+
+  return compareDiffOverlaySecondaryCtx;
+}
+
+function getCompareDiffTargetPresentation(target) {
+  if (target === 'right') {
+    return {
+      iconSvg: COMPARE_DIFF_TARGET_RIGHT_ICON_SVG,
+      title: 'Show differences on right image',
+      label: 'right'
+    };
+  }
+
+  if (target === 'both') {
+    return {
+      iconSvg: COMPARE_DIFF_TARGET_BOTH_ICON_SVG,
+      title: 'Show differences on both images',
+      label: 'both'
+    };
+  }
+
+  return {
+    iconSvg: COMPARE_DIFF_TARGET_LEFT_ICON_SVG,
+    title: 'Show differences on left image',
+    label: 'left'
+  };
+}
+
+function updateCompareDiffNavigationUi() {
+  const regionCount = compareDiffRegions.length;
+  const hasRegions = regionCount > 0;
+  const sideBySideActive = isSideBySideCompareActive();
+
+  if (compareDiffIndexLabel) {
+    compareDiffIndexLabel.textContent = hasRegions && compareDiffCurrentIndex >= 0
+      ? `${String(compareDiffCurrentIndex + 1)}/${String(regionCount)}`
+      : '0/0';
+  }
+
+  if (compareDiffPrevButton) {
+    compareDiffPrevButton.disabled = !sideBySideActive || !hasRegions || compareDiffCurrentIndex <= 0;
+  }
+
+  if (compareDiffNextButton) {
+    compareDiffNextButton.disabled = !sideBySideActive || !hasRegions || compareDiffCurrentIndex >= regionCount - 1;
+  }
+
+  if (compareDiffTargetButton) {
+    const targetPresentation = getCompareDiffTargetPresentation(compareDiffOverlayTarget);
+    compareDiffTargetButton.dataset.target = targetPresentation.label;
+    compareDiffTargetButton.setAttribute('title', targetPresentation.title);
+    compareDiffTargetButton.setAttribute('aria-label', targetPresentation.title);
+    compareDiffTargetButton.disabled = !sideBySideActive;
+
+    const iconElement = compareDiffTargetButton.querySelector('.icon');
+    if (iconElement) {
+      iconElement.innerHTML = targetPresentation.iconSvg;
+    }
+  }
+
+  if (compareDiffAutoCenterButton) {
+    compareDiffAutoCenterButton.disabled = !sideBySideActive || !hasRegions;
+    compareDiffAutoCenterButton.classList.toggle('is-active', compareDiffAutoCenterEnabled);
+    compareDiffAutoCenterButton.setAttribute('aria-pressed', compareDiffAutoCenterEnabled ? 'true' : 'false');
+  }
+}
+
+function centerPreviewOnActiveDifference() {
+  if (!preview || compareDiffCurrentIndex < 0 || compareDiffCurrentIndex >= compareDiffRegions.length) {
+    return;
+  }
+
+  const activeRegion = compareDiffRegions[compareDiffCurrentIndex];
+  const targetImage = compareDiffOverlayTarget === 'right' ? compareImage : image;
+  if (!targetImage) {
+    return;
+  }
+
+  const targetRect = targetImage.getBoundingClientRect();
+  const previewRect = preview.getBoundingClientRect();
+  if (targetRect.width <= 0 || targetRect.height <= 0 || previewRect.width <= 0 || previewRect.height <= 0) {
+    return;
+  }
+
+  const targetCenterX = targetRect.left + ((activeRegion.minXRatio + activeRegion.maxXRatio) / 2) * targetRect.width;
+  const targetCenterY = targetRect.top + ((activeRegion.minYRatio + activeRegion.maxYRatio) / 2) * targetRect.height;
+  const viewportCenterX = previewRect.left + preview.clientWidth / 2;
+  const viewportCenterY = previewRect.top + preview.clientHeight / 2;
+
+  preview.scrollLeft += targetCenterX - viewportCenterX;
+  preview.scrollTop += targetCenterY - viewportCenterY;
+}
+
+function centerPreviewOnActiveDifferenceIfEnabled() {
+  if (!compareDiffAutoCenterEnabled || !isSideBySideCompareActive()) {
+    return;
+  }
+
+  requestAnimationFrame(() => {
+    centerPreviewOnActiveDifference();
+    renderCompareDifferenceOverlay();
+  });
+}
+
+function drawCompareDifferenceRegionOnOverlay(overlayElement, overlayContext, targetImage, region, regionIndex) {
+  const targetRect = targetImage.getBoundingClientRect();
+  const previewRect = previewContainer?.getBoundingClientRect();
+  const renderedWidth = Math.round(targetRect.width);
+  const renderedHeight = Math.round(targetRect.height);
+  if (renderedWidth <= 0 || renderedHeight <= 0) {
+    overlayContext.clearRect(0, 0, overlayElement.width, overlayElement.height);
+    overlayElement.classList.add('is-hidden');
+    return;
+  }
+
+  if (!previewRect) {
+    overlayContext.clearRect(0, 0, overlayElement.width, overlayElement.height);
+    overlayElement.classList.add('is-hidden');
+    return;
+  }
+
+  overlayElement.width = renderedWidth;
+  overlayElement.height = renderedHeight;
+  overlayElement.style.width = `${String(renderedWidth)}px`;
+  overlayElement.style.height = `${String(renderedHeight)}px`;
+  overlayElement.style.left = `${String(Math.round(targetRect.left - previewRect.left))}px`;
+  overlayElement.style.top = `${String(Math.round(targetRect.top - previewRect.top))}px`;
+  overlayElement.classList.remove('is-hidden');
+
+  overlayContext.clearRect(0, 0, renderedWidth, renderedHeight);
+  overlayContext.lineJoin = 'round';
+  overlayContext.font = '600 11px var(--vscode-font-family)';
+  overlayContext.textBaseline = 'top';
+
+  const x = Math.round(region.minXRatio * renderedWidth);
+  const y = Math.round(region.minYRatio * renderedHeight);
+  const width = Math.max(2, Math.round((region.maxXRatio - region.minXRatio) * renderedWidth));
+  const height = Math.max(2, Math.round((region.maxYRatio - region.minYRatio) * renderedHeight));
+
+  overlayContext.strokeStyle = 'rgba(255, 74, 87, 0.95)';
+  overlayContext.lineWidth = 2;
+  overlayContext.strokeRect(x, y, width, height);
+
+  const label = `D${String(regionIndex + 1)}`;
+  const labelWidth = overlayContext.measureText(label).width + 8;
+  const labelHeight = 16;
+  const labelX = x;
+  const labelY = Math.max(0, y - labelHeight);
+
+  overlayContext.fillStyle = 'rgba(255, 74, 87, 0.95)';
+  overlayContext.fillRect(labelX, labelY, labelWidth, labelHeight);
+  overlayContext.fillStyle = '#ffffff';
+  overlayContext.fillText(label, labelX + 4, labelY + 2);
+}
+
+function clearCompareDifferenceOverlay(clearRegions = false) {
+  if (clearRegions) {
+    compareDiffRegions = [];
+    compareDiffCurrentIndex = -1;
+  }
+
+  const primaryOverlayContext = ensureCompareDiffOverlayContext();
+  if (compareDiffOverlay && primaryOverlayContext) {
+    primaryOverlayContext.clearRect(0, 0, compareDiffOverlay.width, compareDiffOverlay.height);
+    compareDiffOverlay.classList.add('is-hidden');
+  }
+
+  const secondaryOverlayContext = ensureCompareDiffOverlaySecondaryContext();
+  if (compareDiffOverlaySecondary && secondaryOverlayContext) {
+    secondaryOverlayContext.clearRect(0, 0, compareDiffOverlaySecondary.width, compareDiffOverlaySecondary.height);
+    compareDiffOverlaySecondary.classList.add('is-hidden');
+  }
+
+  updateCompareDiffNavigationUi();
+}
+
+function renderCompareDifferenceOverlay() {
+  if (!image || !compareImage || !isSideBySideCompareActive()) {
+    clearCompareDifferenceOverlay(false);
+    return;
+  }
+
+  const activeRegion = compareDiffCurrentIndex >= 0
+    ? compareDiffRegions[compareDiffCurrentIndex]
+    : undefined;
+
+  if (!activeRegion) {
+    clearCompareDifferenceOverlay(false);
+    return;
+  }
+
+  const primaryOverlayContext = ensureCompareDiffOverlayContext();
+  if (compareDiffOverlay && primaryOverlayContext) {
+    if (compareDiffOverlayTarget === 'left' || compareDiffOverlayTarget === 'both') {
+      drawCompareDifferenceRegionOnOverlay(
+        compareDiffOverlay,
+        primaryOverlayContext,
+        image,
+        activeRegion,
+        compareDiffCurrentIndex
+      );
+    } else {
+      primaryOverlayContext.clearRect(0, 0, compareDiffOverlay.width, compareDiffOverlay.height);
+      compareDiffOverlay.classList.add('is-hidden');
+    }
+  }
+
+  const secondaryOverlayContext = ensureCompareDiffOverlaySecondaryContext();
+  if (compareDiffOverlaySecondary && secondaryOverlayContext) {
+    if (compareDiffOverlayTarget === 'right' || compareDiffOverlayTarget === 'both') {
+      drawCompareDifferenceRegionOnOverlay(
+        compareDiffOverlaySecondary,
+        secondaryOverlayContext,
+        compareImage,
+        activeRegion,
+        compareDiffCurrentIndex
+      );
+    } else {
+      secondaryOverlayContext.clearRect(0, 0, compareDiffOverlaySecondary.width, compareDiffOverlaySecondary.height);
+      compareDiffOverlaySecondary.classList.add('is-hidden');
+    }
+  }
+
+  updateCompareDiffNavigationUi();
+}
+
+function runCompareDifferenceAnalysis(token) {
+  if (!image || !compareImage) {
+    return;
+  }
+
+  const baseWidth = image.naturalWidth;
+  const baseHeight = image.naturalHeight;
+  const compareWidth = compareImage.naturalWidth;
+  const compareHeight = compareImage.naturalHeight;
+
+  if (baseWidth <= 0 || baseHeight <= 0 || compareWidth <= 0 || compareHeight <= 0) {
+    clearCompareDifferenceOverlay(true);
+    return;
+  }
+
+  if (baseWidth !== compareWidth || baseHeight !== compareHeight) {
+    clearCompareDifferenceOverlay(true);
+    return;
+  }
+
+  const maxDimension = Math.max(baseWidth, baseHeight);
+  const scale = Math.min(1, DIFF_ANALYSIS_MAX_DIMENSION / maxDimension);
+  const analysisWidth = Math.max(1, Math.round(baseWidth * scale));
+  const analysisHeight = Math.max(1, Math.round(baseHeight * scale));
+
+  const baseCanvas = document.createElement('canvas');
+  baseCanvas.width = analysisWidth;
+  baseCanvas.height = analysisHeight;
+  const compareCanvas = document.createElement('canvas');
+  compareCanvas.width = analysisWidth;
+  compareCanvas.height = analysisHeight;
+
+  const baseContext = baseCanvas.getContext('2d', { willReadFrequently: true });
+  const compareContext = compareCanvas.getContext('2d', { willReadFrequently: true });
+  if (!baseContext || !compareContext) {
+    clearCompareDifferenceOverlay(true);
+    return;
+  }
+
+  baseContext.drawImage(image, 0, 0, analysisWidth, analysisHeight);
+  compareContext.drawImage(compareImage, 0, 0, analysisWidth, analysisHeight);
+
+  const basePixels = baseContext.getImageData(0, 0, analysisWidth, analysisHeight).data;
+  const comparePixels = compareContext.getImageData(0, 0, analysisWidth, analysisHeight).data;
+  const pixelCount = analysisWidth * analysisHeight;
+  const diffMask = new Uint8Array(pixelCount);
+  const diffStrength = new Float32Array(pixelCount);
+
+  let changedPixels = 0;
+  let strengthTotal = 0;
+
+  for (let index = 0; index < pixelCount; index += 1) {
+    const pixelOffset = index * 4;
+    const deltaRed = Math.abs(basePixels[pixelOffset] - comparePixels[pixelOffset]);
+    const deltaGreen = Math.abs(basePixels[pixelOffset + 1] - comparePixels[pixelOffset + 1]);
+    const deltaBlue = Math.abs(basePixels[pixelOffset + 2] - comparePixels[pixelOffset + 2]);
+    const deltaAlpha = Math.abs(basePixels[pixelOffset + 3] - comparePixels[pixelOffset + 3]);
+    const colorDelta = (deltaRed + deltaGreen + deltaBlue) / 3;
+    const weightedDelta = colorDelta * 0.85 + deltaAlpha * 0.15;
+
+    if (weightedDelta >= DIFF_PIXEL_THRESHOLD) {
+      diffMask[index] = 1;
+      diffStrength[index] = weightedDelta;
+      changedPixels += 1;
+      strengthTotal += weightedDelta;
+    }
+  }
+
+  if (token !== compareDiffAnalysisToken) {
+    return;
+  }
+
+  if (changedPixels === 0) {
+    compareDiffRegions = [];
+    compareDiffCurrentIndex = -1;
+    renderCompareDifferenceOverlay();
+    return;
+  }
+
+  const visited = new Uint8Array(pixelCount);
+  const queue = new Int32Array(pixelCount);
+  const regions = [];
+
+  for (let rootIndex = 0; rootIndex < pixelCount; rootIndex += 1) {
+    if (diffMask[rootIndex] === 0 || visited[rootIndex] === 1) {
+      continue;
+    }
+
+    let queueStart = 0;
+    let queueEnd = 0;
+    queue[queueEnd] = rootIndex;
+    queueEnd += 1;
+    visited[rootIndex] = 1;
+
+    let regionPixels = 0;
+    let minX = analysisWidth;
+    let minY = analysisHeight;
+    let maxX = 0;
+    let maxY = 0;
+    let sumX = 0;
+    let sumY = 0;
+    let regionStrength = 0;
+
+    while (queueStart < queueEnd) {
+      const currentIndex = queue[queueStart];
+      queueStart += 1;
+      const x = currentIndex % analysisWidth;
+
+      regionPixels += 1;
+      sumX += x;
+      sumY += Math.floor(currentIndex / analysisWidth);
+      regionStrength += diffStrength[currentIndex];
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, Math.floor(currentIndex / analysisWidth));
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, Math.floor(currentIndex / analysisWidth));
+
+      const leftNeighbor = currentIndex - 1;
+      const rightNeighbor = currentIndex + 1;
+      const topNeighbor = currentIndex - analysisWidth;
+      const bottomNeighbor = currentIndex + analysisWidth;
+
+      if (x > 0 && diffMask[leftNeighbor] === 1 && visited[leftNeighbor] === 0) {
+        visited[leftNeighbor] = 1;
+        queue[queueEnd] = leftNeighbor;
+        queueEnd += 1;
+      }
+
+      if (x < analysisWidth - 1 && diffMask[rightNeighbor] === 1 && visited[rightNeighbor] === 0) {
+        visited[rightNeighbor] = 1;
+        queue[queueEnd] = rightNeighbor;
+        queueEnd += 1;
+      }
+
+      if (topNeighbor >= 0 && diffMask[topNeighbor] === 1 && visited[topNeighbor] === 0) {
+        visited[topNeighbor] = 1;
+        queue[queueEnd] = topNeighbor;
+        queueEnd += 1;
+      }
+
+      if (bottomNeighbor < pixelCount && diffMask[bottomNeighbor] === 1 && visited[bottomNeighbor] === 0) {
+        visited[bottomNeighbor] = 1;
+        queue[queueEnd] = bottomNeighbor;
+        queueEnd += 1;
+      }
+    }
+
+    if (regionPixels < DIFF_REGION_MIN_PIXELS) {
+      continue;
+    }
+
+    regions.push({
+      pixelCount: regionPixels,
+      meanStrength: regionStrength / regionPixels,
+      minXRatio: minX / analysisWidth,
+      minYRatio: minY / analysisHeight,
+      maxXRatio: (maxX + 1) / analysisWidth,
+      maxYRatio: (maxY + 1) / analysisHeight
+    });
+  }
+
+  if (token !== compareDiffAnalysisToken) {
+    return;
+  }
+
+  const previouslySelectedIndex = compareDiffCurrentIndex;
+
+  const sortedRegions = regions
+    .sort((leftRegion, rightRegion) => rightRegion.pixelCount - leftRegion.pixelCount);
+
+  const containmentTolerance = 1 / Math.max(analysisWidth, analysisHeight);
+  const filteredRegions = [];
+
+  for (const candidateRegion of sortedRegions) {
+    const isContainedInExistingRegion = filteredRegions.some((keptRegion) => {
+      return (
+        candidateRegion.minXRatio >= keptRegion.minXRatio - containmentTolerance
+        && candidateRegion.minYRatio >= keptRegion.minYRatio - containmentTolerance
+        && candidateRegion.maxXRatio <= keptRegion.maxXRatio + containmentTolerance
+        && candidateRegion.maxYRatio <= keptRegion.maxYRatio + containmentTolerance
+      );
+    });
+
+    if (isContainedInExistingRegion) {
+      continue;
+    }
+
+    filteredRegions.push(candidateRegion);
+  }
+
+  const mergeGapXRatio = DIFF_REGION_MERGE_GAP_PX / analysisWidth;
+  const mergeGapYRatio = DIFF_REGION_MERGE_GAP_PX / analysisHeight;
+  const mergedRegions = filteredRegions.map((region) => ({ ...region }));
+
+  let didMerge = true;
+  while (didMerge) {
+    didMerge = false;
+
+    for (let leftIndex = 0; leftIndex < mergedRegions.length; leftIndex += 1) {
+      for (let rightIndex = leftIndex + 1; rightIndex < mergedRegions.length; rightIndex += 1) {
+        const leftRegion = mergedRegions[leftIndex];
+        const rightRegion = mergedRegions[rightIndex];
+
+        const overlapsOrNearHorizontally = leftRegion.minXRatio <= rightRegion.maxXRatio + mergeGapXRatio
+          && leftRegion.maxXRatio >= rightRegion.minXRatio - mergeGapXRatio;
+        const overlapsOrNearVertically = leftRegion.minYRatio <= rightRegion.maxYRatio + mergeGapYRatio
+          && leftRegion.maxYRatio >= rightRegion.minYRatio - mergeGapYRatio;
+
+        if (!overlapsOrNearHorizontally || !overlapsOrNearVertically) {
+          continue;
+        }
+
+        const mergedPixelCount = leftRegion.pixelCount + rightRegion.pixelCount;
+        const mergedMeanStrength = mergedPixelCount > 0
+          ? ((leftRegion.meanStrength * leftRegion.pixelCount) + (rightRegion.meanStrength * rightRegion.pixelCount)) / mergedPixelCount
+          : leftRegion.meanStrength;
+
+        mergedRegions[leftIndex] = {
+          pixelCount: mergedPixelCount,
+          meanStrength: mergedMeanStrength,
+          minXRatio: Math.min(leftRegion.minXRatio, rightRegion.minXRatio),
+          minYRatio: Math.min(leftRegion.minYRatio, rightRegion.minYRatio),
+          maxXRatio: Math.max(leftRegion.maxXRatio, rightRegion.maxXRatio),
+          maxYRatio: Math.max(leftRegion.maxYRatio, rightRegion.maxYRatio)
+        };
+
+        mergedRegions.splice(rightIndex, 1);
+        didMerge = true;
+        break;
+      }
+
+      if (didMerge) {
+        break;
+      }
+    }
+  }
+
+  compareDiffRegions = mergedRegions
+    .sort((leftRegion, rightRegion) => rightRegion.pixelCount - leftRegion.pixelCount)
+    .slice(0, DIFF_REGION_MAX_ITEMS);
+
+  if (compareDiffRegions.length === 0) {
+    compareDiffCurrentIndex = -1;
+  } else if (previouslySelectedIndex < 0) {
+    compareDiffCurrentIndex = 0;
+  } else {
+    compareDiffCurrentIndex = clamp(previouslySelectedIndex, 0, compareDiffRegions.length - 1);
+  }
+
+  renderCompareDifferenceOverlay();
+}
+
+function scheduleCompareDifferenceAnalysis() {
+  compareDiffAnalysisToken += 1;
+  const token = compareDiffAnalysisToken;
+  clearCompareDifferenceOverlay(false);
+
+  window.setTimeout(() => {
+    if (token !== compareDiffAnalysisToken) {
+      return;
+    }
+
+    runCompareDifferenceAnalysis(token);
+  }, 0);
+}
+
 function getCompareOrientationButtonState() {
   if (compareOrientation === 'vertical') {
     return {
@@ -260,11 +801,19 @@ function getCompareOrientationButtonState() {
 function updateCompareControlsUi() {
   const available = hasComparisonImage();
   const shouldShowControls = available || compareEnabled;
+  const sideBySideActive = isSideBySideCompareActive();
   compareControls?.classList.toggle('is-hidden', !shouldShowControls);
+  compareControls?.classList.toggle('is-side-by-side', sideBySideActive);
 
   if (compareToolButton) {
-    compareToolButton.classList.toggle('is-active', compareEnabled);
-    compareToolButton.setAttribute('aria-pressed', compareEnabled ? 'true' : 'false');
+    const splitActive = compareEnabled && !sideBySideActive;
+    compareToolButton.classList.toggle('is-active', splitActive);
+    compareToolButton.setAttribute('aria-pressed', splitActive ? 'true' : 'false');
+  }
+
+  if (compareSideBySideButton) {
+    compareSideBySideButton.classList.toggle('is-active', sideBySideActive);
+    compareSideBySideButton.setAttribute('aria-pressed', sideBySideActive ? 'true' : 'false');
   }
 
   if (compareOrientationButton) {
@@ -277,13 +826,51 @@ function updateCompareControlsUi() {
     if (iconElement) {
       iconElement.innerHTML = orientationButtonState.iconSvg;
     }
+
+    compareOrientationButton.disabled = sideBySideActive || !available;
   }
+
+  if (compareSlider) {
+    compareSlider.disabled = sideBySideActive || !available;
+  }
+
+  updateCompareDiffNavigationUi();
 }
 
 function applyCompareSplit() {
   if (!compareImage || !compareDivider || !previewBody || !image || !hasComparisonImage()) {
+    previewBody?.classList.remove('side-by-side-mode');
+    clearCompareDifferenceOverlay(false);
     return;
   }
+
+  const sideBySideActive = isSideBySideCompareActive();
+  previewBody.classList.toggle('side-by-side-mode', sideBySideActive);
+
+  if (sideBySideActive) {
+    compareImage.classList.remove('is-hidden');
+    compareDivider.classList.add('is-hidden');
+    compareDivider.classList.remove('is-horizontal');
+    compareImage.style.clipPath = 'none';
+    compareImage.style.left = '';
+    compareImage.style.top = '';
+
+    // Keep both previews at the exact same rendered size in side-by-side mode.
+    const renderedWidth = image.clientWidth;
+    const renderedHeight = image.clientHeight;
+    if (renderedWidth > 0 && renderedHeight > 0) {
+      compareImage.style.width = `${String(renderedWidth)}px`;
+      compareImage.style.height = `${String(renderedHeight)}px`;
+    } else {
+      compareImage.style.width = '';
+      compareImage.style.height = '';
+    }
+
+    renderCompareDifferenceOverlay();
+    return;
+  }
+
+  clearCompareDifferenceOverlay(false);
 
   if (!compareEnabled) {
     compareImage.classList.add('is-hidden');
@@ -409,14 +996,42 @@ function endCompareDividerDrag(pointerId) {
 function setCompareEnabled(isEnabled) {
   if (!hasComparisonImage()) {
     compareEnabled = false;
+    compareViewMode = 'split';
     updateCompareControlsUi();
     applyCompareSplit();
     return;
   }
 
+  if (isEnabled) {
+    compareViewMode = 'split';
+  }
+
   compareEnabled = isEnabled;
   updateCompareControlsUi();
   applyCompareSplit();
+}
+
+function setCompareViewMode(nextMode) {
+  compareViewMode = nextMode === 'side-by-side' ? 'side-by-side' : 'split';
+
+  if (!hasComparisonImage()) {
+    compareEnabled = false;
+  } else if (compareViewMode === 'side-by-side') {
+    compareEnabled = false;
+    endCompareDividerDrag();
+    clearPendingCompareDividerSplitUpdate();
+  } else {
+    compareEnabled = true;
+  }
+
+  updateCompareControlsUi();
+  applyCompareSplit();
+
+  if (isSideBySideCompareActive()) {
+    scheduleCompareDifferenceAnalysis();
+  } else {
+    clearCompareDifferenceOverlay(false);
+  }
 }
 
 function setComparisonImage(source, label) {
@@ -426,6 +1041,15 @@ function setComparisonImage(source, label) {
 
   compareImage.setAttribute('src', source);
   compareImageLabel.textContent = label || 'Comparison image';
+
+  const shouldEnableSideBySide = enableSideBySideOnNextComparePick || compareViewMode === 'side-by-side';
+  enableSideBySideOnNextComparePick = false;
+
+  if (shouldEnableSideBySide) {
+    setCompareViewMode('side-by-side');
+    return;
+  }
+
   setCompareEnabled(true);
 }
 
@@ -438,11 +1062,15 @@ function clearComparisonImage() {
   compareImage.style.clipPath = '';
   compareImage.classList.add('is-hidden');
   compareDivider?.classList.add('is-hidden');
+  previewBody?.classList.remove('side-by-side-mode');
   endCompareDividerDrag();
   compareImageLabel.textContent = 'No comparison image';
   compareEnabled = false;
+  compareViewMode = 'split';
+  enableSideBySideOnNextComparePick = false;
   clearPendingCompareDividerSplitUpdate();
   updateCompareControlsUi();
+  clearCompareDifferenceOverlay(true);
 }
 
 function setPipetteMode(isEnabled) {
@@ -1243,15 +1871,41 @@ function applyFitSizing() {
 
   const viewportWidth = Math.max(1, preview.clientWidth);
   const viewportHeight = Math.max(1, preview.clientHeight);
-  const fitScale = Math.min(viewportWidth / naturalWidth, viewportHeight / naturalHeight);
+  const sideBySideActive = isSideBySideCompareActive() && Boolean(compareImage);
+  const sideBySideGapPx = sideBySideActive ? 14 : 0;
+  const sideBySideHorizontalPaddingPx = sideBySideActive ? 24 : 0;
+  const fitScaleByWidth = sideBySideActive
+    ? (viewportWidth - sideBySideHorizontalPaddingPx - sideBySideGapPx) / (naturalWidth * 2)
+    : viewportWidth / naturalWidth;
+  const fitScale = Math.min(fitScaleByWidth, viewportHeight / naturalHeight);
   const safeScale = Number.isFinite(fitScale) && fitScale > 0 ? fitScale : 1;
   const fitWidth = Math.max(1, Math.round(naturalWidth * safeScale));
 
-  previewBody.style.width = '100%';
+  previewBody.style.width = sideBySideActive ? 'max-content' : '100%';
   previewBody.style.height = '100%';
   image.style.width = `${String(fitWidth)}px`;
   if (compareImage) {
     compareImage.style.width = `${String(fitWidth)}px`;
+  }
+}
+
+function updatePanAvailability(resetScrollWhenNotPannable) {
+  if (!preview) {
+    return;
+  }
+
+  const isPannable = preview.scrollWidth > preview.clientWidth + 1
+    || preview.scrollHeight > preview.clientHeight + 1;
+  preview.classList.toggle('pan-enabled', isPannable);
+
+  if (!isPannable) {
+    preview.classList.remove('dragging');
+    isDragging = false;
+
+    if (resetScrollWhenNotPannable) {
+      preview.scrollLeft = 0;
+      preview.scrollTop = 0;
+    }
   }
 }
 
@@ -1262,10 +1916,7 @@ function updateView() {
 
   if (fitMode) {
     applyFitSizing();
-
-    preview.classList.remove('pan-enabled', 'dragging');
-    preview.scrollLeft = 0;
-    preview.scrollTop = 0;
+    updatePanAvailability(true);
 
     if (fitReflowFrameId !== null) {
       cancelAnimationFrame(fitReflowFrameId);
@@ -1273,6 +1924,7 @@ function updateView() {
     fitReflowFrameId = requestAnimationFrame(() => {
       applyFitSizing();
       applyCompareSplit();
+      updatePanAvailability(false);
       fitReflowFrameId = null;
     });
 
@@ -1284,7 +1936,6 @@ function updateView() {
 
   previewBody.style.width = 'max-content';
   previewBody.style.height = 'max-content';
-  preview.classList.add('pan-enabled');
   if (image.naturalWidth > 0) {
     const renderedWidth = Math.round(image.naturalWidth * zoom);
     image.style.width = `${String(renderedWidth)}px`;
@@ -1292,6 +1943,8 @@ function updateView() {
       compareImage.style.width = `${String(renderedWidth)}px`;
     }
   }
+  updatePanAvailability(true);
+
   zoomLabel.textContent = `${String(Math.round(zoom * 100))}%`;
   applyCompareSplit();
   requestOverviewMapViewportUpdate();
@@ -1546,7 +2199,13 @@ bindClickAction(infoToggleButton, () => {
 
 bindClickAction(compareToolButton, () => {
   if (!hasComparisonImage()) {
+    enableSideBySideOnNextComparePick = false;
     vscode?.postMessage({ type: 'pick-compare-image' });
+    return;
+  }
+
+  if (isSideBySideCompareActive()) {
+    setCompareViewMode('split');
     return;
   }
 
@@ -1555,16 +2214,91 @@ bindClickAction(compareToolButton, () => {
 });
 
 bindClickAction(comparePickButton, () => {
+  enableSideBySideOnNextComparePick = false;
   vscode?.postMessage({ type: 'pick-compare-image' });
 });
 
+bindClickAction(compareSideBySideButton, () => {
+  if (!hasComparisonImage()) {
+    enableSideBySideOnNextComparePick = true;
+    vscode?.postMessage({ type: 'pick-compare-image' });
+    return;
+  }
+
+  if (isSideBySideCompareActive()) {
+    vscode?.postMessage({ type: 'clear-compare-image' });
+    clearComparisonImage();
+    return;
+  }
+
+  setCompareViewMode('side-by-side');
+});
+
 bindClickAction(compareOrientationButton, () => {
+  if (isSideBySideCompareActive()) {
+    return;
+  }
+
   compareOrientation = compareOrientation === 'vertical' ? 'horizontal' : 'vertical';
   updateCompareControlsUi();
   applyCompareSplit();
 });
 
+bindClickAction(compareDiffPrevButton, () => {
+  if (!isSideBySideCompareActive() || compareDiffRegions.length === 0 || compareDiffCurrentIndex <= 0) {
+    return;
+  }
+
+  compareDiffCurrentIndex -= 1;
+  renderCompareDifferenceOverlay();
+  centerPreviewOnActiveDifferenceIfEnabled();
+});
+
+bindClickAction(compareDiffNextButton, () => {
+  if (!isSideBySideCompareActive() || compareDiffRegions.length === 0 || compareDiffCurrentIndex >= compareDiffRegions.length - 1) {
+    return;
+  }
+
+  compareDiffCurrentIndex += 1;
+  renderCompareDifferenceOverlay();
+  centerPreviewOnActiveDifferenceIfEnabled();
+});
+
+bindClickAction(compareDiffTargetButton, () => {
+  if (!isSideBySideCompareActive()) {
+    return;
+  }
+
+  if (compareDiffOverlayTarget === 'left') {
+    compareDiffOverlayTarget = 'right';
+  } else if (compareDiffOverlayTarget === 'right') {
+    compareDiffOverlayTarget = 'both';
+  } else {
+    compareDiffOverlayTarget = 'left';
+  }
+
+  renderCompareDifferenceOverlay();
+  centerPreviewOnActiveDifferenceIfEnabled();
+});
+
+bindClickAction(compareDiffAutoCenterButton, () => {
+  if (!isSideBySideCompareActive() || compareDiffRegions.length === 0) {
+    return;
+  }
+
+  compareDiffAutoCenterEnabled = !compareDiffAutoCenterEnabled;
+  updateCompareDiffNavigationUi();
+
+  if (compareDiffAutoCenterEnabled) {
+    centerPreviewOnActiveDifferenceIfEnabled();
+  }
+});
+
 compareSlider?.addEventListener('input', () => {
+  if (isSideBySideCompareActive()) {
+    return;
+  }
+
   const nextValue = Number.parseFloat(compareSlider.value);
   if (!Number.isFinite(nextValue)) {
     return;
@@ -1575,7 +2309,7 @@ compareSlider?.addEventListener('input', () => {
 });
 
 compareDivider?.addEventListener('pointerdown', (event) => {
-  if (event.button !== 0 || !compareEnabled || !hasComparisonImage()) {
+  if (event.button !== 0 || !compareEnabled || !hasComparisonImage() || isSideBySideCompareActive()) {
     return;
   }
 
@@ -1614,7 +2348,7 @@ compareDivider?.addEventListener('pointercancel', (event) => {
 });
 
 compareDivider?.addEventListener('dblclick', (event) => {
-  if (!compareEnabled || !hasComparisonImage()) {
+  if (!compareEnabled || !hasComparisonImage() || isSideBySideCompareActive()) {
     return;
   }
 
@@ -1781,7 +2515,11 @@ previewBody?.addEventListener('pointerdown', (event) => {
     return;
   }
 
-  if (fitMode) {
+  const isPannable = preview.scrollWidth > preview.clientWidth + 1
+    || preview.scrollHeight > preview.clientHeight + 1;
+  preview.classList.toggle('pan-enabled', isPannable);
+
+  if (!isPannable) {
     return;
   }
 
@@ -1883,11 +2621,19 @@ image?.addEventListener('load', () => {
   }
   scheduleInitialViewModeDecision();
   requestOverviewMapViewportUpdate();
+
+  if (isSideBySideCompareActive()) {
+    scheduleCompareDifferenceAnalysis();
+  }
 });
 
 compareImage?.addEventListener('load', () => {
   compareImage.setAttribute('draggable', 'false');
   applyCompareSplit();
+
+  if (isSideBySideCompareActive()) {
+    scheduleCompareDifferenceAnalysis();
+  }
 });
 
 window.addEventListener('message', (event) => {
@@ -1954,6 +2700,7 @@ if (hasComparisonImage()) {
 } else {
   updateCompareControlsUi();
 }
+clearCompareDifferenceOverlay(true);
 if (compareSlider) {
   compareSlider.value = String(compareSplitPercent);
 }
@@ -1965,6 +2712,10 @@ if (image?.complete && image.naturalWidth > 0 && image.naturalHeight > 0) {
 }
 
 preview?.addEventListener('scroll', () => {
+  if (isSideBySideCompareActive()) {
+    renderCompareDifferenceOverlay();
+  }
+
   requestOverviewMapViewportUpdate();
 });
 

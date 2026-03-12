@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
+## [1.6.0] - 2026-03-15
+### Added
+- Added a dedicated side-by-side comparison mode in the toolbar.
+- Added visual difference detection overlays directly on compared images.
+- Added difference navigation controls (previous/next) with one region displayed at a time.
+- Added difference overlay target switching (`left`, `right`, `both`).
+- Added optional auto-centering on the currently selected difference region.
+- Added high-resolution SVG comparison samples in `test-images/diff-test-a.svg` and `test-images/diff-test-b.svg`.
+
+
 ## [1.5.2] - 2026-03-11
 ### Added
 - Added two dominant color performance settings:

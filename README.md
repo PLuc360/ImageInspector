@@ -2,7 +2,7 @@
 
 Image Inspector is a VS Code extension that opens images in a dedicated custom editor to inspect visual content and metadata side by side.
 
-Current version: 1.5.0
+Current version: 1.6.0
 
 ## Highlights
 
@@ -12,6 +12,7 @@ Current version: 1.5.0
 - Color picker tool with pixel loupe and live pixel info (position + color)
 - Overview minimap with current viewport rectangle and click/drag recentering
 - Before/after comparison mode with an interactive split divider
+- Side-by-side comparison mode with visual difference detection overlays
 - Advanced ICO support with internal variant gallery when available
 - Automatic webview refresh when the source image file changes
 - User customization options (toolbar position, accent color, loupe settings)
@@ -66,7 +67,7 @@ npm run compile
 
 ### From local VSIX package
 
-The workspace also includes a local VSIX package (example: image-inspector-1.5.0.vsix) that can be installed directly from VS Code.
+The workspace also includes a local VSIX package (example: image-inspector-1.6.0.vsix) that can be installed directly from VS Code.
 
 ## Usage
 
@@ -126,6 +127,11 @@ Webview shortcut:
 - Pick a comparison image from the toolbar or dedicated command
 - Interactive split slider
 - Vertical/horizontal split orientation
+- Dedicated side-by-side mode in the toolbar
+- Automatic difference region detection with visual bounding boxes
+- Difference navigation controls (previous/next, one region at a time)
+- Difference overlay target control (left image, right image, both)
+- Optional auto-center on selected difference
 - Safety check: comparison requires matching width and height
 
 ### ICO handling
@@ -193,13 +199,14 @@ Recommended flow:
 
 ## Recent updates
 
-Version 1.5.0 notably includes:
+Version 1.6.0 notably includes:
 
-- before/after comparison mode
-- Set Comparison Image command
-- bounded performance caches (converted previews and ICO)
-- customizable accent color
-- Open with Details command registration fix
+- side-by-side comparison mode
+- visual difference detection overlays with one-at-a-time navigation
+- difference overlay target selector (left/right/both)
+- optional auto-center on selected difference
+- improved comparison detection pipeline (nested-region filtering and nearby-region merge)
+- improved fit and pan behavior in side-by-side mode for large landscape images
 
 See CHANGELOG.md for full release notes.
 
@@ -213,7 +220,7 @@ This project is distributed under the MIT License. See LICENSE.
 
 Image Inspector est une extension VS Code qui ouvre les images dans un éditeur personnalisé pour inspecter visuellement les fichiers et leurs métadonnées.
 
-Version actuelle: 1.5.0
+Version actuelle: 1.6.0
 
 ## Points forts
 
@@ -223,6 +230,7 @@ Version actuelle: 1.5.0
 - Outil pipette avec loupe pixel et informations en direct (coordonnées + couleur)
 - Mini-carte (overview) avec rectangle de viewport et recentrage par clic/glisser
 - Mode comparaison avant/après avec séparateur interactif
+- Mode comparaison côte à côte avec détection visuelle des différences
 - Support ICO avancé: galerie des variantes internes quand disponibles
 - Rafraîchissement automatique du webview lors de la modification du fichier image
 - Paramètres de personnalisation (position toolbar, couleur d'accent, réglages de loupe)
@@ -277,7 +285,7 @@ npm run compile
 
 ### Depuis un package VSIX local
 
-Le projet contient aussi un package VSIX local (exemple: image-inspector-1.5.0.vsix) qui peut être installé via VS Code.
+Le projet contient aussi un package VSIX local (exemple: image-inspector-1.6.0.vsix) qui peut être installé via VS Code.
 
 ## Utilisation
 
@@ -337,6 +345,11 @@ Raccourcis dans le webview:
 - Sélection d'une image de comparaison depuis la toolbar ou la commande dédiée
 - Slider de séparation interactif
 - Orientation verticale ou horizontale
+- Mode côte à côte dédié dans la toolbar
+- Détection automatique des zones de différences avec encadrement visuel
+- Navigation des différences (précédente/suivante, une zone à la fois)
+- Cible d'affichage des différences (image gauche, image droite, les deux)
+- Option d'auto-centrage sur la différence sélectionnée
 - Vérification de sécurité: dimensions identiques requises entre image principale et image de comparaison
 
 ### Gestion ICO
@@ -404,13 +417,14 @@ Cycle recommandé:
 
 ## Historique récent
 
-La version 1.5.0 apporte notamment:
+La version 1.6.0 apporte notamment:
 
-- mode comparaison avant/après
-- commande Set Comparison Image
-- caches bornés pour performances (aperçus convertis et ICO)
-- personnalisation de la couleur d'accent
-- correctif de la commande Open with Details
+- mode comparaison côte à côte
+- détection visuelle des différences avec navigation zone par zone
+- sélecteur de cible d'overlay des différences (gauche/droite/les deux)
+- auto-centrage optionnel sur la différence sélectionnée
+- amélioration de la détection (filtrage des zones imbriquées et fusion des zones proches)
+- amélioration du fit/pan en comparaison côte à côte sur images larges
 
 Consulter CHANGELOG.md pour le détail complet.
 

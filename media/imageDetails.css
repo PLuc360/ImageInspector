@@ -115,10 +115,27 @@ body {
   min-width: 100%;
   width: max-content;
   height: max-content;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 0;
+}
+
+.preview-body.side-by-side-mode {
+  align-items: center;
+  justify-content: flex-start;
+  gap: 14px;
+  padding: 12px;
+}
+
+.preview-body.side-by-side-mode #preview-image,
+.preview-body.side-by-side-mode .compare-image {
+  position: relative;
+  left: auto;
+  top: auto;
+  clip-path: none;
+  box-shadow: 0 0 0 1px rgba(var(--toolbar-green-accent-rgb), 0.16);
 }
 
 .preview img.fit-mode {
@@ -276,6 +293,7 @@ body {
 .zoom-toolbar #zoom-select.is-active,
 .zoom-toolbar #pipette-tool.is-active,
 .zoom-toolbar #compare-tool.is-active,
+.zoom-toolbar #compare-side-by-side.is-active,
 .zoom-toolbar #info-toggle.is-active {
   background: var(--toolbar-green-accent-bg);
   border-color: var(--toolbar-green-accent-border);
@@ -285,6 +303,7 @@ body {
 .zoom-toolbar #zoom-select.is-active:hover,
 .zoom-toolbar #pipette-tool.is-active:hover,
 .zoom-toolbar #compare-tool.is-active:hover,
+.zoom-toolbar #compare-side-by-side.is-active:hover,
 .zoom-toolbar #info-toggle.is-active:hover {
   background: var(--toolbar-green-accent-bg-hover);
 }
@@ -337,6 +356,92 @@ body {
 }
 
 .compare-controls.is-hidden {
+  display: none;
+}
+
+.compare-controls.is-side-by-side .compare-orientation-button,
+.compare-controls.is-side-by-side input[type='range'] {
+  display: none;
+}
+
+.compare-diff-nav {
+  display: none;
+}
+
+.compare-controls.is-side-by-side .compare-diff-nav {
+  display: inline-flex;
+}
+
+.compare-diff-prev,
+.compare-diff-next,
+.compare-diff-target,
+.compare-diff-autocenter {
+  border: 1px solid var(--vscode-button-border, transparent);
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+  border-radius: 999px;
+  height: 26px;
+  min-width: 26px;
+  padding: 0 7px;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+}
+
+.compare-diff-prev:hover,
+.compare-diff-next:hover,
+.compare-diff-target:hover,
+.compare-diff-autocenter:hover {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.compare-diff-prev:disabled,
+.compare-diff-next:disabled,
+.compare-diff-target:disabled,
+.compare-diff-autocenter:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.compare-diff-autocenter.is-active {
+  background: var(--toolbar-green-accent-bg);
+  border-color: var(--toolbar-green-accent-border);
+  color: var(--vscode-foreground);
+}
+
+.compare-diff-autocenter.is-active:hover {
+  background: var(--toolbar-green-accent-bg-hover);
+}
+
+.compare-diff-index {
+  min-width: 40px;
+  justify-content: center;
+  color: var(--vscode-descriptionForeground);
+  font-size: 0.74rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.compare-diff-target[data-target='left'] {
+  color: #8bd1ff;
+}
+
+.compare-diff-target[data-target='right'] {
+  color: #ffb86b;
+}
+
+.compare-diff-target[data-target='both'] {
+  color: #7de0a2;
+}
+
+.compare-diff-overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.compare-diff-overlay.is-hidden {
   display: none;
 }
 

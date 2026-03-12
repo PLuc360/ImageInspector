@@ -172,6 +172,16 @@ export function buildCustomEditorWebview(
         <button id="compare-tool" type="button" title="Before/after compare" aria-label="Before/after compare" aria-pressed="false">
           <span class="icon" aria-hidden="true">⇆</span>
         </button>
+        <button id="compare-side-by-side" type="button" title="Side-by-side compare" aria-label="Side-by-side compare" aria-pressed="false">
+          <span class="icon" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:inline;vertical-align:middle">
+              <rect x="2.5" y="4" width="6.5" height="11" rx="1.4" stroke="currentColor" stroke-width="1.4"/>
+              <rect x="11" y="4" width="6.5" height="11" rx="1.4" stroke="currentColor" stroke-width="1.4"/>
+              <path d="M10 5.2v8.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-dasharray="1.8 1.8"/>
+              <path d="M9.2 2.7l.65 1.35 1.5.18-1.1 1.02.3 1.47-1.35-.72-1.35.72.3-1.47-1.1-1.02 1.5-.18.65-1.35z" fill="currentColor"/>
+            </svg>
+          </span>
+        </button>
         <span id="zoom-label" class="zoom-label">Fit</span>
       </div>
       <div id="compare-controls" class="compare-controls${hasComparisonImage ? '' : ' is-hidden'}" aria-label="Comparison controls">
@@ -192,8 +202,34 @@ export function buildCustomEditorWebview(
           </span>
         </button>
         <input id="compare-slider" type="range" min="0" max="100" value="50" step="1" aria-label="Comparison split" />
+        <button id="compare-diff-prev" type="button" class="compare-diff-nav compare-diff-prev" aria-label="Previous difference" title="Previous difference">
+          <span class="icon" aria-hidden="true">◀</span>
+        </button>
+        <span id="compare-diff-index" class="compare-diff-nav compare-diff-index" aria-live="polite">0/0</span>
+        <button id="compare-diff-next" type="button" class="compare-diff-nav compare-diff-next" aria-label="Next difference" title="Next difference">
+          <span class="icon" aria-hidden="true">▶</span>
+        </button>
+        <button id="compare-diff-target" type="button" class="compare-diff-nav compare-diff-target" aria-label="Show differences on left image" title="Show differences on left image" data-target="left">
+          <span class="icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:inline;vertical-align:middle">
+              <rect x="2.5" y="3.5" width="7.5" height="13" rx="1.6" fill="currentColor" fill-opacity="0.18" stroke="currentColor" stroke-width="1.2"/>
+              <rect x="10" y="3.5" width="7.5" height="13" rx="1.6" stroke="currentColor" stroke-width="1.2"/>
+            </svg>
+          </span>
+        </button>
+        <button id="compare-diff-autocenter" type="button" class="compare-diff-nav compare-diff-autocenter" aria-label="Auto-center selected difference" title="Auto-center selected difference" aria-pressed="false">
+          <span class="icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:inline;vertical-align:middle">
+              <circle cx="10" cy="10" r="5.2" stroke="currentColor" stroke-width="1.2"/>
+              <circle cx="10" cy="10" r="1.6" fill="currentColor"/>
+              <path d="M10 2.5v2.2M10 15.3v2.2M2.5 10h2.2M15.3 10h2.2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+            </svg>
+          </span>
+        </button>
         <span id="compare-image-label" class="compare-image-label">${hasComparisonImage ? escapeHtml(comparisonImageLabel) : 'No comparison image'}</span>
       </div>
+      <canvas id="compare-diff-overlay" class="compare-diff-overlay is-hidden" aria-hidden="true"></canvas>
+      <canvas id="compare-diff-overlay-secondary" class="compare-diff-overlay is-hidden" aria-hidden="true"></canvas>
       <aside id="info-overlay" class="info-overlay is-hidden" aria-label="Image information">
         <div id="info-overlay-handle" class="info-overlay-handle" title="Move">
           <span class="drag-icon" aria-hidden="true">⋮⋮</span>
