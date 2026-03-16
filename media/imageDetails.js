@@ -67,7 +67,35 @@ const overviewMapViewport = document.getElementById('overview-map-viewport');
 const PIPETTE_RESULT_VISIBLE_DURATION_MS = 500;
 const PIPETTE_RESULT_FADE_DURATION_MS = 260;
 const selectedIcoSizeBadge = document.getElementById('selected-ico-size');
-const icoGalleryItems = Array.from(document.querySelectorAll('.ico-gallery-item'));
+function attachIcoGalleryListeners() {
+  let icoGalleryItems = [];
+  for (const galleryItem of icoGalleryItems) {
+    galleryItem.addEventListener('click', (event) => {
+      event.preventDefault();
+
+      const nextSource = galleryItem.getAttribute('data-image-source');
+      if (!nextSource) {
+        return;
+      }
+
+      setActiveIcoGalleryItem(galleryItem);
+
+      // Mise à jour couleur dominante
+      const dominantColorHex = galleryItem.getAttribute('data-dominant-color-hex');
+      const dominantColorRgb = galleryItem.getAttribute('data-dominant-color-rgb');
+      if (dominantColorHex) {
+        applyDominantColor(dominantColorHex, dominantColorRgb || '');
+      }
+
+      image.setAttribute('src', nextSource);
+      syncOverviewMapSource();
+      updateView();
+    });
+  }
+}
+document.addEventListener('DOMContentLoaded', () => {
+  initializeIcoGallery();
+});
 let isDraggingOverviewMap = false;
 let overviewMapDragPointerId = null;
 let overviewMapViewportFrameId = null;
@@ -222,6 +250,7 @@ function applyThemeAccentRgb(accentRgb) {
 }
 
 function applyDominantColor(hexColor, rgbColor) {
+    console.log('[ImageInspector] applyDominantColor', hexColor, rgbColor);
   if (!layoutElement || typeof hexColor !== 'string' || hexColor.trim().length === 0) {
     return;
   }
@@ -1314,6 +1343,7 @@ function syncActiveIcoGalleryItemFromImage() {
 }
 
 function initializeIcoGallery() {
+  icoGalleryItems = Array.from(document.querySelectorAll('.ico-gallery-item'));
   if (!image || !icoGalleryItems.length) {
     return;
   }
@@ -1329,9 +1359,14 @@ function initializeIcoGallery() {
 
       setActiveIcoGalleryItem(galleryItem);
 
-      if (image.getAttribute('src') === nextSource) {
-        return;
+      // Mise à jour couleur dominante
+      const dominantColorHex = galleryItem.getAttribute('data-dominant-color-hex');
+      const dominantColorRgb = galleryItem.getAttribute('data-dominant-color-rgb');
+      if (dominantColorHex) {
+        applyDominantColor(dominantColorHex, dominantColorRgb || '');
       }
+
+      // Toujours appliquer la couleur dominante, même si l'image ne change pas
 
       if (pipetteMode) {
         setPipetteMode(false);

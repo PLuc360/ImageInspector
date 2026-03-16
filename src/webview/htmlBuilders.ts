@@ -29,6 +29,8 @@ export interface IcoVariantViewModel {
   width: number;
   height: number;
   imageSource: string;
+  dominantColorHex: string;
+  dominantColorRgb: string;
 }
 
 /**
@@ -115,6 +117,8 @@ export function buildCustomEditorWebview(
         class="ico-gallery-item${index === 0 ? ' is-active' : ''}"
         data-image-source="${escapeHtml(variant.imageSource)}"
         data-size-label="${escapeHtml(variant.label)}"
+        data-dominant-color-hex="${escapeHtml(variant.dominantColorHex)}"
+        data-dominant-color-rgb="${escapeHtml(variant.dominantColorRgb)}"
         title="${escapeHtml(variant.label)}"
         aria-label="Show ${escapeHtml(variant.label)} icon"
         aria-pressed="${index === 0 ? 'true' : 'false'}"

@@ -850,10 +850,31 @@ async function getImageDetails(
       throw error;
     }
 
-    const icoEntry = await getIcoPrimaryEntry(filePath);
-    const width = icoEntry?.width ?? 0;
-    const height = icoEntry?.height ?? 0;
-    const estimatedChannels = Math.max(1, Math.ceil((icoEntry?.bitCount ?? 0) / 8));
+    // Extraction du variant principal
+    const buffer = await fs.readFile(filePath);
+    const entries = await parseIcoEntries(buffer);
+    const primaryEntry = entries.slice().sort((a, b) => (b.width * b.height - a.width * a.height) || (b.bitCount - a.bitCount))[0];
+    const width = primaryEntry?.width ?? 0;
+    const height = primaryEntry?.height ?? 0;
+    const estimatedChannels = Math.max(1, Math.ceil((primaryEntry?.bitCount ?? 0) / 8));
+
+    let dominantColorHex = '#808080';
+    let dominantColorRgb = 'rgb(128, 128, 128)';
+
+    if (resolvedOptions?.includeDominantColor && primaryEntry) {
+      const imageEndOffset = primaryEntry.imageOffset + primaryEntry.bytesInResource;
+      if (primaryEntry.isPng && primaryEntry.imageOffset < buffer.length && imageEndOffset <= buffer.length) {
+        const imageBuffer = buffer.subarray(primaryEntry.imageOffset, imageEndOffset);
+        try {
+          const stats = await sharp(imageBuffer).stats();
+          const dominant = stats.dominant;
+          dominantColorHex = rgbToHex(dominant.r, dominant.g, dominant.b);
+          dominantColorRgb = `rgb(${dominant.r}, ${dominant.g}, ${dominant.b})`;
+        } catch (e) {
+          // fallback couleur grise
+        }
+      }
+    }
 
     const details: ImageDetailsViewModel = {
       fileName: path.basename(filePath),
@@ -866,10 +887,10 @@ async function getImageDetails(
       format: 'ICO',
       space: 'Unknown',
       channels: estimatedChannels,
-      hasAlpha: (icoEntry?.bitCount ?? 0) >= 32,
+      hasAlpha: (primaryEntry?.bitCount ?? 0) >= 32,
       density: undefined,
-      dominantColorHex: '#808080',
-      dominantColorRgb: 'rgb(128, 128, 128)'
+      dominantColorHex,
+      dominantColorRgb
     };
 
     setBoundedCachedValue(imageDetailsCache, detailsCacheKey, details, MAX_IMAGE_DETAILS_CACHE_ENTRIES);
@@ -1109,25 +1130,38 @@ async function getIcoGalleryItems(filePath: string): Promise<IcoVariantViewModel
   const buffer = await fs.readFile(filePath);
   const entries = await parseIcoEntries(buffer);
 
-  const variants = entries
-    .map((entry, index) => {
-      const imageEndOffset = entry.imageOffset + entry.bytesInResource;
-      if (!entry.isPng || entry.imageOffset >= buffer.length || imageEndOffset > buffer.length) {
-        return undefined;
-      }
+  const variantPromises = entries.map(async (entry, index) => {
+    const imageEndOffset = entry.imageOffset + entry.bytesInResource;
+    if (!entry.isPng || entry.imageOffset >= buffer.length || imageEndOffset > buffer.length) {
+      return undefined;
+    }
 
-      const imageBuffer = buffer.subarray(entry.imageOffset, imageEndOffset);
-      const label = `${entry.width}x${entry.height}`;
+    const imageBuffer = buffer.subarray(entry.imageOffset, imageEndOffset);
+    const label = `${entry.width}x${entry.height}`;
 
-      return {
-        id: `ico-variant-${String(index + 1)}`,
-        label,
-        width: entry.width,
-        height: entry.height,
-        imageSource: toPngDataUri(imageBuffer)
-      } satisfies IcoVariantViewModel;
-    })
-    .filter((variant): variant is IcoVariantViewModel => Boolean(variant));
+    let dominantColorHex = '#808080';
+    let dominantColorRgb = 'rgb(128, 128, 128)';
+    try {
+      const stats = await sharp(imageBuffer).stats();
+      const dominant = stats.dominant;
+      dominantColorHex = rgbToHex(dominant.r, dominant.g, dominant.b);
+      dominantColorRgb = `rgb(${dominant.r}, ${dominant.g}, ${dominant.b})`;
+    } catch (e) {
+      // fallback couleur grise
+    }
+
+    return {
+      id: `ico-variant-${String(index + 1)}`,
+      label,
+      width: entry.width,
+      height: entry.height,
+      imageSource: toPngDataUri(imageBuffer),
+      dominantColorHex,
+      dominantColorRgb
+    } as IcoVariantViewModel;
+  });
+  const variantsRaw = await Promise.all(variantPromises);
+  const variants: IcoVariantViewModel[] = variantsRaw.filter((variant): variant is IcoVariantViewModel => Boolean(variant));
 
   setBoundedCachedValue(icoGalleryCache, cacheKey, variants, MAX_ICO_CACHE_ENTRIES);
   return variants;
