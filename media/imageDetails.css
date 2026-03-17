@@ -586,58 +586,6 @@ body {
   font-size: 0.78rem;
 }
 
-.badge {
-  border: 1px solid var(--vscode-panel-border);
-  border-radius: 999px;
-  padding: 1px 10px;
-  font-size: 0.74rem;
-  color: var(--vscode-descriptionForeground);
-  background: var(--vscode-editor-background);
-  transition: background 0.2s;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 22px;
-}
-
-/* Extension-specific gradients */
-.badge-ext-png {
-  background: linear-gradient(90deg, #3566a8 0%, #23406a 100%);
-  color: #fff;
-}
-.badge-ext-jpg, .badge-ext-jpeg {
-  background: linear-gradient(90deg, #bfa13a 0%, #7a5e13 100%);
-  color: #fff;
-}
-.badge-ext-gif {
-  background: linear-gradient(90deg, #b04a5a 0%, #7a2d3a 100%);
-  color: #fff;
-}
-.badge-ext-bmp {
-  background: linear-gradient(90deg, #6c7380 0%, #3a3e44 100%);
-  color: #fff;
-}
-.badge-ext-webp {
-  background: linear-gradient(90deg, #218c6a 0%, #14513a 100%);
-  color: #fff;
-}
-.badge-ext-svg {
-  background: linear-gradient(90deg, #5a3a7a 0%, #2d1a3a 100%);
-  color: #fff;
-}
-.badge-ext-tiff, .badge-ext-tif {
-  background: linear-gradient(90deg, #3a5a6c 0%, #1a2d3a 100%);
-  color: #fff;
-}
-.badge-ext-avif {
-  background: linear-gradient(90deg, #217a9a 0%, #12405a 100%);
-  color: #fff;
-}
-.badge-ext-heic, .badge-ext-heif {
-  background: linear-gradient(90deg, #a85a7a 0%, #6a2340 100%);
-  color: #fff;
-}
-
 .color-chip {
   width: 30px;
   height: 14px;

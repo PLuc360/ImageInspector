@@ -1,11 +1,236 @@
+/**
+ * Generates a PNG thumbnail (96x96) for an image.
+ * @param filePath Absolute path to the image
+ * @returns PNG Buffer
+ */
+async function generateThumbnailPNG(filePath: string): Promise<Buffer> {
+  return await sharp(filePath)
+    .resize(96, 96, { fit: 'cover' })
+    .png({ quality: 80 })
+    .toBuffer();
+}
+
+/**
+ * Prepares an array of GalleryImage with thumbnail for binary serialization.
+ * @param images Array of objects {src, name, type, size, width, height, filePath}
+ * @returns Array of objects {src, name, type, size, width, height, thumbnail}
+ */
+async function prepareGalleryImagesWithThumb(images: Array<{src: string, name: string, type: string, size: number, width: number, height: number, filePath: string}>): Promise<Array<{src: string, name: string, type: string, size: number, width: number, height: number, thumbnail: Buffer}>> {
+  return await Promise.all(images.map(async img => {
+    let thumbnail: Buffer;
+    try {
+      thumbnail = await generateThumbnailPNG(img.filePath);
+    } catch {
+      thumbnail = Buffer.alloc(0);
+    }
+    return {
+      src: img.src,
+      name: img.name,
+      type: img.type,
+      size: img.size,
+      width: img.width,
+      height: img.height,
+      thumbnail
+    };
+  }));
+}
+/**
+ * Binary structure for GalleryImage with PNG thumbnail.
+ * src: 128 bytes (UTF-8, zero padding)
+ * name: 64 bytes
+ * type: 8 bytes
+ * size: 4 bytes
+ * width: 4 bytes
+ * height: 4 bytes
+ * thumbnailSize: 4 bytes
+ * thumbnail: variable (PNG buffer)
+ */
+const GALLERY_IMAGE_BIN_STRUCT_THUMB = {
+  srcLen: 128,
+  nameLen: 64,
+  typeLen: 8,
+  sizeLen: 4,
+  widthLen: 4,
+  heightLen: 4,
+  thumbSizeLen: 4,
+};
+
+/**
+ * Serializes an array of GalleryImage with thumbnail to binary.
+ * @param images Array of objects {src, name, type, size, width, height, thumbnail}
+ * @returns Binary Buffer
+ */
+function serializeGalleryImagesBinWithThumb(images: Array<{src: string, name: string, type: string, size: number, width: number, height: number, thumbnail: Buffer}>): Buffer {
+  const { srcLen, nameLen, typeLen, sizeLen, widthLen, heightLen, thumbSizeLen } = GALLERY_IMAGE_BIN_STRUCT_THUMB;
+  // Compute total size
+  let totalLen = 0;
+  const thumbSizes = images.map(img => img.thumbnail.length);
+  totalLen = images.reduce((acc, img, idx) => acc + srcLen + nameLen + typeLen + sizeLen + widthLen + heightLen + thumbSizeLen + thumbSizes[idx], 0);
+  const buf = Buffer.alloc(totalLen);
+  let offset = 0;
+  images.forEach((img, idx) => {
+    buf.fill(0, offset, offset + srcLen + nameLen + typeLen);
+    buf.write(img.src.slice(0, srcLen), offset, srcLen, 'utf8');
+    offset += srcLen;
+    buf.write(img.name.slice(0, nameLen), offset, nameLen, 'utf8');
+    offset += nameLen;
+    buf.write(img.type.slice(0, typeLen), offset, typeLen, 'utf8');
+    offset += typeLen;
+    buf.writeUInt32LE(img.size, offset);
+    offset += sizeLen;
+    buf.writeUInt32LE(img.width, offset);
+    offset += widthLen;
+    buf.writeUInt32LE(img.height, offset);
+    offset += heightLen;
+    buf.writeUInt32LE(img.thumbnail.length, offset);
+    offset += thumbSizeLen;
+    img.thumbnail.copy(buf, offset, 0, img.thumbnail.length);
+    offset += img.thumbnail.length;
+  });
+  return buf;
+}
+
+/**
+ * Deserializes a binary Buffer into an array of GalleryImage with thumbnail.
+ * @param buf Binary Buffer
+ * @returns Array of objects {src, name, type, size, width, height, thumbnail}
+ */
+function deserializeGalleryImagesBinWithThumb(buf: Buffer): Array<{src: string, name: string, type: string, size: number, width: number, height: number, thumbnail: Buffer}> {
+  const { srcLen, nameLen, typeLen, sizeLen, widthLen, heightLen, thumbSizeLen } = GALLERY_IMAGE_BIN_STRUCT_THUMB;
+  const images = [];
+  let offset = 0;
+  while (offset + srcLen + nameLen + typeLen + sizeLen + widthLen + heightLen + thumbSizeLen <= buf.length) {
+    const src = buf.toString('utf8', offset, offset + srcLen).replace(/\0+$/, '');
+    const name = buf.toString('utf8', offset + srcLen, offset + srcLen + nameLen).replace(/\0+$/, '');
+    const type = buf.toString('utf8', offset + srcLen + nameLen, offset + srcLen + nameLen + typeLen).replace(/\0+$/, '');
+    const size = buf.readUInt32LE(offset + srcLen + nameLen + typeLen);
+    const width = buf.readUInt32LE(offset + srcLen + nameLen + typeLen + sizeLen);
+    const height = buf.readUInt32LE(offset + srcLen + nameLen + typeLen + sizeLen + widthLen);
+    const thumbSize = buf.readUInt32LE(offset + srcLen + nameLen + typeLen + sizeLen + widthLen + heightLen);
+    const thumbStart = offset + srcLen + nameLen + typeLen + sizeLen + widthLen + heightLen + thumbSizeLen;
+    const thumbnail = buf.slice(thumbStart, thumbStart + thumbSize);
+    images.push({ src, name, type, size, width, height, thumbnail });
+    offset = thumbStart + thumbSize;
+  }
+  return images;
+}
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import sharp from 'sharp';
 
+/**
+ * Generates a URI accessible by the webview for an image.
+ * @param webview Target webview
+ * @param filePath Absolute path to the image
+ * @returns URI string
+ */
+function getWebviewImageSrc(webview: vscode.Webview, filePath: string): string {
+  return webview.asWebviewUri(vscode.Uri.file(filePath)).toString();
+}
+/**
+ * Compact binary structure for GalleryImage.
+ * src: 128 bytes (UTF-8, zero padding)
+ * name: 64 bytes (UTF-8, zero padding)
+ * type: 8 bytes (UTF-8, zero padding)
+ * size: 4 bytes (uint32)
+ * width: 4 bytes (uint32)
+ * height: 4 bytes (uint32)
+ * Total: 212 bytes per image.
+ */
+
+const GALLERY_IMAGE_BIN_STRUCT = {
+  srcLen: 128,
+  nameLen: 64,
+  typeLen: 8,
+  sizeLen: 4,
+  widthLen: 4,
+  heightLen: 4,
+  totalLen: 128 + 64 + 8 + 4 + 4 + 4
+};
+
+/**
+ * Serializes an array of GalleryImage to binary.
+ * @param images Array of GalleryImage objects
+ * @returns Binary Buffer
+ */
+function serializeGalleryImagesBin(images: Array<{src: string, name: string, type: string, size: number, width: number, height: number}>): Buffer {
+  const { srcLen, nameLen, typeLen, sizeLen, widthLen, heightLen, totalLen } = GALLERY_IMAGE_BIN_STRUCT;
+  const buf = Buffer.alloc(totalLen * images.length);
+  images.forEach((img, idx) => {
+    let offset = idx * totalLen;
+    buf.fill(0, offset, offset + totalLen);
+    buf.write(img.src.slice(0, srcLen), offset, srcLen, 'utf8');
+    offset += srcLen;
+    buf.write(img.name.slice(0, nameLen), offset, nameLen, 'utf8');
+    offset += nameLen;
+    buf.write(img.type.slice(0, typeLen), offset, typeLen, 'utf8');
+    offset += typeLen;
+    buf.writeUInt32LE(img.size, offset);
+    offset += sizeLen;
+    buf.writeUInt32LE(img.width, offset);
+    offset += widthLen;
+    buf.writeUInt32LE(img.height, offset);
+  });
+  return buf;
+}
+
+/**
+ * Deserializes a binary Buffer into an array of GalleryImage.
+ * @param buf Binary Buffer
+ * @returns Array of GalleryImage objects
+ */
+function deserializeGalleryImagesBin(buf: Buffer): Array<{src: string, name: string, type: string, size: number, width: number, height: number}> {
+  const { srcLen, nameLen, typeLen, sizeLen, widthLen, heightLen, totalLen } = GALLERY_IMAGE_BIN_STRUCT;
+  const images = [];
+  for (let offset = 0; offset + totalLen <= buf.length; offset += totalLen) {
+    const src = buf.toString('utf8', offset, offset + srcLen).replace(/\0+$/, '');
+    const name = buf.toString('utf8', offset + srcLen, offset + srcLen + nameLen).replace(/\0+$/, '');
+    const type = buf.toString('utf8', offset + srcLen + nameLen, offset + srcLen + nameLen + typeLen).replace(/\0+$/, '');
+    const size = buf.readUInt32LE(offset + srcLen + nameLen + typeLen);
+    const width = buf.readUInt32LE(offset + srcLen + nameLen + typeLen + sizeLen);
+    const height = buf.readUInt32LE(offset + srcLen + nameLen + typeLen + sizeLen + widthLen);
+    images.push({ src, name, type, size, width, height });
+  }
+  return images;
+}
+
+/**
+ * Writes the binary metadata file at the root of the folder.
+ * @param folderPath Folder path
+ * @param images Array of GalleryImage
+ */
+async function writeGalleryMetaBin(folderPath: string, images: Array<{src: string, name: string, type: string, size: number, width: number, height: number}>): Promise<void> {
+  const binPath = path.join(folderPath, 'imageGalleryMeta.bin');
+  // Add filePath if missing
+  const imagesWithFilePath = images.map(img => ({
+    ...img,
+    filePath: typeof img.src === 'string' ? img.src : ''
+  }));
+  // Prepare images with thumbnails
+  const imagesWithThumb = await prepareGalleryImagesWithThumb(imagesWithFilePath);
+  const buf = serializeGalleryImagesBinWithThumb(imagesWithThumb);
+  await fs.writeFile(binPath, buf);
+}
+
+/**
+ * Reads the binary metadata file at the root of the folder.
+ * @param folderPath Folder path
+ * @returns Array of GalleryImage
+ */
+async function readGalleryMetaBin(folderPath: string): Promise<Array<{src: string, name: string, type: string, size: number, width: number, height: number}>> {
+  const binPath = path.join(folderPath, 'imageGalleryMeta.bin');
+  try {
+    const buf = await fs.readFile(binPath);
+    return deserializeGalleryImagesBin(buf);
+  } catch {
+    return [];
+  }
+}
 import {
   buildCustomEditorWebview,
   buildErrorWebview,
+  buildFolderGalleryWebview,
   type IcoVariantViewModel,
   type ImageDetailsViewModel
 } from './webview';
@@ -651,6 +876,243 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
 }
 
 /**
+ * Scans a folder for supported image files (non-recursive).
+ *
+ * @param folderPath Absolute path to the folder.
+ * @returns Sorted list of absolute image file paths found directly in the folder.
+ */
+async function scanFolderImages(folderPath: string): Promise<string[]> {
+  const entries = await fs.readdir(folderPath, { withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isFile() && isSupportedImage(entry.name))
+    .map((entry) => path.join(folderPath, entry.name))
+    .sort((a, b) => path.basename(a).localeCompare(path.basename(b), undefined, { sensitivity: 'base', numeric: true }));
+}
+
+/**
+ * Manages WebviewPanel instances for folder image galleries.
+ * One panel is kept alive per folder path.
+ */
+class ImageFolderGalleryPanel {
+  private static readonly activePanels = new Map<string, ImageFolderGalleryPanel>();
+  private readonly panel: vscode.WebviewPanel;
+  private readonly imageFiles: Array<{ src: string; filePath: string; name: string; type: string; size: number; width: number; height: number; dominantColorHex: string; dominantColorRgb: string }>;
+  private readonly storageKey: string;
+
+  /**
+   * Opens or reveals the gallery panel for the given folder.
+   *
+   * @param folderUri URI of the folder to display images from.
+   * @param context Extension context.
+   */
+  static async open(folderUri: vscode.Uri, context: vscode.ExtensionContext): Promise<void> {
+    const folderPath = folderUri.fsPath;
+    const storageKey = `galleryMeta:${folderPath}`;
+    const existing = ImageFolderGalleryPanel.activePanels.get(folderPath);
+    if (existing) {
+      existing.panel.reveal();
+      return;
+    }
+
+    const imageFiles = await scanFolderImages(folderPath);
+    let galleryImageMeta;
+    // Try to read the binary file with thumbnails
+    let binImages: Array<{src: string, name: string, type: string, size: number, width: number, height: number, thumbnail: Buffer}> = [];
+    try {
+      const binPath = path.join(folderPath, 'imageGalleryMeta.bin');
+      const buf = await fs.readFile(binPath);
+      binImages = deserializeGalleryImagesBinWithThumb(buf);
+    } catch {}
+    if (binImages.length === imageFiles.length) {
+      // Use binary cache
+      galleryImageMeta = binImages.map((img, idx) => ({
+        src: '', // will be updated after
+        filePath: imageFiles[idx],
+        name: img.name,
+        type: img.type,
+        size: img.size,
+        width: img.width,
+        height: img.height,
+        dominantColorHex: '#cccccc',
+        dominantColorRgb: 'rgb(204, 204, 204)',
+        thumbnail: img.thumbnail
+      }));
+    } else {
+      // Fallback: classic generation
+      galleryImageMeta = imageFiles.map((filePath) => ({
+        src: '',
+        filePath,
+        name: path.basename(filePath),
+        type: 'Loading...',
+        size: 0,
+        width: 0,
+        height: 0,
+        dominantColorHex: '#cccccc',
+        dominantColorRgb: 'rgb(204, 204, 204)'
+      }));
+    }
+      const instance = new ImageFolderGalleryPanel(folderUri, galleryImageMeta, context);
+      instance.imageFiles.forEach(img => {
+        img.src = getWebviewImageSrc(instance.panel.webview, img.filePath);
+      });
+      ImageFolderGalleryPanel.activePanels.set(folderPath, instance);
+      // Fix: capture variables for closure
+      const self = instance;
+      const folder = folderPath;
+
+    // Asynchronous loading of metadata per image
+    if (binImages.length === imageFiles.length) {
+      // If binary cache is valid, skip generation
+      self.imageFiles.forEach((img, index) => {
+        img.src = getWebviewImageSrc(self.panel.webview, img.filePath);
+        self.panel.webview.postMessage({
+          type: 'update-image-meta',
+          index,
+          meta: self.imageFiles[index]
+        });
+      });
+    } else {
+      // Classic generation if no cache
+      await Promise.all(imageFiles.map(async (filePath, index) => {
+        try {
+          const details = await getImageDetails(filePath, undefined, {
+            includeDominantColor: true,
+            dominantColorQuality: DEFAULT_DOMINANT_COLOR_QUALITY,
+            dominantColorFastSampleSize: DEFAULT_DOMINANT_COLOR_FAST_SAMPLE_SIZE
+          });
+          self.imageFiles[index] = {
+            src: getWebviewImageSrc(self.panel.webview, filePath),
+            filePath,
+            name: details.fileName,
+            type: details.format,
+            size: details.sizeBytes,
+            width: details.width,
+            height: details.height,
+            dominantColorHex: details.dominantColorHex,
+            dominantColorRgb: details.dominantColorRgb
+          };
+          self.panel.webview.postMessage({
+            type: 'update-image-meta',
+            index,
+            meta: self.imageFiles[index]
+          });
+          await context.workspaceState.update(storageKey, self.imageFiles);
+        } catch {
+          // In case of error, keep the placeholder
+        }
+      }));
+      // Prepare and write binary file with thumbnails after full collection
+      try {
+        const imagesWithThumb = await prepareGalleryImagesWithThumb(self.imageFiles);
+        const buf = serializeGalleryImagesBinWithThumb(imagesWithThumb);
+        await fs.writeFile(path.join(folder, 'imageGalleryMeta.bin'), buf);
+      } catch (err) {
+        // Log on failure, but do not block flow
+        console.error('Erreur lors de l\'écriture du fichier binaire de galerie:', err);
+      }
+    }
+  }
+
+  /**
+   * Creates and wires up the gallery WebviewPanel.
+   *
+   * @param folderUri URI of the folder being displayed.
+   * @param imageFiles Absolute paths of images found in the folder.
+   * @param context Extension context.
+   */
+  private constructor(
+    folderUri: vscode.Uri,
+    galleryImageMeta: Array<{ filePath: string; name: string; type: string; size: number; width: number; height: number; dominantColorHex: string; dominantColorRgb: string }>,
+    context: vscode.ExtensionContext
+  ) {
+    this.imageFiles = galleryImageMeta.map(img => ({
+      ...img,
+      src: '' // will be updated after
+    }));
+    const folderName = path.basename(folderUri.fsPath);
+    // Panel initialization
+    this.panel = vscode.window.createWebviewPanel(
+      'imageInspector.folderGallery',
+      `Gallery : ${folderName}`,
+      vscode.ViewColumn.One,
+      {
+        enableScripts: true,
+        localResourceRoots: [
+          vscode.Uri.joinPath(context.extensionUri, 'media'),
+          vscode.Uri.file(folderUri.fsPath)
+        ]
+      }
+    );
+    // Update src after panel creation
+    this.imageFiles.forEach(img => {
+      img.src = getWebviewImageSrc(this.panel.webview, img.filePath);
+    });
+    this.storageKey = `galleryMeta:${folderUri.fsPath}`;
+
+    this.panel.webview.html = buildFolderGalleryWebview(
+      this.panel.webview,
+      folderUri.fsPath,
+      galleryImageMeta,
+      context.extensionUri
+    );
+
+    this.panel.webview.onDidReceiveMessage(
+      (rawMessage: unknown) => {
+        if (!rawMessage || typeof rawMessage !== 'object' || !('type' in rawMessage)) {
+          return;
+        }
+
+        const message = rawMessage as { type: string; index?: unknown; binPath?: string };
+        // Handler for gallery binary file request
+        if (message.type === 'request-gallery-meta-bin' && typeof message.binPath === 'string') {
+          // Lecture du fichier binaire avec miniatures
+          const binPath = path.join(folderUri.fsPath, message.binPath);
+          fs.readFile(binPath).then(buf => {
+            const images = deserializeGalleryImagesBinWithThumb(buf).map(img => ({
+              ...img,
+              thumbnail: img.thumbnail.length > 0 ? img.thumbnail.toString('base64') : undefined
+            }));
+            this.panel.webview.postMessage({
+              type: 'response-gallery-meta-bin',
+              binPath: message.binPath,
+              images
+            });
+          }).catch(() => {
+            this.panel.webview.postMessage({
+              type: 'response-gallery-meta-bin',
+              binPath: message.binPath,
+              images: []
+            });
+          });
+          return;
+        }
+        // Handler pour ouverture d'image
+        if (message.type === 'open-image' && typeof message.index === 'number') {
+          const index = Math.trunc(message.index);
+          if (index < 0 || index >= this.imageFiles.length) {
+            return;
+          }
+          const imageUri = vscode.Uri.file(this.imageFiles[index].filePath);
+          void vscode.commands.executeCommand(
+            'vscode.openWith',
+            imageUri,
+            ImageDetailsCustomEditorProvider.viewType
+          );
+        }
+      },
+      undefined,
+      context.subscriptions
+    );
+
+    this.panel.onDidDispose(() => {
+      // Final metadata save
+      context.workspaceState.update(this.storageKey, this.imageFiles);
+      ImageFolderGalleryPanel.activePanels.delete(folderUri.fsPath);
+    }, undefined, context.subscriptions);
+  }
+}
+
+/**
  * Activates the extension and registers commands and providers.
  *
  * @param context Extension context.
@@ -715,6 +1177,19 @@ export function activate(context: vscode.ExtensionContext): void {
     void provider.refreshActivePanelFromConfiguration(event);
   });
 
+  const openFolderGalleryDisposable = vscode.commands.registerCommand(
+    'imageInspector.openFolderGallery',
+    async (resource?: unknown, resources?: unknown) => {
+      const folderUri = await resolveFolderUri(resource, resources);
+      if (!folderUri) {
+        void vscode.window.showInformationMessage('Select a folder in the explorer to open its gallery.');
+        return;
+      }
+
+      await ImageFolderGalleryPanel.open(folderUri, context);
+    }
+  );
+
   context.subscriptions.push(
     providerDisposable,
     showImageDetailsDisposable,
@@ -723,7 +1198,8 @@ export function activate(context: vscode.ExtensionContext): void {
     zoomResetDisposable,
     zoomFitDisposable,
     selectComparisonImageDisposable,
-    configurationChangeDisposable
+    configurationChangeDisposable,
+    openFolderGalleryDisposable
   );
 }
 
@@ -752,6 +1228,180 @@ async function resolveImageUri(resource?: vscode.Uri): Promise<vscode.Uri | unde
   });
 
   return selected?.[0];
+}
+
+/**
+ * Resolves a folder URI from command input, current editor, or picker.
+ *
+ * @param resource Optional value provided by command invocation.
+ * @param resources Optional list of selected values from explorer context.
+ * @returns Resolved folder URI or undefined when selection is canceled.
+ */
+async function resolveFolderUri(resource?: unknown, resources?: unknown): Promise<vscode.Uri | undefined> {
+  const explicitCandidates = collectUriCandidates(resources, resource);
+  const selectionCandidate = await findFirstDirectoryUri(explicitCandidates);
+  if (selectionCandidate) {
+    return selectionCandidate;
+  }
+
+  const workspaceFolders = vscode.workspace.workspaceFolders ?? [];
+  if (workspaceFolders.length === 1) {
+    const soleWorkspaceUri = workspaceFolders[0]?.uri;
+    if (soleWorkspaceUri && await isDirectoryUri(soleWorkspaceUri)) {
+      return soleWorkspaceUri;
+    }
+  }
+
+  if (workspaceFolders.length > 1) {
+    const workspaceItems = workspaceFolders.map((workspaceFolder) => ({
+      label: workspaceFolder.name,
+      description: workspaceFolder.uri.fsPath,
+      uri: workspaceFolder.uri
+    }));
+
+    const selectedWorkspace = await vscode.window.showQuickPick(workspaceItems, {
+      placeHolder: 'Select the workspace folder to open in gallery'
+    });
+
+    if (selectedWorkspace?.uri && await isDirectoryUri(selectedWorkspace.uri)) {
+      return selectedWorkspace.uri;
+          // Écriture du fichier binaire de galerie (avec miniatures)
+    }
+  }
+        // Écriture du fichier binaire de galerie (avec miniatures)
+
+  const editorUri = vscode.window.activeTextEditor?.document.uri;
+  if (workspaceFolders.length === 0 && editorUri?.scheme === 'file') {
+    const editorDirectoryUri = vscode.Uri.file(path.dirname(editorUri.fsPath));
+    if (await isDirectoryUri(editorDirectoryUri)) {
+      return editorDirectoryUri;
+    }
+  }
+
+  const selected = await vscode.window.showOpenDialog({
+    canSelectFiles: false,
+    canSelectFolders: true,
+    canSelectMany: false,
+    openLabel: 'Open image gallery'
+  });
+
+  const selectedFolderUri = selected?.[0];
+  if (selectedFolderUri && await isDirectoryUri(selectedFolderUri)) {
+    return selectedFolderUri;
+  }
+
+  return undefined;
+}
+
+/**
+ * Finds the first directory URI from an optional list of URIs.
+ *
+ * @param uris Candidate URIs.
+ * @returns First URI that points to an existing directory.
+ */
+async function findFirstDirectoryUri(uris?: vscode.Uri[]): Promise<vscode.Uri | undefined> {
+  if (!uris || uris.length === 0) {
+    return undefined;
+  }
+
+  for (const uri of uris) {
+    if (await isDirectoryUri(uri)) {
+      return uri;
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Collects URI candidates from unknown command arguments.
+ *
+ * @param resources Value that may contain multiple selected entries.
+ * @param resource Value that may contain a single selected entry.
+ * @returns Normalized URI candidates.
+ */
+function collectUriCandidates(resources: unknown, resource: unknown): vscode.Uri[] {
+  const result: vscode.Uri[] = [];
+
+  if (Array.isArray(resources)) {
+    for (const entry of resources) {
+      const candidate = tryParseUriCandidate(entry);
+      if (candidate) {
+        result.push(candidate);
+      }
+    }
+  }
+
+  const singleCandidate = tryParseUriCandidate(resource);
+  if (singleCandidate) {
+    result.push(singleCandidate);
+  }
+
+  return result;
+}
+
+/**
+ * Tries to parse an unknown command argument into a URI.
+ *
+ * @param value Potential URI-like value.
+ * @returns Parsed URI when successful.
+ */
+function tryParseUriCandidate(value: unknown): vscode.Uri | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  if (value instanceof vscode.Uri) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    return vscode.Uri.file(value);
+  }
+
+  if (typeof value !== 'object') {
+    return undefined;
+  }
+
+  if ('uri' in value) {
+    const nestedUri = (value as { uri?: unknown }).uri;
+    return tryParseUriCandidate(nestedUri);
+  }
+
+  if ('scheme' in value && 'path' in value) {
+    try {
+      return vscode.Uri.from(value as {
+        scheme: string;
+        authority?: string;
+        path?: string;
+        query?: string;
+        fragment?: string;
+      });
+    } catch {
+      return undefined;
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Checks whether a URI points to an existing directory.
+ *
+ * @param uri URI to validate.
+ * @returns True when URI targets an existing directory.
+ */
+async function isDirectoryUri(uri: vscode.Uri): Promise<boolean> {
+  if (uri.scheme !== 'file') {
+    return false;
+  }
+
+  try {
+    const stats = await fs.stat(uri.fsPath);
+    return stats.isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -850,7 +1500,7 @@ async function getImageDetails(
       throw error;
     }
 
-    // Extraction du variant principal
+    // Extract main variant
     const buffer = await fs.readFile(filePath);
     const entries = await parseIcoEntries(buffer);
     const primaryEntry = entries.slice().sort((a, b) => (b.width * b.height - a.width * a.height) || (b.bitCount - a.bitCount))[0];
@@ -871,7 +1521,7 @@ async function getImageDetails(
           dominantColorHex = rgbToHex(dominant.r, dominant.g, dominant.b);
           dominantColorRgb = `rgb(${dominant.r}, ${dominant.g}, ${dominant.b})`;
         } catch (e) {
-          // fallback couleur grise
+          // fallback to gray color
         }
       }
     }

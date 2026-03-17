@@ -1,3 +1,8 @@
+// Dynamically add shared badge CSS
+const badgeStyle = document.createElement('link');
+badgeStyle.rel = 'stylesheet';
+badgeStyle.href = 'badge.css';
+document.head.appendChild(badgeStyle);
 const vscode = typeof acquireVsCodeApi === 'function' ? acquireVsCodeApi() : undefined;
 const layoutElement = document.querySelector('.layout');
 const pipetteZoomLoupe = document.getElementById('pipette-zoom-loupe');
@@ -80,7 +85,7 @@ function attachIcoGalleryListeners() {
 
       setActiveIcoGalleryItem(galleryItem);
 
-      // Mise à jour couleur dominante
+      // Update dominant color
       const dominantColorHex = galleryItem.getAttribute('data-dominant-color-hex');
       const dominantColorRgb = galleryItem.getAttribute('data-dominant-color-rgb');
       if (dominantColorHex) {
@@ -1359,14 +1364,14 @@ function initializeIcoGallery() {
 
       setActiveIcoGalleryItem(galleryItem);
 
-      // Mise à jour couleur dominante
+      // Update dominant color
       const dominantColorHex = galleryItem.getAttribute('data-dominant-color-hex');
       const dominantColorRgb = galleryItem.getAttribute('data-dominant-color-rgb');
       if (dominantColorHex) {
         applyDominantColor(dominantColorHex, dominantColorRgb || '');
       }
 
-      // Toujours appliquer la couleur dominante, même si l'image ne change pas
+      // Always apply dominant color, even if the image does not change
 
       if (pipetteMode) {
         setPipetteMode(false);

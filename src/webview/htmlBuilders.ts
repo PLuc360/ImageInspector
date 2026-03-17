@@ -1,3 +1,16 @@
+/**
+ * Formats a file size in bytes to a human-readable string with dynamic unit.
+ * @param size File size in bytes.
+ * @returns Formatted string (e.g. '512 bytes', '1.2 KB', '3.4 MB').
+ */
+function formatFileSize(size: number | undefined): string {
+  if (typeof size !== 'number' || isNaN(size) || size < 0) return 'N/A';
+  if (size < 1024) return `${size} bytes`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  if (size < 1024 * 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(2)} MB`;
+  return `${(size / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 
 /**
@@ -74,15 +87,15 @@ export function buildCustomEditorWebview(
   const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(mediaRootUri, 'imageDetails.js'));
 
   const rows = [
-    ['Name', details.fileName],
-    ['Format', details.format],
-    ['Dimensions', `${details.width} × ${details.height}`],
-    ['Megapixels', `${details.megapixels} MP`],
-    ['Size', `${details.sizeText} (${details.sizeBytes} bytes)`],
-    ['Color space', details.space],
-    ['Channels', String(details.channels)],
-    ['Alpha channel', details.hasAlpha ? 'Yes' : 'No'],
-    ['DPI', details.density ? String(details.density) : 'N/A']
+     ['Name', details.fileName],
+     ['Type', details.format],
+     ['Dimensions', details.width && details.height ? `${details.width} × ${details.height}` : 'N/A'],
+     ['Megapixels', details.width && details.height ? `${details.megapixels} MP` : 'N/A'],
+     ['Size', details.sizeBytes ? `${details.sizeText} (${details.sizeBytes} bytes)` : 'N/A'],
+     ['Color space', details.space],
+     ['Channels', String(details.channels)],
+     ['Alpha channel', details.hasAlpha ? 'Yes' : 'No'],
+     ['DPI', details.density ? String(details.density) : 'N/A']
   ];
 
   const tableRows = `${rows
@@ -136,6 +149,7 @@ export function buildCustomEditorWebview(
   <meta http-equiv="Content-Security-Policy" content="${contentSecurityPolicy}" />
   <title>Image Details</title>
   <link rel="stylesheet" href="${escapeHtml(styleUri.toString())}" />
+  <link rel="stylesheet" href="${escapeHtml(webview.asWebviewUri(vscode.Uri.joinPath(mediaRootUri, 'badge.css')).toString())}" />
 </head>
 <body>
   <div
@@ -276,6 +290,84 @@ export function buildCustomEditorWebview(
       <div id="zoom-selection-box" class="zoom-selection-box" aria-hidden="true"></div>
     </section>
   </div>
+  <script src="${escapeHtml(scriptUri.toString())}"></script>
+</body>
+</html>`;
+}
+
+/**
+ * Builds the image gallery HTML for a folder.
+ *
+ * @param webview Target webview instance.
+ * @param folderPath Absolute path to the scanned folder.
+ * @param imageFiles Absolute paths of images found directly in the folder.
+ * @param extensionUri Extension root URI.
+ * @returns Complete HTML payload for the gallery webview.
+ */
+export function buildFolderGalleryWebview(
+  webview: vscode.Webview,
+  folderPath: string,
+  imageFiles: Array<{ filePath: string; name: string; type: string; size: number; width: number; height: number; dominantColorHex: string; dominantColorRgb: string }>,
+  extensionUri: vscode.Uri
+): string {
+  const mediaRootUri = vscode.Uri.joinPath(extensionUri, 'media');
+  const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(mediaRootUri, 'imageGallery.css'));
+  const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(mediaRootUri, 'imageGallery.js'));
+
+  const folderName = path.basename(folderPath);
+  const imageCount = imageFiles.length;
+  const countLabel = imageCount === 1 ? '1 image' : `${String(imageCount)} images`;
+
+  const thumbnailItems = imageFiles
+    .map((meta, index) => {
+      const fileUri = vscode.Uri.file(meta.filePath);
+      const webviewUri = webview.asWebviewUri(fileUri);
+      const extension = meta.name.includes('.') ? meta.name.slice(meta.name.lastIndexOf('.')).toLowerCase() : '';
+      const extClass = extension ? `badge-ext-${extension.replace('.', '')}` : '';
+      const extLabel = extension ? extension.replace('.', '').toUpperCase() : '';
+      const type = meta.type && meta.type !== 'Unknown' ? meta.type : 'N/A';
+      const size = formatFileSize(meta.size);
+      const dim = (typeof meta.width === 'number' && typeof meta.height === 'number' && meta.width > 0 && meta.height > 0 && !isNaN(meta.width) && !isNaN(meta.height)) ? `${meta.width} × ${meta.height}` : 'N/A';
+      // Couleur dominante : on tente de récupérer meta.dominantColorHex si présent
+      const dominantColorHex = meta.dominantColorHex || '#808080';
+      return `<button type="button" class="gallery-item" data-index="${String(index)}" title="${escapeHtml(meta.name)}" aria-label="${escapeHtml(meta.name)}" data-name="${escapeHtml(meta.name)}" data-type="${escapeHtml(type)}" data-size="${meta.size}" data-width="${meta.width}" data-height="${meta.height}">
+        <div class="gallery-thumb">
+          <img src="${escapeHtml(webviewUri.toString())}" alt="${escapeHtml(meta.name)}" />
+        </div>
+        <span class="gallery-label">${escapeHtml(meta.name)}</span>
+        <div class="gallery-badges meta-row compact" style="margin-top:4px;">
+          <span class="color-chip" style="background: ${escapeHtml(dominantColorHex)}"></span>
+          <span class="badge ${extClass}">${extLabel}</span>
+          <span class="badge">${dim}</span>
+          <span class="badge">${size}</span>
+        </div>
+      </button>`;
+    })
+    .join('');
+
+  const contentBody = imageFiles.length > 0
+    ? `<div class="gallery-grid">${thumbnailItems}</div>`
+    : `<div class="gallery-empty"><p>No images found in this folder.</p></div>`;
+
+  const contentSecurityPolicy = [
+    "default-src 'none'",
+    `img-src ${webview.cspSource}`,
+    `style-src ${webview.cspSource}`,
+    `script-src ${webview.cspSource}`
+  ].join('; ');
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="${contentSecurityPolicy}" />
+  <title>Gallery \u2013 ${escapeHtml(folderName)}</title>
+  <link rel="stylesheet" href="${escapeHtml(styleUri.toString())}" />
+  <link rel="stylesheet" href="${escapeHtml(webview.asWebviewUri(vscode.Uri.joinPath(mediaRootUri, 'badge.css')).toString())}" />
+</head>
+<body>
+  ${contentBody}
   <script src="${escapeHtml(scriptUri.toString())}"></script>
 </body>
 </html>`;

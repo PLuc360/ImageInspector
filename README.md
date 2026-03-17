@@ -2,7 +2,7 @@
 
 Image Inspector is a VS Code extension that opens images in a dedicated custom editor to inspect visual content and metadata side by side.
 
-Current version: 1.6.0
+Current version: 1.7.0
 
 ## Highlights
 
@@ -16,6 +16,7 @@ Current version: 1.6.0
 - Advanced ICO support with internal variant gallery when available
 - Automatic webview refresh when the source image file changes
 - User customization options (toolbar position, accent color, loupe settings)
+- Gallery view for browsing images in a folder
 
 ## Supported formats
 
@@ -220,7 +221,7 @@ This project is distributed under the MIT License. See LICENSE.
 
 Image Inspector est une extension VS Code qui ouvre les images dans un éditeur personnalisé pour inspecter visuellement les fichiers et leurs métadonnées.
 
-Version actuelle: 1.6.0
+Version actuelle: 1.7.0
 
 ## Points forts
 
@@ -234,6 +235,7 @@ Version actuelle: 1.6.0
 - Support ICO avancé: galerie des variantes internes quand disponibles
 - Rafraîchissement automatique du webview lors de la modification du fichier image
 - Paramètres de personnalisation (position toolbar, couleur d'accent, réglages de loupe)
+- Galerie de navigation pour les images d'un même dossier
 
 ## Formats supportés
 

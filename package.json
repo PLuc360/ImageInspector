@@ -2,7 +2,7 @@
   "name": "image-inspector",
   "displayName": "Image Inspector",
   "description": "Displays image information (dimensions, size, format, dominant colors).",
-  "version": "1.6.1",
+  "version": "1.7.0",
   "publisher": "pierre-luc-guegan",
   "icon": "assets/icon.png",
   "repository": {
@@ -24,19 +24,19 @@
         "viewType": "imageInspector.previewEditor",
         "displayName": "Image Details Preview",
         "selector": [
-          { "filenamePattern": "*.png" },
-          { "filenamePattern": "*.jpg" },
-          { "filenamePattern": "*.jpeg" },
-          { "filenamePattern": "*.webp" },
-          { "filenamePattern": "*.gif" },
+          { "filenamePattern": "*.avif" },
           { "filenamePattern": "*.bmp" },
+          { "filenamePattern": "*.gif" },
+          { "filenamePattern": "*.heic" },
+          { "filenamePattern": "*.heif" },
+          { "filenamePattern": "*.ico" },
+          { "filenamePattern": "*.jpeg" },
+          { "filenamePattern": "*.jpg" },
+          { "filenamePattern": "*.png" },
+          { "filenamePattern": "*.svg" },
           { "filenamePattern": "*.tif" },
           { "filenamePattern": "*.tiff" },
-          { "filenamePattern": "*.avif" },
-          { "filenamePattern": "*.ico" },
-          { "filenamePattern": "*.svg" },
-          { "filenamePattern": "*.heic" },
-          { "filenamePattern": "*.heif" }
+          { "filenamePattern": "*.webp" }
         ],
         "priority": "default"
       }
@@ -127,6 +127,15 @@
       {
         "command": "imageInspector.selectComparisonImage",
         "title": "Image Inspector: Set Comparison Image"
+      },
+      {
+        "command": "imageInspector.openFolderGallery",
+        "title": "Image Inspector: Open Image Gallery",
+        "shortTitle": "Open Gallery",
+        "icon": {
+          "light": "assets/gallery-light.svg",
+          "dark": "assets/gallery-dark.svg"
+        }
       }
     ],
     "keybindings": [
@@ -166,8 +175,13 @@
         {
           "command": "imageInspector.showImageDetails",
           "when": "resourceExtname == .png || resourceExtname == .jpg || resourceExtname == .jpeg || resourceExtname == .webp || resourceExtname == .gif || resourceExtname == .bmp || resourceExtname == .tif || resourceExtname == .tiff || resourceExtname == .avif || resourceExtname == .ico || resourceExtname == .svg || resourceExtname == .heic || resourceExtname == .heif"
+        },
+        {
+          "command": "imageInspector.openFolderGallery",
+          "when": "explorerResourceIsFolder"
         }
-      ]
+      ],
+      "view/title": []
     }
   },
   "scripts": {
