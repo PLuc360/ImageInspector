@@ -5,7 +5,7 @@
  */
 async function generateThumbnailPNG(filePath: string): Promise<Buffer> {
   return await sharp(filePath)
-    .resize(96, 96, { fit: 'cover' })
+    .resize(512, 512, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
     .png({ quality: 80 })
     .toBuffer();
 }
@@ -433,7 +433,13 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
    * @returns Unique key for refresh timer tracking.
    */
   private getRefreshTimerKey(document: ImageCustomDocument, webviewPanel: vscode.WebviewPanel): string {
-    return `${webviewPanel.viewType}${document.uri.toString()}`;
+    // Avoid accessing viewType if webviewPanel is disposed
+    try {
+      return `${webviewPanel.viewType}${document.uri.toString()}`;
+    } catch (e) {
+      // Panel is disposed, return a neutral key
+      return `disposed${document.uri.toString()}`;
+    }
   }
 
   /**
@@ -923,10 +929,12 @@ class ImageFolderGalleryPanel {
       const buf = await fs.readFile(binPath);
       binImages = deserializeGalleryImagesBinWithThumb(buf);
     } catch {}
+    // Progressive display: show the gallery immediately with available info
+    galleryImageMeta = [];
     if (binImages.length === imageFiles.length) {
-      // Use binary cache
+      // If binary cache is complete, use it
       galleryImageMeta = binImages.map((img, idx) => ({
-        src: '', // will be updated after
+        src: '',
         filePath: imageFiles[idx],
         name: img.name,
         type: img.type,
@@ -938,7 +946,7 @@ class ImageFolderGalleryPanel {
         thumbnail: img.thumbnail
       }));
     } else {
-      // Fallback: classic generation
+      // Otherwise, show the gallery with placeholders
       galleryImageMeta = imageFiles.map((filePath) => ({
         src: '',
         filePath,
@@ -951,28 +959,26 @@ class ImageFolderGalleryPanel {
         dominantColorRgb: 'rgb(204, 204, 204)'
       }));
     }
-      const instance = new ImageFolderGalleryPanel(folderUri, galleryImageMeta, context);
-      instance.imageFiles.forEach(img => {
-        img.src = getWebviewImageSrc(instance.panel.webview, img.filePath);
-      });
-      ImageFolderGalleryPanel.activePanels.set(folderPath, instance);
-      // Fix: capture variables for closure
-      const self = instance;
-      const folder = folderPath;
 
-    // Asynchronous loading of metadata per image
+    const instance = new ImageFolderGalleryPanel(folderUri, galleryImageMeta, context);
+    instance.imageFiles.forEach(img => {
+      img.src = getWebviewImageSrc(instance.panel.webview, img.filePath);
+    });
+    ImageFolderGalleryPanel.activePanels.set(folderPath, instance);
+
+    // Progressive display: update each image as soon as its info is ready
     if (binImages.length === imageFiles.length) {
-      // If binary cache is valid, skip generation
-      self.imageFiles.forEach((img, index) => {
-        img.src = getWebviewImageSrc(self.panel.webview, img.filePath);
-        self.panel.webview.postMessage({
+      // If cache, send info immediately
+      instance.imageFiles.forEach((img, index) => {
+        img.src = getWebviewImageSrc(instance.panel.webview, img.filePath);
+        instance.panel.webview.postMessage({
           type: 'update-image-meta',
           index,
-          meta: self.imageFiles[index]
+          meta: instance.imageFiles[index]
         });
       });
     } else {
-      // Classic generation if no cache
+      // Otherwise, generate and update as info becomes available
       await Promise.all(imageFiles.map(async (filePath, index) => {
         try {
           const details = await getImageDetails(filePath, undefined, {
@@ -980,8 +986,8 @@ class ImageFolderGalleryPanel {
             dominantColorQuality: DEFAULT_DOMINANT_COLOR_QUALITY,
             dominantColorFastSampleSize: DEFAULT_DOMINANT_COLOR_FAST_SAMPLE_SIZE
           });
-          self.imageFiles[index] = {
-            src: getWebviewImageSrc(self.panel.webview, filePath),
+          instance.imageFiles[index] = {
+            src: getWebviewImageSrc(instance.panel.webview, filePath),
             filePath,
             name: details.fileName,
             type: details.format,
@@ -991,25 +997,25 @@ class ImageFolderGalleryPanel {
             dominantColorHex: details.dominantColorHex,
             dominantColorRgb: details.dominantColorRgb
           };
-          self.panel.webview.postMessage({
+          instance.panel.webview.postMessage({
             type: 'update-image-meta',
             index,
-            meta: self.imageFiles[index]
+            meta: instance.imageFiles[index]
           });
-          await context.workspaceState.update(storageKey, self.imageFiles);
+          await context.workspaceState.update(storageKey, instance.imageFiles);
         } catch {
           // In case of error, keep the placeholder
         }
       }));
-      // Prepare and write binary file with thumbnails after full collection
-      try {
-        const imagesWithThumb = await prepareGalleryImagesWithThumb(self.imageFiles);
-        const buf = serializeGalleryImagesBinWithThumb(imagesWithThumb);
-        await fs.writeFile(path.join(folder, 'imageGalleryMeta.bin'), buf);
-      } catch (err) {
-        // Log on failure, but do not block flow
-        console.error('Erreur lors de l\'écriture du fichier binaire de galerie:', err);
-      }
+      // Generate thumbnails and write binary file in background
+      prepareGalleryImagesWithThumb(instance.imageFiles.map(img => ({ ...img, filePath: img.filePath })))
+        .then(imagesWithThumb => {
+          const buf = serializeGalleryImagesBinWithThumb(imagesWithThumb);
+          return fs.writeFile(path.join(folderPath, 'imageGalleryMeta.bin'), buf);
+        })
+        .catch(err => {
+          console.error('Error while writing gallery binary file:', err);
+        });
     }
   }
 
@@ -1077,7 +1083,7 @@ class ImageFolderGalleryPanel {
               binPath: message.binPath,
               images
             });
-          }).catch(() => {
+          }).catch((err) => {
             this.panel.webview.postMessage({
               type: 'response-gallery-meta-bin',
               binPath: message.binPath,

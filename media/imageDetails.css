@@ -57,6 +57,79 @@
   --toolbar-green-halo-mid: rgba(var(--toolbar-green-accent-rgb), 0.22);
 }
 
+/* --- Classes pour remplacer les styles en ligne --- */
+.svg-inline-middle {
+  display: inline;
+  vertical-align: middle;
+}
+
+.img-pixelated {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  -ms-interpolation-mode: nearest-neighbor;
+}
+
+.gallery-badges-margin {
+  margin-top: 4px;
+}
+
+
+.canvas-hidden {
+  display: none;
+}
+
+.pipette-color-result {
+  display: none;
+  position: absolute;
+  z-index: 10;
+  background: #fff;
+  padding: 4px;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+  font-size: 12px;
+}
+
+.pipette-zoom-loupe {
+  display: none;
+  position: fixed;
+  pointer-events: none;
+  z-index: 20;
+  filter: drop-shadow(0 2px 6px #0006);
+}
+/* --- Classes dynamiques pour JS --- */
+.is-hidden {
+  display: none !important;
+}
+.is-visible {
+  display: block !important;
+}
+.is-flex {
+  display: flex !important;
+}
+.is-inline {
+  display: inline !important;
+}
+.is-grab {
+  cursor: grab !important;
+}
+.is-grabbing {
+  cursor: grabbing !important;
+}
+.is-crosshair {
+  cursor: crosshair !important;
+}
+.is-none {
+  cursor: none !important;
+}
+.is-opacity-0 {
+  opacity: 0 !important;
+}
+.is-opacity-1 {
+  opacity: 1 !important;
+}
+.pipette-hover-swatch-transparent {
+  background: transparent !important;
+}
 html,
 body {
   width: 100%;
@@ -124,7 +197,7 @@ body {
 
 .preview-body.side-by-side-mode {
   align-items: center;
-  justify-content: flex-start;
+  justify-content: center;
   gap: 14px;
   padding: 12px;
 }

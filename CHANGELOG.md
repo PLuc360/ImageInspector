@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.8.0] - 2026-03-27
+### Added
+- Progressive gallery loading: images and metadata now appear as soon as available, improving perceived performance for large folders.
+- CSP security: webviews now use strict Content Security Policy with dynamic nonces for scripts.
+- Badge CSS and JS are now injected with correct URIs and security attributes.
+
+### Changed
+- Gallery thumbnail generation now uses larger (512x512) PNGs with transparent backgrounds for better quality.
+- Improved scroll restoration: gallery scroll position is preserved and restored more reliably when switching tabs or reopening.
+- Refactored gallery event listeners to avoid memory leaks and ensure single initialization.
+- Improved error handling for disposed panels and binary file writing.
+- Updated gallery HTML/CSS for better accessibility and maintainability.
+
+### Fixed
+- Fixed rare issues with gallery state when switching folders or rapidly opening/closing panels.
+
+
 ## [1.7.0] - 2026-03-19
 ### Added
 - Added a gallery view for browsing images in a folder.

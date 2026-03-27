@@ -1,8 +1,15 @@
 // Dynamically add shared badge CSS
-const badgeStyle = document.createElement('link');
-badgeStyle.rel = 'stylesheet';
-badgeStyle.href = 'badge.css';
-document.head.appendChild(badgeStyle);
+function setBadgeCssUri(uri) {
+  window.badgeCssUri = uri;
+  const badgeStyle = document.createElement('link');
+  badgeStyle.rel = 'stylesheet';
+  badgeStyle.href = uri;
+  document.head.appendChild(badgeStyle);
+}
+
+if (window.badgeCssUri) {
+  setBadgeCssUri(window.badgeCssUri);
+}
 const vscode = typeof acquireVsCodeApi === 'function' ? acquireVsCodeApi() : undefined;
 const layoutElement = document.querySelector('.layout');
 const pipetteZoomLoupe = document.getElementById('pipette-zoom-loupe');
@@ -238,11 +245,11 @@ function applyToolbarPosition(toolbarPosition) {
   }
 
   for (const toolbarClass of TOOLBAR_POSITION_CLASSES) {
-    zoomToolbar.classList.remove(toolbarClass);
+    zoomToolbar?.classList.remove(toolbarClass);
   }
 
   if (TOOLBAR_POSITION_CLASSES.includes(`toolbar-pos-${toolbarPosition}`)) {
-    zoomToolbar.classList.add(`toolbar-pos-${toolbarPosition}`);
+    zoomToolbar?.classList.add(`toolbar-pos-${toolbarPosition}`);
   }
 }
 
@@ -255,7 +262,6 @@ function applyThemeAccentRgb(accentRgb) {
 }
 
 function applyDominantColor(hexColor, rgbColor) {
-    console.log('[ImageInspector] applyDominantColor', hexColor, rgbColor);
   if (!layoutElement || typeof hexColor !== 'string' || hexColor.trim().length === 0) {
     return;
   }
@@ -284,7 +290,7 @@ function updateSelectionModeUi() {
   }
 
   previewContainer?.classList.toggle('selection-mode', selectionMode);
-  zoomSelectButton.classList.toggle('is-active', selectionMode);
+  zoomSelectButton?.classList.toggle('is-active', selectionMode);
   zoomSelectButton.setAttribute('aria-pressed', selectionMode ? 'true' : 'false');
 }
 
@@ -388,7 +394,7 @@ function updateCompareDiffNavigationUi() {
 
   if (compareDiffAutoCenterButton) {
     compareDiffAutoCenterButton.disabled = !sideBySideActive || !hasRegions;
-    compareDiffAutoCenterButton.classList.toggle('is-active', compareDiffAutoCenterEnabled);
+    compareDiffAutoCenterButton?.classList.toggle('is-active', compareDiffAutoCenterEnabled);
     compareDiffAutoCenterButton.setAttribute('aria-pressed', compareDiffAutoCenterEnabled ? 'true' : 'false');
   }
 }
@@ -437,13 +443,13 @@ function drawCompareDifferenceRegionOnOverlay(overlayElement, overlayContext, ta
   const renderedHeight = Math.round(targetRect.height);
   if (renderedWidth <= 0 || renderedHeight <= 0) {
     overlayContext.clearRect(0, 0, overlayElement.width, overlayElement.height);
-    overlayElement.classList.add('is-hidden');
+    overlayElement?.classList.add('is-hidden');
     return;
   }
 
   if (!previewRect) {
     overlayContext.clearRect(0, 0, overlayElement.width, overlayElement.height);
-    overlayElement.classList.add('is-hidden');
+    overlayElement?.classList.add('is-hidden');
     return;
   }
 
@@ -453,7 +459,7 @@ function drawCompareDifferenceRegionOnOverlay(overlayElement, overlayContext, ta
   overlayElement.style.height = `${String(renderedHeight)}px`;
   overlayElement.style.left = `${String(Math.round(targetRect.left - previewRect.left))}px`;
   overlayElement.style.top = `${String(Math.round(targetRect.top - previewRect.top))}px`;
-  overlayElement.classList.remove('is-hidden');
+  overlayElement?.classList.remove('is-hidden');
 
   overlayContext.clearRect(0, 0, renderedWidth, renderedHeight);
   overlayContext.lineJoin = 'round';
@@ -490,13 +496,13 @@ function clearCompareDifferenceOverlay(clearRegions = false) {
   const primaryOverlayContext = ensureCompareDiffOverlayContext();
   if (compareDiffOverlay && primaryOverlayContext) {
     primaryOverlayContext.clearRect(0, 0, compareDiffOverlay.width, compareDiffOverlay.height);
-    compareDiffOverlay.classList.add('is-hidden');
+    compareDiffOverlay?.classList.add('is-hidden');
   }
 
   const secondaryOverlayContext = ensureCompareDiffOverlaySecondaryContext();
   if (compareDiffOverlaySecondary && secondaryOverlayContext) {
     secondaryOverlayContext.clearRect(0, 0, compareDiffOverlaySecondary.width, compareDiffOverlaySecondary.height);
-    compareDiffOverlaySecondary.classList.add('is-hidden');
+    compareDiffOverlaySecondary?.classList.add('is-hidden');
   }
 
   updateCompareDiffNavigationUi();
@@ -529,7 +535,7 @@ function renderCompareDifferenceOverlay() {
       );
     } else {
       primaryOverlayContext.clearRect(0, 0, compareDiffOverlay.width, compareDiffOverlay.height);
-      compareDiffOverlay.classList.add('is-hidden');
+      compareDiffOverlay?.classList.add('is-hidden');
     }
   }
 
@@ -545,7 +551,7 @@ function renderCompareDifferenceOverlay() {
       );
     } else {
       secondaryOverlayContext.clearRect(0, 0, compareDiffOverlaySecondary.width, compareDiffOverlaySecondary.height);
-      compareDiffOverlaySecondary.classList.add('is-hidden');
+      compareDiffOverlaySecondary?.classList.add('is-hidden');
     }
   }
 
@@ -841,12 +847,12 @@ function updateCompareControlsUi() {
 
   if (compareToolButton) {
     const splitActive = compareEnabled && !sideBySideActive;
-    compareToolButton.classList.toggle('is-active', splitActive);
+    compareToolButton?.classList.toggle('is-active', splitActive);
     compareToolButton.setAttribute('aria-pressed', splitActive ? 'true' : 'false');
   }
 
   if (compareSideBySideButton) {
-    compareSideBySideButton.classList.toggle('is-active', sideBySideActive);
+    compareSideBySideButton?.classList.toggle('is-active', sideBySideActive);
     compareSideBySideButton.setAttribute('aria-pressed', sideBySideActive ? 'true' : 'false');
   }
 
@@ -854,7 +860,7 @@ function updateCompareControlsUi() {
     const orientationButtonState = getCompareOrientationButtonState();
     compareOrientationButton.dataset.orientation = compareOrientation;
     compareOrientationButton.setAttribute('aria-label', orientationButtonState.title);
-    compareOrientationButton.classList.toggle('is-active', compareOrientation === 'horizontal');
+    compareOrientationButton?.classList.toggle('is-active', compareOrientation === 'horizontal');
 
     const iconElement = compareOrientationButton.querySelector('.icon');
     if (iconElement) {
@@ -879,11 +885,11 @@ function applyCompareSplit() {
   }
 
   const sideBySideActive = isSideBySideCompareActive();
-  previewBody.classList.toggle('side-by-side-mode', sideBySideActive);
+  previewBody?.classList.toggle('side-by-side-mode', sideBySideActive);
 
   if (sideBySideActive) {
-    compareImage.classList.remove('is-hidden');
-    compareDivider.classList.add('is-hidden');
+    compareImage?.classList.remove('is-hidden');
+    compareDivider?.classList.add('is-hidden');
     compareDivider.classList.remove('is-horizontal');
     compareImage.style.clipPath = 'none';
     compareImage.style.left = '';
@@ -1116,20 +1122,22 @@ function setPipetteMode(isEnabled) {
   if (pipetteMode) {
     refreshPipetteImageBuffer();
     if (previewBody) {
-      previewBody.style.cursor = 'none';
+      previewBody.classList.add('is-none');
     }
     if (pipetteZoomLoupe) {
-      pipetteZoomLoupe.style.display = 'block';
+      pipetteZoomLoupe.classList.remove('is-hidden');
+      pipetteZoomLoupe.classList.add('is-visible');
     }
     setPipetteHoverInfoVisible(true);
     resetPipetteHoverInfo();
   } else {
     if (previewBody) {
-      previewBody.style.cursor = '';
+      previewBody.classList.remove('is-none');
     }
     hidePipetteColorResult(true);
     if (pipetteZoomLoupe) {
-      pipetteZoomLoupe.style.display = 'none';
+      pipetteZoomLoupe.classList.add('is-hidden');
+      pipetteZoomLoupe.classList.remove('is-visible');
     }
     setPipetteHoverInfoVisible(false);
     resetPipetteHoverInfo();
@@ -1158,7 +1166,7 @@ function resetPipetteHoverInfo() {
   }
 
   if (pipetteHoverSwatch) {
-    pipetteHoverSwatch.style.background = 'transparent';
+    pipetteHoverSwatch.classList.add('pipette-hover-swatch-transparent');
   }
 }
 
@@ -1170,6 +1178,7 @@ function updatePipetteHoverInfo(x, y, pixelData) {
   const hexColor = formatHexColor(pixelData[0], pixelData[1], pixelData[2]);
   pipetteHoverPosition.textContent = `${String(x)}, ${String(y)}`;
   pipetteHoverColor.textContent = hexColor;
+  pipetteHoverSwatch.classList.remove('pipette-hover-swatch-transparent');
   pipetteHoverSwatch.style.background = hexColor;
 }
 
@@ -1192,17 +1201,17 @@ function hidePipetteColorResult(immediate = false) {
 
   clearPipetteColorResultTimers();
   if (immediate) {
-    pipetteColorResult.style.opacity = '0';
-    pipetteColorResult.style.display = 'none';
+    pipetteColorResult.classList.add('is-opacity-0');
+    pipetteColorResult.classList.add('is-hidden');
     return;
   }
 
-  pipetteColorResult.style.opacity = '0';
+  pipetteColorResult.classList.add('is-opacity-0');
   pipetteResultHideTimeoutId = window.setTimeout(() => {
     if (!pipetteColorResult) {
       return;
     }
-    pipetteColorResult.style.display = 'none';
+    pipetteColorResult.classList.add('is-hidden');
     pipetteResultHideTimeoutId = null;
   }, PIPETTE_RESULT_FADE_DURATION_MS);
 }
@@ -1404,7 +1413,7 @@ function hideOverviewMapViewport() {
     return;
   }
 
-  overviewMapViewport.style.display = 'none';
+  overviewMapViewport.classList.add('is-hidden');
 }
 
 function getOverviewMapContentRect() {
@@ -1587,7 +1596,7 @@ previewBody?.addEventListener('pointermove', (event) => {
     event.clientY < imageRect.bottom;
 
   pipetteZoomLoupe.width = pipetteZoomLoupe.height = loupeDiameter;
-  const loupeCtx = pipetteZoomLoupe.getContext('2d');
+  const loupeCtx = pipetteZoomLoupe.getContext('2d', { willReadFrequently: true });
 
   if (!isPointerInsideImage || imageRect.width <= 0 || imageRect.height <= 0) {
     resetPipetteHoverInfo();
@@ -2802,4 +2811,8 @@ window.addEventListener('resize', () => {
   applyInfoOverlayPosition(left, top);
 
   requestOverviewMapViewportUpdate();
+    // Redraw difference regions if side-by-side compare is active
+    if (typeof isSideBySideCompareActive === 'function' && isSideBySideCompareActive()) {
+      renderCompareDifferenceOverlay();
+    }
 });

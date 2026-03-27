@@ -102,11 +102,13 @@ export function buildCustomEditorWebview(
     .map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(value)}</td></tr>`)
     .join('')}<tr><th>Dominant color</th><td id="dominant-color-table">${escapeHtml(details.dominantColorHex)} (${escapeHtml(details.dominantColorRgb)})</td></tr>`;
 
+  // Génère un nonce sécurisé pour les scripts
+  const nonce = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
   const contentSecurityPolicy = [
     "default-src 'none'",
     `img-src ${webview.cspSource} data:`,
     `style-src ${webview.cspSource} 'unsafe-inline'`,
-    `script-src ${webview.cspSource}`
+    `script-src ${webview.cspSource} 'nonce-${nonce}'`
   ].join('; ');
 
   // Extract the file extension with a leading dot (lowercase).
@@ -150,6 +152,7 @@ export function buildCustomEditorWebview(
   <title>Image Details</title>
   <link rel="stylesheet" href="${escapeHtml(styleUri.toString())}" />
   <link rel="stylesheet" href="${escapeHtml(webview.asWebviewUri(vscode.Uri.joinPath(mediaRootUri, 'badge.css')).toString())}" />
+  <script src="${escapeHtml(webview.asWebviewUri(vscode.Uri.joinPath(mediaRootUri, 'badge.js')).toString())}" nonce="${nonce}"></script>
 </head>
 <body>
   <div
@@ -179,7 +182,7 @@ export function buildCustomEditorWebview(
         </button>
         <button id="pipette-tool" type="button" title="Color picker" aria-label="Color picker">
           <span class="icon" aria-hidden="true">
-            <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:inline;vertical-align:middle">
+            <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle">
               <path d="M14.44 2.44a2.5 2.5 0 0 1 3.54 3.54l-1.13 1.13-3.54-3.54 1.13-1.13zm-2.2 2.2l3.54 3.54-9.19 9.19c-.2.2-.45.34-.72.4l-3.13.7a.5.5 0 0 1-.6-.6l.7-3.13c.06-.27.2-.52.4-.72l9.19-9.19z" fill="var(--vscode-icon-foreground)"/>
             </svg>
           </span>
@@ -192,7 +195,7 @@ export function buildCustomEditorWebview(
         </button>
         <button id="compare-side-by-side" type="button" title="Side-by-side compare" aria-label="Side-by-side compare" aria-pressed="false">
           <span class="icon" aria-hidden="true">
-            <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:inline;vertical-align:middle">
+            <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle">
               <rect x="2.5" y="4" width="6.5" height="11" rx="1.4" stroke="currentColor" stroke-width="1.4"/>
               <rect x="11" y="4" width="6.5" height="11" rx="1.4" stroke="currentColor" stroke-width="1.4"/>
               <path d="M10 5.2v8.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-dasharray="1.8 1.8"/>
@@ -205,7 +208,7 @@ export function buildCustomEditorWebview(
       <div id="compare-controls" class="compare-controls${hasComparisonImage ? '' : ' is-hidden'}" aria-label="Comparison controls">
         <button id="compare-pick" type="button" class="compare-pick-button" aria-label="Choose comparison image">
           <span class="icon" aria-hidden="true">
-            <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:inline;vertical-align:middle">
+            <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle">
               <path d="M3.25 5.75a1.5 1.5 0 0 1 1.5-1.5h4.1l1.2 1.5h5.2a1.5 1.5 0 0 1 1.5 1.5v7a1.5 1.5 0 0 1-1.5 1.5H4.75a1.5 1.5 0 0 1-1.5-1.5v-8.5z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
               <path d="M10 8.1v4M8 10.1h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
             </svg>
@@ -278,19 +281,19 @@ export function buildCustomEditorWebview(
       </aside>
       <div class="preview-scroll">
         <div class="preview-body">
-          <img id="preview-image" src="${imageSource}" alt="${escapeHtml(details.fileName)}" style="image-rendering: pixelated; image-rendering: crisp-edges; -ms-interpolation-mode: nearest-neighbor;" />
-          <img id="compare-image" class="compare-image${hasComparisonImage ? '' : ' is-hidden'}" src="${hasComparisonImage ? escapeHtml(comparisonImageSource) : ''}" alt="Comparison image" style="image-rendering: pixelated; image-rendering: crisp-edges; -ms-interpolation-mode: nearest-neighbor;" />
+          <img id="preview-image" src="${imageSource}" alt="${escapeHtml(details.fileName)}" class="img-pixelated" />
+          <img id="compare-image" class="compare-image${hasComparisonImage ? '' : ' is-hidden'} img-pixelated" src="${hasComparisonImage ? escapeHtml(comparisonImageSource) : ''}" alt="Comparison image" />
           <div id="compare-divider" class="compare-divider${hasComparisonImage ? '' : ' is-hidden'}" aria-hidden="true"></div>
-          <canvas id="pipette-canvas" style="display:none;"></canvas>
-          <div id="pipette-color-result" style="display:none;position:absolute;z-index:10;background:#fff;padding:4px;border-radius:4px;border:1px solid #ccc;font-size:12px;"></div>
-          <canvas id="pipette-zoom-loupe" width="64" height="64" style="display:none;position:fixed;pointer-events:none;z-index:20;filter:drop-shadow(0 2px 6px #0006);"></canvas>
+          <canvas id="pipette-canvas" class="canvas-hidden"></canvas>
+          <div id="pipette-color-result" class="pipette-color-result"></div>
+          <canvas id="pipette-zoom-loupe" width="64" height="64" class="pipette-zoom-loupe"></canvas>
         </div>
       </div>
       ${icoGalleryMarkup}
       <div id="zoom-selection-box" class="zoom-selection-box" aria-hidden="true"></div>
     </section>
   </div>
-  <script src="${escapeHtml(scriptUri.toString())}"></script>
+  <script src="${escapeHtml(scriptUri.toString())}" nonce="${nonce}"></script>
 </body>
 </html>`;
 }
@@ -318,44 +321,21 @@ export function buildFolderGalleryWebview(
   const imageCount = imageFiles.length;
   const countLabel = imageCount === 1 ? '1 image' : `${String(imageCount)} images`;
 
-  const thumbnailItems = imageFiles
-    .map((meta, index) => {
-      const fileUri = vscode.Uri.file(meta.filePath);
-      const webviewUri = webview.asWebviewUri(fileUri);
-      const extension = meta.name.includes('.') ? meta.name.slice(meta.name.lastIndexOf('.')).toLowerCase() : '';
-      const extClass = extension ? `badge-ext-${extension.replace('.', '')}` : '';
-      const extLabel = extension ? extension.replace('.', '').toUpperCase() : '';
-      const type = meta.type && meta.type !== 'Unknown' ? meta.type : 'N/A';
-      const size = formatFileSize(meta.size);
-      const dim = (typeof meta.width === 'number' && typeof meta.height === 'number' && meta.width > 0 && meta.height > 0 && !isNaN(meta.width) && !isNaN(meta.height)) ? `${meta.width} × ${meta.height}` : 'N/A';
-      // Couleur dominante : on tente de récupérer meta.dominantColorHex si présent
-      const dominantColorHex = meta.dominantColorHex || '#808080';
-      return `<button type="button" class="gallery-item" data-index="${String(index)}" title="${escapeHtml(meta.name)}" aria-label="${escapeHtml(meta.name)}" data-name="${escapeHtml(meta.name)}" data-type="${escapeHtml(type)}" data-size="${meta.size}" data-width="${meta.width}" data-height="${meta.height}">
-        <div class="gallery-thumb">
-          <img src="${escapeHtml(webviewUri.toString())}" alt="${escapeHtml(meta.name)}" />
-        </div>
-        <span class="gallery-label">${escapeHtml(meta.name)}</span>
-        <div class="gallery-badges meta-row compact" style="margin-top:4px;">
-          <span class="color-chip" style="background: ${escapeHtml(dominantColorHex)}"></span>
-          <span class="badge ${extClass}">${extLabel}</span>
-          <span class="badge">${dim}</span>
-          <span class="badge">${size}</span>
-        </div>
-      </button>`;
-    })
-    .join('');
-
+  // On ne génère plus les miniatures côté HTML initial : la grille est vide, le JS s'en charge après chargement binaire
   const contentBody = imageFiles.length > 0
-    ? `<div class="gallery-grid">${thumbnailItems}</div>`
+    ? `<div class="gallery-grid"></div>`
     : `<div class="gallery-empty"><p>No images found in this folder.</p></div>`;
 
+  // Génère un nonce sécurisé pour les scripts
+  const nonce = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
   const contentSecurityPolicy = [
     "default-src 'none'",
-    `img-src ${webview.cspSource}`,
+    `img-src ${webview.cspSource} data:`,
     `style-src ${webview.cspSource}`,
-    `script-src ${webview.cspSource}`
+    `script-src ${webview.cspSource} 'nonce-${nonce}'`
   ].join('; ');
 
+  const badgeCssUri = webview.asWebviewUri(vscode.Uri.joinPath(mediaRootUri, 'badge.css')).toString();
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -364,11 +344,11 @@ export function buildFolderGalleryWebview(
   <meta http-equiv="Content-Security-Policy" content="${contentSecurityPolicy}" />
   <title>Gallery \u2013 ${escapeHtml(folderName)}</title>
   <link rel="stylesheet" href="${escapeHtml(styleUri.toString())}" />
-  <link rel="stylesheet" href="${escapeHtml(webview.asWebviewUri(vscode.Uri.joinPath(mediaRootUri, 'badge.css')).toString())}" />
+  <link rel="stylesheet" href="${escapeHtml(badgeCssUri)}" />
 </head>
-<body>
+<body data-badge-css-uri="${escapeHtml(badgeCssUri)}">
   ${contentBody}
-  <script src="${escapeHtml(scriptUri.toString())}"></script>
+  <script src="${escapeHtml(scriptUri.toString())}" nonce="${nonce}"></script>
 </body>
 </html>`;
 }
