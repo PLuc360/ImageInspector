@@ -79,8 +79,9 @@ const overviewMapViewport = document.getElementById('overview-map-viewport');
 const PIPETTE_RESULT_VISIBLE_DURATION_MS = 500;
 const PIPETTE_RESULT_FADE_DURATION_MS = 260;
 const selectedIcoSizeBadge = document.getElementById('selected-ico-size');
+let icoGalleryItems = [];
+
 function attachIcoGalleryListeners() {
-  let icoGalleryItems = [];
   for (const galleryItem of icoGalleryItems) {
     galleryItem.addEventListener('click', (event) => {
       event.preventDefault();
@@ -105,9 +106,6 @@ function attachIcoGalleryListeners() {
     });
   }
 }
-document.addEventListener('DOMContentLoaded', () => {
-  initializeIcoGallery();
-});
 let isDraggingOverviewMap = false;
 let overviewMapDragPointerId = null;
 let overviewMapViewportFrameId = null;
@@ -2083,6 +2081,7 @@ function setInfoOverlayVisible(isVisible) {
   }
   if (isVisible) {
     requestAnimationFrame(() => {
+      initializeInfoOverlayPosition();
       requestOverviewMapViewportUpdate();
     });
   }

@@ -1,287 +1,38 @@
-/**
- * Generates a PNG thumbnail (96x96) for an image.
- * @param filePath Absolute path to the image
- * @returns PNG Buffer
- */
-async function generateThumbnailPNG(filePath: string): Promise<Buffer> {
-  return await sharp(filePath)
-    .resize(512, 512, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
-    .png({ quality: 80 })
-    .toBuffer();
+// Caches and cache utilities
+const MAX_IMAGE_DETAILS_CACHE_ENTRIES = 32;
+const MAX_ICO_CACHE_ENTRIES = 16;
+const MAX_CONVERTED_PREVIEW_CACHE_ENTRIES = 16;
+const MAX_GALLERY_THUMBNAIL_CACHE_ENTRIES = 128;
+
+const imageDetailsCache = new Map<string, ImageDetailsViewModel>();
+const icoEntriesCache = new Map<string, any>();
+const icoGalleryCache = new Map<string, any>();
+const convertedPreviewCache = new Map<string, string>();
+const galleryThumbnailCache = new Map<string, string>();
+
+function getCachedValue<T>(cache: Map<string, T>, key: string): T | undefined {
+  return cache.get(key);
 }
 
-/**
- * Prepares an array of GalleryImage with thumbnail for binary serialization.
- * @param images Array of objects {src, name, type, size, width, height, filePath}
- * @returns Array of objects {src, name, type, size, width, height, thumbnail}
- */
-async function prepareGalleryImagesWithThumb(images: Array<{src: string, name: string, type: string, size: number, width: number, height: number, filePath: string}>): Promise<Array<{src: string, name: string, type: string, size: number, width: number, height: number, thumbnail: Buffer}>> {
-  return await Promise.all(images.map(async img => {
-    let thumbnail: Buffer;
-    try {
-      thumbnail = await generateThumbnailPNG(img.filePath);
-    } catch {
-      thumbnail = Buffer.alloc(0);
+function setBoundedCachedValue<T>(cache: Map<string, T>, key: string, value: T, maxEntries: number): void {
+  if (cache.size >= maxEntries) {
+    // Remove oldest entry
+    const firstKey = cache.keys().next().value;
+    if (firstKey !== undefined) {
+      cache.delete(firstKey);
     }
-    return {
-      src: img.src,
-      name: img.name,
-      type: img.type,
-      size: img.size,
-      width: img.width,
-      height: img.height,
-      thumbnail
-    };
-  }));
-}
-/**
- * Binary structure for GalleryImage with PNG thumbnail.
- * src: 128 bytes (UTF-8, zero padding)
- * name: 64 bytes
- * type: 8 bytes
- * size: 4 bytes
- * width: 4 bytes
- * height: 4 bytes
- * thumbnailSize: 4 bytes
- * thumbnail: variable (PNG buffer)
- */
-const GALLERY_IMAGE_BIN_STRUCT_THUMB = {
-  srcLen: 128,
-  nameLen: 64,
-  typeLen: 8,
-  sizeLen: 4,
-  widthLen: 4,
-  heightLen: 4,
-  thumbSizeLen: 4,
-};
-
-/**
- * Serializes an array of GalleryImage with thumbnail to binary.
- * @param images Array of objects {src, name, type, size, width, height, thumbnail}
- * @returns Binary Buffer
- */
-function serializeGalleryImagesBinWithThumb(images: Array<{src: string, name: string, type: string, size: number, width: number, height: number, thumbnail: Buffer}>): Buffer {
-  const { srcLen, nameLen, typeLen, sizeLen, widthLen, heightLen, thumbSizeLen } = GALLERY_IMAGE_BIN_STRUCT_THUMB;
-  // Compute total size
-  let totalLen = 0;
-  const thumbSizes = images.map(img => img.thumbnail.length);
-  totalLen = images.reduce((acc, img, idx) => acc + srcLen + nameLen + typeLen + sizeLen + widthLen + heightLen + thumbSizeLen + thumbSizes[idx], 0);
-  const buf = Buffer.alloc(totalLen);
-  let offset = 0;
-  images.forEach((img, idx) => {
-    buf.fill(0, offset, offset + srcLen + nameLen + typeLen);
-    buf.write(img.src.slice(0, srcLen), offset, srcLen, 'utf8');
-    offset += srcLen;
-    buf.write(img.name.slice(0, nameLen), offset, nameLen, 'utf8');
-    offset += nameLen;
-    buf.write(img.type.slice(0, typeLen), offset, typeLen, 'utf8');
-    offset += typeLen;
-    buf.writeUInt32LE(img.size, offset);
-    offset += sizeLen;
-    buf.writeUInt32LE(img.width, offset);
-    offset += widthLen;
-    buf.writeUInt32LE(img.height, offset);
-    offset += heightLen;
-    buf.writeUInt32LE(img.thumbnail.length, offset);
-    offset += thumbSizeLen;
-    img.thumbnail.copy(buf, offset, 0, img.thumbnail.length);
-    offset += img.thumbnail.length;
-  });
-  return buf;
-}
-
-/**
- * Deserializes a binary Buffer into an array of GalleryImage with thumbnail.
- * @param buf Binary Buffer
- * @returns Array of objects {src, name, type, size, width, height, thumbnail}
- */
-function deserializeGalleryImagesBinWithThumb(buf: Buffer): Array<{src: string, name: string, type: string, size: number, width: number, height: number, thumbnail: Buffer}> {
-  const { srcLen, nameLen, typeLen, sizeLen, widthLen, heightLen, thumbSizeLen } = GALLERY_IMAGE_BIN_STRUCT_THUMB;
-  const images = [];
-  let offset = 0;
-  while (offset + srcLen + nameLen + typeLen + sizeLen + widthLen + heightLen + thumbSizeLen <= buf.length) {
-    const src = buf.toString('utf8', offset, offset + srcLen).replace(/\0+$/, '');
-    const name = buf.toString('utf8', offset + srcLen, offset + srcLen + nameLen).replace(/\0+$/, '');
-    const type = buf.toString('utf8', offset + srcLen + nameLen, offset + srcLen + nameLen + typeLen).replace(/\0+$/, '');
-    const size = buf.readUInt32LE(offset + srcLen + nameLen + typeLen);
-    const width = buf.readUInt32LE(offset + srcLen + nameLen + typeLen + sizeLen);
-    const height = buf.readUInt32LE(offset + srcLen + nameLen + typeLen + sizeLen + widthLen);
-    const thumbSize = buf.readUInt32LE(offset + srcLen + nameLen + typeLen + sizeLen + widthLen + heightLen);
-    const thumbStart = offset + srcLen + nameLen + typeLen + sizeLen + widthLen + heightLen + thumbSizeLen;
-    const thumbnail = buf.slice(thumbStart, thumbStart + thumbSize);
-    images.push({ src, name, type, size, width, height, thumbnail });
-    offset = thumbStart + thumbSize;
   }
-  return images;
-}
-import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
-import * as vscode from 'vscode';
-import sharp from 'sharp';
-
-/**
- * Generates a URI accessible by the webview for an image.
- * @param webview Target webview
- * @param filePath Absolute path to the image
- * @returns URI string
- */
-function getWebviewImageSrc(webview: vscode.Webview, filePath: string): string {
-  return webview.asWebviewUri(vscode.Uri.file(filePath)).toString();
-}
-/**
- * Compact binary structure for GalleryImage.
- * src: 128 bytes (UTF-8, zero padding)
- * name: 64 bytes (UTF-8, zero padding)
- * type: 8 bytes (UTF-8, zero padding)
- * size: 4 bytes (uint32)
- * width: 4 bytes (uint32)
- * height: 4 bytes (uint32)
- * Total: 212 bytes per image.
- */
-
-const GALLERY_IMAGE_BIN_STRUCT = {
-  srcLen: 128,
-  nameLen: 64,
-  typeLen: 8,
-  sizeLen: 4,
-  widthLen: 4,
-  heightLen: 4,
-  totalLen: 128 + 64 + 8 + 4 + 4 + 4
-};
-
-/**
- * Serializes an array of GalleryImage to binary.
- * @param images Array of GalleryImage objects
- * @returns Binary Buffer
- */
-function serializeGalleryImagesBin(images: Array<{src: string, name: string, type: string, size: number, width: number, height: number}>): Buffer {
-  const { srcLen, nameLen, typeLen, sizeLen, widthLen, heightLen, totalLen } = GALLERY_IMAGE_BIN_STRUCT;
-  const buf = Buffer.alloc(totalLen * images.length);
-  images.forEach((img, idx) => {
-    let offset = idx * totalLen;
-    buf.fill(0, offset, offset + totalLen);
-    buf.write(img.src.slice(0, srcLen), offset, srcLen, 'utf8');
-    offset += srcLen;
-    buf.write(img.name.slice(0, nameLen), offset, nameLen, 'utf8');
-    offset += nameLen;
-    buf.write(img.type.slice(0, typeLen), offset, typeLen, 'utf8');
-    offset += typeLen;
-    buf.writeUInt32LE(img.size, offset);
-    offset += sizeLen;
-    buf.writeUInt32LE(img.width, offset);
-    offset += widthLen;
-    buf.writeUInt32LE(img.height, offset);
-  });
-  return buf;
+  cache.set(key, value);
 }
 
-/**
- * Deserializes a binary Buffer into an array of GalleryImage.
- * @param buf Binary Buffer
- * @returns Array of GalleryImage objects
- */
-function deserializeGalleryImagesBin(buf: Buffer): Array<{src: string, name: string, type: string, size: number, width: number, height: number}> {
-  const { srcLen, nameLen, typeLen, sizeLen, widthLen, heightLen, totalLen } = GALLERY_IMAGE_BIN_STRUCT;
-  const images = [];
-  for (let offset = 0; offset + totalLen <= buf.length; offset += totalLen) {
-    const src = buf.toString('utf8', offset, offset + srcLen).replace(/\0+$/, '');
-    const name = buf.toString('utf8', offset + srcLen, offset + srcLen + nameLen).replace(/\0+$/, '');
-    const type = buf.toString('utf8', offset + srcLen + nameLen, offset + srcLen + nameLen + typeLen).replace(/\0+$/, '');
-    const size = buf.readUInt32LE(offset + srcLen + nameLen + typeLen);
-    const width = buf.readUInt32LE(offset + srcLen + nameLen + typeLen + sizeLen);
-    const height = buf.readUInt32LE(offset + srcLen + nameLen + typeLen + sizeLen + widthLen);
-    images.push({ src, name, type, size, width, height });
-  }
-  return images;
+// Missing option types
+interface GetImageDetailsOptions {
+  includeDominantColor?: boolean;
+  dominantColorQuality?: DominantColorQuality;
+  dominantColorFastSampleSize?: number;
 }
 
-/**
- * Writes the binary metadata file at the root of the folder.
- * @param folderPath Folder path
- * @param images Array of GalleryImage
- */
-async function writeGalleryMetaBin(folderPath: string, images: Array<{src: string, name: string, type: string, size: number, width: number, height: number}>): Promise<void> {
-  const binPath = path.join(folderPath, 'imageGalleryMeta.bin');
-  // Add filePath if missing
-  const imagesWithFilePath = images.map(img => ({
-    ...img,
-    filePath: typeof img.src === 'string' ? img.src : ''
-  }));
-  // Prepare images with thumbnails
-  const imagesWithThumb = await prepareGalleryImagesWithThumb(imagesWithFilePath);
-  const buf = serializeGalleryImagesBinWithThumb(imagesWithThumb);
-  await fs.writeFile(binPath, buf);
-}
-
-/**
- * Reads the binary metadata file at the root of the folder.
- * @param folderPath Folder path
- * @returns Array of GalleryImage
- */
-async function readGalleryMetaBin(folderPath: string): Promise<Array<{src: string, name: string, type: string, size: number, width: number, height: number}>> {
-  const binPath = path.join(folderPath, 'imageGalleryMeta.bin');
-  try {
-    const buf = await fs.readFile(binPath);
-    return deserializeGalleryImagesBin(buf);
-  } catch {
-    return [];
-  }
-}
-import {
-  buildCustomEditorWebview,
-  buildErrorWebview,
-  buildFolderGalleryWebview,
-  type IcoVariantViewModel,
-  type ImageDetailsViewModel
-} from './webview';
-
-const SUPPORTED_IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tif', '.tiff', '.avif', '.ico', '.svg', '.heic', '.heif'];
-const SUPPORTED_IMAGE_FILTER_EXTENSIONS = SUPPORTED_IMAGE_EXTENSIONS.map((extension) => extension.replace('.', ''));
-
-type IcoImageEntry = {
-  width: number;
-  height: number;
-  bitCount: number;
-  bytesInResource: number;
-  imageOffset: number;
-  isPng: boolean;
-};
-
-type IcoSource = string | Buffer;
-
-type ZoomMessage = {
-  type: 'zoom-in' | 'zoom-out' | 'zoom-reset' | 'zoom-fit';
-};
-
-type WebviewInboundMessage = {
-  type: 'pick-compare-image';
-} | {
-  type: 'clear-compare-image';
-};
-
-type WebviewOutboundMessage =
-  | ZoomMessage
-  | {
-    type: 'set-compare-image';
-    source: string;
-    label: string;
-  }
-  | {
-    type: 'clear-compare-image';
-  }
-  | {
-    type: 'set-dominant-color';
-    hexColor: string;
-    rgbColor: string;
-  }
-  | {
-    type: 'update-settings';
-    settings: ImageInspectorSettings;
-  };
-
-type DominantColorQuality = 'fast' | 'full';
-
-type ImageInspectorSettings = {
+interface ImageInspectorSettings {
   toolbarPosition: string;
   themeAccentRgb: string;
   pipetteLoupeDiameter: number;
@@ -290,60 +41,260 @@ type ImageInspectorSettings = {
   pipetteLoupeZoomAtMaxImageZoom: number;
   dominantColorQuality: DominantColorQuality;
   dominantColorFastSampleSize: number;
-};
+}
 
-type GetImageDetailsOptions = {
-  includeDominantColor: boolean;
-  dominantColorQuality: DominantColorQuality;
-  dominantColorFastSampleSize: number;
-};
+interface IcoImageEntry {
+  width: number;
+  height: number;
+  bitCount: number;
+  bytesInResource: number;
+  imageOffset: number;
+  isPng: boolean;
+}
 
-const MAX_CONVERTED_PREVIEW_CACHE_ENTRIES = 12;
-const MAX_ICO_CACHE_ENTRIES = 24;
-const MAX_IMAGE_DETAILS_CACHE_ENTRIES = 32;
-const DEFAULT_THEME_ACCENT_HEX = '#00C86E';
-const DEFAULT_DOMINANT_COLOR_QUALITY: DominantColorQuality = 'full';
+type IcoSource = string | Buffer;
+
+// Minimal provider for custom editor
+class ImageCustomDocument implements vscode.CustomDocument {
+  uri: vscode.Uri;
+  constructor(uri: vscode.Uri) {
+    this.uri = uri;
+  }
+  dispose(): void {}
+}
+
+class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorProvider<ImageCustomDocument> {
+  public static readonly viewType = 'imageInspector.previewEditor';
+  private readonly context: vscode.ExtensionContext;
+  private activePanel: vscode.WebviewPanel | undefined;
+  private readonly openPanels = new Map<vscode.WebviewPanel, vscode.Uri>();
+
+  constructor(context: vscode.ExtensionContext) {
+    this.context = context;
+  }
+
+  async openCustomDocument(
+    uri: vscode.Uri,
+    openContext: vscode.CustomDocumentOpenContext,
+    token: vscode.CancellationToken
+  ): Promise<ImageCustomDocument> {
+    return new ImageCustomDocument(uri);
+  }
+
+  /**
+   * Resolves and displays the custom editor for an image file.
+   * @param document The custom document representing the image.
+   * @param webviewPanel The webview panel to display content.
+   * @param token Cancellation token.
+   */
+  async resolveCustomEditor(
+    document: ImageCustomDocument,
+    webviewPanel: vscode.WebviewPanel,
+    token: vscode.CancellationToken
+  ): Promise<void> {
+    try {
+      const filePath = document.uri.fsPath;
+      const settings = getImageInspectorSettings();
+      const icoVariants = path.extname(filePath).toLowerCase() === '.ico'
+        ? await getIcoGalleryItems(filePath)
+        : [];
+
+      webviewPanel.webview.options = {
+        enableScripts: true,
+        localResourceRoots: [
+          vscode.Uri.joinPath(this.context.extensionUri, 'media'),
+          vscode.Uri.file(path.dirname(filePath)),
+          ...(vscode.workspace.workspaceFolders?.map((folder) => folder.uri) ?? [])
+        ]
+      };
+
+      const details = await getImageDetails(filePath, undefined, {
+        includeDominantColor: true,
+        dominantColorQuality: settings.dominantColorQuality,
+        dominantColorFastSampleSize: settings.dominantColorFastSampleSize
+      });
+      const imageSrc = getWebviewImageSrc(webviewPanel.webview, filePath);
+      webviewPanel.webview.html = buildCustomEditorWebview(
+        webviewPanel.webview,
+        imageSrc,
+        details,
+        this.context.extensionUri,
+        {
+          toolbarPosition: settings.toolbarPosition,
+          themeAccentRgb: settings.themeAccentRgb,
+          icoVariants,
+          pipetteLoupeDiameter: settings.pipetteLoupeDiameter,
+          pipetteLoupeVirtualResolution: settings.pipetteLoupeVirtualResolution,
+          pipetteLoupeZoomAtMinImageZoom: settings.pipetteLoupeZoomAtMinImageZoom,
+          pipetteLoupeZoomAtMaxImageZoom: settings.pipetteLoupeZoomAtMaxImageZoom
+        }
+      );
+
+      const isNewPanel = !this.openPanels.has(webviewPanel);
+      this.openPanels.set(webviewPanel, document.uri);
+      this.activePanel = webviewPanel;
+
+      if (isNewPanel) {
+        webviewPanel.webview.onDidReceiveMessage((message: unknown) => {
+          if (!message || typeof message !== 'object' || !('type' in message)) {
+            return;
+          }
+
+          const webviewMessage = message as { type: string };
+          if (webviewMessage.type === 'pick-compare-image') {
+            void this.promptComparisonImageForPanel(webviewPanel, document.uri);
+          }
+        });
+
+        webviewPanel.onDidChangeViewState((event) => {
+          if (event.webviewPanel.active) {
+            this.activePanel = event.webviewPanel;
+          }
+        });
+
+        webviewPanel.onDidDispose(() => {
+          this.openPanels.delete(webviewPanel);
+          if (this.activePanel === webviewPanel) {
+            this.activePanel = undefined;
+          }
+        });
+      }
+    } catch (err) {
+      webviewPanel.webview.html = `<html><body><h2>Erreur lors du chargement de l'image</h2><pre>${String(err)}</pre></body></html>`;
+    }
+  }
+
+  /**
+   * Sends a message to the currently active image inspector panel.
+   * @param message Message payload consumed by the webview.
+   */
+  async sendZoomMessage(message: { type: string }): Promise<void> {
+    if (!this.activePanel) {
+      return;
+    }
+
+    await this.activePanel.webview.postMessage(message);
+  }
+
+  /**
+   * Opens a picker to choose a comparison image for the active panel.
+   */
+  async promptComparisonImageForActivePanel(): Promise<void> {
+    if (!this.activePanel) {
+      void vscode.window.showInformationMessage('Open an image in Image Inspector before selecting a comparison image.');
+      return;
+    }
+
+    const currentImageUri = this.openPanels.get(this.activePanel);
+    if (!currentImageUri) {
+      return;
+    }
+
+    await this.promptComparisonImageForPanel(this.activePanel, currentImageUri);
+  }
+
+  /**
+   * Refreshes runtime settings for all opened image inspector panels.
+   */
+  refreshActivePanelFromConfiguration(_event: vscode.ConfigurationChangeEvent): void {
+    const settings = getImageInspectorSettings();
+
+    for (const panel of this.openPanels.keys()) {
+      void panel.webview.postMessage({
+        type: 'update-settings',
+        settings
+      });
+    }
+  }
+
+  /**
+   * Prompts the user for a comparison image and sends it to the target webview.
+   * @param panel Target image inspector panel.
+   * @param currentImageUri URI of the currently displayed image.
+   */
+  private async promptComparisonImageForPanel(
+    panel: vscode.WebviewPanel,
+    currentImageUri: vscode.Uri
+  ): Promise<void> {
+    const selectedUris = await vscode.window.showOpenDialog({
+      canSelectFiles: true,
+      canSelectFolders: false,
+      canSelectMany: false,
+      defaultUri: vscode.Uri.file(path.dirname(currentImageUri.fsPath)),
+      openLabel: 'Select comparison image',
+      filters: {
+        Images: SUPPORTED_IMAGE_FILTER_EXTENSIONS
+      }
+    });
+
+    const comparisonImageUri = selectedUris?.[0];
+    if (!comparisonImageUri) {
+      return;
+    }
+
+    const localResourceRoots = new Map<string, vscode.Uri>();
+    for (const resourceRoot of panel.webview.options.localResourceRoots ?? []) {
+      localResourceRoots.set(resourceRoot.toString(), resourceRoot);
+    }
+    localResourceRoots.set(
+      vscode.Uri.file(path.dirname(comparisonImageUri.fsPath)).toString(),
+      vscode.Uri.file(path.dirname(comparisonImageUri.fsPath))
+    );
+
+    panel.webview.options = {
+      ...panel.webview.options,
+      localResourceRoots: Array.from(localResourceRoots.values())
+    };
+
+    await panel.webview.postMessage({
+      type: 'set-compare-image',
+      source: getWebviewImageSrc(panel.webview, comparisonImageUri.fsPath),
+      label: path.basename(comparisonImageUri.fsPath)
+    });
+  }
+}
+// Types and constants for gallery and inspector
+const SUPPORTED_IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tif', '.tiff', '.avif', '.ico', '.svg', '.heic', '.heif'];
+const SUPPORTED_IMAGE_FILTER_EXTENSIONS = SUPPORTED_IMAGE_EXTENSIONS.map((extension) => extension.replace('.', ''));
+const DEFAULT_DOMINANT_COLOR_QUALITY = 'full';
 const DEFAULT_DOMINANT_COLOR_FAST_SAMPLE_SIZE = 64;
+const DEFAULT_THEME_ACCENT_HEX = '#00C86E';
 
-const convertedPreviewCache = new Map<string, string>();
-const icoEntriesCache = new Map<string, IcoImageEntry[]>();
-const icoGalleryCache = new Map<string, IcoVariantViewModel[]>();
-const imageDetailsCache = new Map<string, ImageDetailsViewModel>();
+type DominantColorQuality = 'fast' | 'full';
 
+function getWebviewImageSrc(webview: vscode.Webview, filePath: string): string {
+  return webview.asWebviewUri(vscode.Uri.file(filePath)).toString();
+}
+import * as fs from 'fs/promises';
+import * as path from 'path';
+
+import sharp from 'sharp';
+
+// Buffer is global in Node.js, but can be imported explicitly if needed
+import { Buffer } from 'buffer';
+import * as vscode from 'vscode';
+import {
+  buildCustomEditorWebview,
+  buildErrorWebview,
+  buildFolderGalleryWebview,
+  type IcoVariantViewModel,
+  type ImageDetailsViewModel
+} from './webview';
+// Utilities for file version management (cache, refresh)
 type FileVersionInfo = {
   key: string;
   sizeBytes: number;
 };
 
-/**
- * Builds a stable cache key for a file version.
- *
- * @param filePath Absolute file path.
- * @param size File size in bytes.
- * @param mtimeMs Last modified time in milliseconds.
- * @returns Cache key identifying one file version.
- */
 function buildFileVersionKey(filePath: string, size: number, mtimeMs: number): string {
   return `${filePath}::${String(size)}::${String(Math.trunc(mtimeMs))}`;
 }
 
-/**
- * Resolves a cache key for the current version of a file.
- *
- * @param filePath Absolute file path.
- * @returns Cache key based on file size and mtime.
- */
 async function getFileVersionKey(filePath: string): Promise<string> {
   const stats = await fs.stat(filePath);
   return buildFileVersionKey(filePath, stats.size, stats.mtimeMs);
 }
 
-/**
- * Resolves file stats and a version key in one pass.
- *
- * @param filePath Absolute file path.
- * @returns File stats and corresponding cache key.
- */
 async function getFileVersionInfo(filePath: string): Promise<FileVersionInfo> {
   const stats = await fs.stat(filePath);
   const sizeBytes = typeof stats.size === 'bigint' ? Number(stats.size) : stats.size;
@@ -353,533 +304,6 @@ async function getFileVersionInfo(filePath: string): Promise<FileVersionInfo> {
   };
 }
 
-/**
- * Gets and touches a cache entry to keep it hot (LRU behavior).
- *
- * @param cache Cache map.
- * @param key Cache key.
- * @returns Cached value when present.
- */
-function getCachedValue<T>(cache: Map<string, T>, key: string): T | undefined {
-  const value = cache.get(key);
-  if (value === undefined) {
-    return undefined;
-  }
-
-  cache.delete(key);
-  cache.set(key, value);
-  return value;
-}
-
-/**
- * Inserts a value in a bounded cache and evicts oldest entries.
- *
- * @param cache Cache map.
- * @param key Cache key.
- * @param value Cached value.
- * @param maxEntries Maximum number of entries to keep.
- */
-function setBoundedCachedValue<T>(cache: Map<string, T>, key: string, value: T, maxEntries: number): void {
-  if (cache.has(key)) {
-    cache.delete(key);
-  }
-
-  cache.set(key, value);
-  while (cache.size > maxEntries) {
-    const oldestKey = cache.keys().next().value;
-    if (oldestKey === undefined) {
-      return;
-    }
-
-    cache.delete(oldestKey);
-  }
-}
-
-/**
- * Represents a readonly image document handled by the custom editor.
- */
-class ImageCustomDocument implements vscode.CustomDocument {
-  /**
-   * Creates a custom image document.
-   *
-   * @param uri Document URI.
-   */
-  constructor(public readonly uri: vscode.Uri) {}
-
-  /**
-   * Disposes document resources.
-   */
-  dispose(): void {
-    return;
-  }
-}
-
-/**
- * Provides a readonly custom editor to render image preview and metadata.
- */
-class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorProvider<ImageCustomDocument> {
-  static readonly viewType = 'imageInspector.previewEditor';
-  private activePanel: vscode.WebviewPanel | undefined;
-  private activeDocument: ImageCustomDocument | undefined;
-  private readonly refreshDebounceTimers = new Map<string, NodeJS.Timeout>();
-  private readonly comparisonImageByDocumentUri = new Map<string, vscode.Uri>();
-  private readonly renderSequenceByViewKey = new Map<string, number>();
-
-  /**
-   * Builds a stable key used to debounce refreshes per panel/document pair.
-   *
-   * @param document Document currently rendered.
-   * @param webviewPanel Associated webview panel.
-   * @returns Unique key for refresh timer tracking.
-   */
-  private getRefreshTimerKey(document: ImageCustomDocument, webviewPanel: vscode.WebviewPanel): string {
-    // Avoid accessing viewType if webviewPanel is disposed
-    try {
-      return `${webviewPanel.viewType}${document.uri.toString()}`;
-    } catch (e) {
-      // Panel is disposed, return a neutral key
-      return `disposed${document.uri.toString()}`;
-    }
-  }
-
-  /**
-   * Starts a new render sequence for one panel/document pair.
-   *
-   * @param viewKey Stable panel/document key.
-   * @returns Sequence number for this render request.
-   */
-  private beginRenderSequence(viewKey: string): number {
-    const nextSequence = (this.renderSequenceByViewKey.get(viewKey) ?? 0) + 1;
-    this.renderSequenceByViewKey.set(viewKey, nextSequence);
-    return nextSequence;
-  }
-
-  /**
-   * Checks whether a render request is still current.
-   *
-   * @param viewKey Stable panel/document key.
-   * @param sequence Sequence number to validate.
-   * @returns True when the sequence is still the latest one.
-   */
-  private isRenderSequenceCurrent(viewKey: string, sequence: number): boolean {
-    return this.renderSequenceByViewKey.get(viewKey) === sequence;
-  }
-
-  /**
-   * Creates a provider instance.
-   *
-   * @param context Extension context used for subscription lifecycle.
-   */
-  constructor(private readonly context: vscode.ExtensionContext) {}
-
-  /**
-   * Opens the document associated with the custom editor.
-   *
-   * @param uri Resource URI.
-   * @returns A custom document wrapper.
-   */
-  openCustomDocument(uri: vscode.Uri): ImageCustomDocument {
-    return new ImageCustomDocument(uri);
-  }
-
-  /**
-   * Resolves the custom editor webview content for a document.
-   *
-   * @param document Custom document instance.
-   * @param webviewPanel Target webview panel.
-   */
-  async resolveCustomEditor(document: ImageCustomDocument, webviewPanel: vscode.WebviewPanel): Promise<void> {
-    this.activePanel = webviewPanel;
-    this.activeDocument = document;
-    const fileWatcher = this.createDocumentFileWatcher(document, webviewPanel);
-
-    webviewPanel.onDidDispose(() => {
-      if (this.activePanel === webviewPanel) {
-        this.activePanel = undefined;
-        this.activeDocument = undefined;
-      }
-
-      const timerKey = this.getRefreshTimerKey(document, webviewPanel);
-      const refreshTimer = this.refreshDebounceTimers.get(timerKey);
-      if (refreshTimer) {
-        clearTimeout(refreshTimer);
-        this.refreshDebounceTimers.delete(timerKey);
-      }
-
-      this.renderSequenceByViewKey.delete(timerKey);
-
-      fileWatcher.dispose();
-    }, undefined, this.context.subscriptions);
-
-    webviewPanel.onDidChangeViewState((event) => {
-      if (event.webviewPanel.active) {
-        this.activePanel = event.webviewPanel;
-        this.activeDocument = document;
-      }
-    }, undefined, this.context.subscriptions);
-
-    webviewPanel.webview.options = {
-      enableScripts: true,
-      localResourceRoots: [
-        vscode.Uri.joinPath(this.context.extensionUri, 'media'),
-        vscode.Uri.file(path.dirname(document.uri.fsPath)),
-        vscode.Uri.file(path.parse(document.uri.fsPath).root)
-      ]
-    };
-
-    webviewPanel.webview.onDidReceiveMessage((rawMessage: unknown) => {
-      if (!rawMessage || typeof rawMessage !== 'object' || !('type' in rawMessage)) {
-        return;
-      }
-
-      const message = rawMessage as WebviewInboundMessage;
-      void this.handleWebviewMessage(document, webviewPanel, message);
-    }, undefined, this.context.subscriptions);
-
-    await this.renderDocument(document, webviewPanel);
-  }
-
-  /**
-   * Renders the webview for a specific image document.
-   *
-   * @param document Custom document instance.
-   * @param webviewPanel Target webview panel.
-   */
-  private async renderDocument(document: ImageCustomDocument, webviewPanel: vscode.WebviewPanel): Promise<void> {
-    const viewKey = this.getRefreshTimerKey(document, webviewPanel);
-    const renderSequence = this.beginRenderSequence(viewKey);
-
-    try {
-      const imageInspectorSettings = getImageInspectorSettings();
-      const primaryFileVersion = await getFileVersionInfo(document.uri.fsPath);
-      const details = await getImageDetails(
-        document.uri.fsPath,
-        primaryFileVersion,
-        {
-          includeDominantColor: false,
-          dominantColorQuality: imageInspectorSettings.dominantColorQuality,
-          dominantColorFastSampleSize: imageInspectorSettings.dominantColorFastSampleSize
-        }
-      );
-
-      if (!this.isRenderSequenceCurrent(viewKey, renderSequence)) {
-        return;
-      }
-
-      let imageSource = await getWebviewImageSource(
-        document.uri.fsPath,
-        document.uri,
-        webviewPanel.webview,
-        primaryFileVersion.key
-      );
-      const comparisonImageUri = this.comparisonImageByDocumentUri.get(document.uri.toString());
-      const extension = path.extname(document.uri.fsPath).toLowerCase();
-      const icoVariants = extension === '.ico' ? await getIcoGalleryItems(document.uri.fsPath) : [];
-      let comparisonImageSource = '';
-      let comparisonImageLabel = '';
-
-      if (icoVariants.length > 0) {
-        imageSource = getDefaultIcoVariantSource(icoVariants);
-      }
-
-      if (comparisonImageUri) {
-        const comparisonFileVersion = await getFileVersionInfo(comparisonImageUri.fsPath);
-        comparisonImageSource = await getWebviewImageSource(
-          comparisonImageUri.fsPath,
-          comparisonImageUri,
-          webviewPanel.webview,
-          comparisonFileVersion.key
-        );
-        comparisonImageLabel = path.basename(comparisonImageUri.fsPath);
-      }
-
-      if (!this.isRenderSequenceCurrent(viewKey, renderSequence)) {
-        return;
-      }
-
-      webviewPanel.title = details.fileName;
-      webviewPanel.webview.html = buildCustomEditorWebview(
-        webviewPanel.webview,
-        imageSource,
-        details,
-        this.context.extensionUri,
-        {
-          toolbarPosition: imageInspectorSettings.toolbarPosition,
-          themeAccentRgb: imageInspectorSettings.themeAccentRgb,
-          icoVariants,
-          comparisonImageSource,
-          comparisonImageLabel,
-          pipetteLoupeDiameter: imageInspectorSettings.pipetteLoupeDiameter,
-          pipetteLoupeVirtualResolution: imageInspectorSettings.pipetteLoupeVirtualResolution,
-          pipetteLoupeZoomAtMinImageZoom: imageInspectorSettings.pipetteLoupeZoomAtMinImageZoom,
-          pipetteLoupeZoomAtMaxImageZoom: imageInspectorSettings.pipetteLoupeZoomAtMaxImageZoom
-        }
-      );
-
-      void this.pushDominantColorUpdate(
-        document,
-        webviewPanel,
-        viewKey,
-        renderSequence,
-        primaryFileVersion,
-        imageInspectorSettings
-      );
-    } catch (error) {
-      if (!this.isRenderSequenceCurrent(viewKey, renderSequence)) {
-        return;
-      }
-
-      const message = getImageLoadErrorMessage(document.uri.fsPath, error);
-      webviewPanel.webview.html = buildErrorWebview(message);
-    }
-  }
-
-  /**
-   * Computes and sends dominant color update asynchronously.
-   *
-   * @param document Active document.
-   * @param webviewPanel Target panel.
-   * @param viewKey Stable panel/document key.
-   * @param renderSequence Render sequence to validate.
-   * @param knownFileVersion Optional file version info reused from render.
-   * @param settings Current extension settings.
-   */
-  private async pushDominantColorUpdate(
-    document: ImageCustomDocument,
-    webviewPanel: vscode.WebviewPanel,
-    viewKey: string,
-    renderSequence: number,
-    knownFileVersion: FileVersionInfo | undefined,
-    settings: ImageInspectorSettings
-  ): Promise<void> {
-    const resolvedFileVersion = knownFileVersion ?? await getFileVersionInfo(document.uri.fsPath);
-    const details = await getImageDetails(
-      document.uri.fsPath,
-      resolvedFileVersion,
-      {
-        includeDominantColor: true,
-        dominantColorQuality: settings.dominantColorQuality,
-        dominantColorFastSampleSize: settings.dominantColorFastSampleSize
-      }
-    );
-
-    if (!this.isRenderSequenceCurrent(viewKey, renderSequence)) {
-      return;
-    }
-
-    const outboundMessage: WebviewOutboundMessage = {
-      type: 'set-dominant-color',
-      hexColor: details.dominantColorHex,
-      rgbColor: details.dominantColorRgb
-    };
-
-    await webviewPanel.webview.postMessage(outboundMessage);
-  }
-
-  /**
-   * Creates a file watcher to refresh a webview when its image changes externally.
-   *
-   * @param document Custom document being displayed.
-   * @param webviewPanel Associated webview panel.
-   * @returns Disposable watcher.
-   */
-  private createDocumentFileWatcher(
-    document: ImageCustomDocument,
-    webviewPanel: vscode.WebviewPanel
-  ): vscode.Disposable {
-    const fileName = path.basename(document.uri.fsPath);
-    const parentFolder = path.dirname(document.uri.fsPath);
-    const filePattern = new vscode.RelativePattern(parentFolder, fileName);
-    const watcher = vscode.workspace.createFileSystemWatcher(filePattern);
-
-    const scheduleRefresh = () => {
-      const timerKey = this.getRefreshTimerKey(document, webviewPanel);
-      const existingTimer = this.refreshDebounceTimers.get(timerKey);
-      if (existingTimer) {
-        clearTimeout(existingTimer);
-      }
-
-      const refreshTimer = setTimeout(() => {
-        this.refreshDebounceTimers.delete(timerKey);
-        void this.renderDocument(document, webviewPanel);
-      }, 150);
-
-      this.refreshDebounceTimers.set(timerKey, refreshTimer);
-    };
-
-    watcher.onDidChange(scheduleRefresh, undefined, this.context.subscriptions);
-    watcher.onDidCreate(scheduleRefresh, undefined, this.context.subscriptions);
-    watcher.onDidDelete(scheduleRefresh, undefined, this.context.subscriptions);
-
-    return watcher;
-  }
-
-  /**
-   * Sends a zoom action to the currently active custom editor panel.
-   *
-   * @param message Zoom message payload.
-   */
-  async sendZoomMessage(message: ZoomMessage): Promise<void> {
-    if (!this.activePanel) {
-      return;
-    }
-
-    await this.activePanel.webview.postMessage(message);
-  }
-
-  /**
-   * Prompts the user to pick a comparison image for the active custom editor.
-   */
-  async promptComparisonImageForActivePanel(): Promise<void> {
-    if (!this.activePanel || !this.activeDocument) {
-      void vscode.window.showInformationMessage('Open an image in Image Inspector first.');
-      return;
-    }
-
-    await this.pickComparisonImage(this.activeDocument, this.activePanel);
-  }
-
-  /**
-   * Handles webview-to-extension messages.
-   *
-   * @param document Active custom document.
-   * @param webviewPanel Active webview panel.
-   * @param message Inbound message payload.
-   */
-  private async handleWebviewMessage(
-    document: ImageCustomDocument,
-    webviewPanel: vscode.WebviewPanel,
-    message: WebviewInboundMessage
-  ): Promise<void> {
-    if (message.type === 'pick-compare-image') {
-      await this.pickComparisonImage(document, webviewPanel);
-      return;
-    }
-
-    if (message.type === 'clear-compare-image') {
-      await this.clearComparisonImage(document, webviewPanel);
-    }
-  }
-
-  /**
-   * Opens a picker and sends a comparison image source to the webview.
-   *
-   * @param document Active custom document.
-   * @param webviewPanel Active webview panel.
-   */
-  private async pickComparisonImage(
-    document: ImageCustomDocument,
-    webviewPanel: vscode.WebviewPanel
-  ): Promise<void> {
-    const selected = await vscode.window.showOpenDialog({
-      canSelectMany: false,
-      openLabel: 'Choose comparison image',
-      filters: {
-        Images: SUPPORTED_IMAGE_FILTER_EXTENSIONS
-      }
-    });
-
-    const comparisonUri = selected?.[0];
-    if (!comparisonUri) {
-      return;
-    }
-
-    const [primaryFileVersion, comparisonFileVersion] = await Promise.all([
-      getFileVersionInfo(document.uri.fsPath),
-      getFileVersionInfo(comparisonUri.fsPath)
-    ]);
-
-    const [primaryDetails, comparisonDetails] = await Promise.all([
-      getImageDetails(document.uri.fsPath, primaryFileVersion, {
-        includeDominantColor: false,
-        dominantColorQuality: DEFAULT_DOMINANT_COLOR_QUALITY,
-        dominantColorFastSampleSize: DEFAULT_DOMINANT_COLOR_FAST_SAMPLE_SIZE
-      }),
-      getImageDetails(comparisonUri.fsPath, comparisonFileVersion, {
-        includeDominantColor: false,
-        dominantColorQuality: DEFAULT_DOMINANT_COLOR_QUALITY,
-        dominantColorFastSampleSize: DEFAULT_DOMINANT_COLOR_FAST_SAMPLE_SIZE
-      })
-    ]);
-
-    if (primaryDetails.width !== comparisonDetails.width || primaryDetails.height !== comparisonDetails.height) {
-      const primarySize = `${String(primaryDetails.width)}x${String(primaryDetails.height)}`;
-      const compareSize = `${String(comparisonDetails.width)}x${String(comparisonDetails.height)}`;
-      void vscode.window.showWarningMessage(
-        `Comparison requires matching dimensions. Current: ${primarySize}, selected: ${compareSize}.`
-      );
-      return;
-    }
-
-    const comparisonSource = await getWebviewImageSource(
-      comparisonUri.fsPath,
-      comparisonUri,
-      webviewPanel.webview,
-      comparisonFileVersion.key
-    );
-
-    this.comparisonImageByDocumentUri.set(document.uri.toString(), comparisonUri);
-
-    const outboundMessage: WebviewOutboundMessage = {
-      type: 'set-compare-image',
-      source: comparisonSource,
-      label: path.basename(comparisonUri.fsPath)
-    };
-
-    await webviewPanel.webview.postMessage(outboundMessage);
-  }
-
-  /**
-   * Clears any currently selected comparison image for one document.
-   *
-   * @param document Active custom document.
-   * @param webviewPanel Active webview panel.
-   */
-  private async clearComparisonImage(
-    document: ImageCustomDocument,
-    webviewPanel: vscode.WebviewPanel
-  ): Promise<void> {
-    this.comparisonImageByDocumentUri.delete(document.uri.toString());
-
-    const outboundMessage: WebviewOutboundMessage = {
-      type: 'clear-compare-image'
-    };
-
-    await webviewPanel.webview.postMessage(outboundMessage);
-  }
-
-  /**
-   * Re-renders the active custom editor panel after configuration updates.
-   */
-  async refreshActivePanelFromConfiguration(event: vscode.ConfigurationChangeEvent): Promise<void> {
-    if (!this.activePanel || !this.activeDocument) {
-      return;
-    }
-
-    const settings = getImageInspectorSettings();
-    const settingsMessage: WebviewOutboundMessage = {
-      type: 'update-settings',
-      settings
-    };
-    await this.activePanel.webview.postMessage(settingsMessage);
-
-    if (
-      event.affectsConfiguration('imageInspector.dominantColorQuality')
-      || event.affectsConfiguration('imageInspector.dominantColorFastSampleSize')
-    ) {
-      const viewKey = this.getRefreshTimerKey(this.activeDocument, this.activePanel);
-      const renderSequence = this.renderSequenceByViewKey.get(viewKey) ?? 0;
-      void this.pushDominantColorUpdate(
-        this.activeDocument,
-        this.activePanel,
-        viewKey,
-        renderSequence,
-        undefined,
-        settings
-      );
-    }
-  }
-}
 
 /**
  * Scans a folder for supported image files (non-recursive).
@@ -890,9 +314,70 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
 async function scanFolderImages(folderPath: string): Promise<string[]> {
   const entries = await fs.readdir(folderPath, { withFileTypes: true });
   return entries
-    .filter((entry) => entry.isFile() && isSupportedImage(entry.name))
-    .map((entry) => path.join(folderPath, entry.name))
-    .sort((a, b) => path.basename(a).localeCompare(path.basename(b), undefined, { sensitivity: 'base', numeric: true }));
+    .filter((entry: any) => entry.isFile() && isSupportedImage(entry.name))
+    .map((entry: any) => path.join(folderPath, entry.name))
+    .sort((a: string, b: string) => path.basename(a).localeCompare(path.basename(b), undefined, { sensitivity: 'base', numeric: true }));
+}
+
+/**
+ * Builds a lightweight gallery thumbnail for one image file.
+ *
+ * @param filePath Absolute path to the source image.
+ * @param fileVersionInfo Optional precomputed file version information.
+ * @returns Data URI of the generated thumbnail, or an empty string on fallback.
+ */
+async function getGalleryThumbnailSource(
+  filePath: string,
+  fileVersionInfo?: FileVersionInfo
+): Promise<string> {
+  const resolvedFileVersion = fileVersionInfo ?? await getFileVersionInfo(filePath);
+  const cachedThumbnail = getCachedValue(galleryThumbnailCache, resolvedFileVersion.key);
+  if (cachedThumbnail) {
+    return cachedThumbnail;
+  }
+
+  try {
+    const thumbnailBuffer = await sharp(filePath)
+      .rotate()
+      .resize({
+        width: 320,
+        height: 320,
+        fit: 'inside',
+        withoutEnlargement: true
+      })
+      .webp({ quality: 72 })
+      .toBuffer();
+
+    const thumbnailSource = `data:image/webp;base64,${thumbnailBuffer.toString('base64')}`;
+    setBoundedCachedValue(galleryThumbnailCache, resolvedFileVersion.key, thumbnailSource, MAX_GALLERY_THUMBNAIL_CACHE_ENTRIES);
+    return thumbnailSource;
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Processes asynchronous tasks with a small concurrency cap.
+ *
+ * @param items Items to process.
+ * @param concurrency Maximum number of parallel workers.
+ * @param worker Async callback executed for each item.
+ */
+async function processWithConcurrencyLimit<T>(
+  items: readonly T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<void>
+): Promise<void> {
+  const workerCount = Math.max(1, Math.min(concurrency, items.length || 1));
+  let nextIndex = 0;
+
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      await worker(items[currentIndex], currentIndex);
+    }
+  }));
 }
 
 /**
@@ -902,7 +387,7 @@ async function scanFolderImages(folderPath: string): Promise<string[]> {
 class ImageFolderGalleryPanel {
   private static readonly activePanels = new Map<string, ImageFolderGalleryPanel>();
   private readonly panel: vscode.WebviewPanel;
-  private readonly imageFiles: Array<{ src: string; filePath: string; name: string; type: string; size: number; width: number; height: number; dominantColorHex: string; dominantColorRgb: string }>;
+  private readonly imageFiles: Array<{ src: string; thumbUrl?: string; filePath: string; name: string; type: string; size: number; width: number; height: number; dominantColorHex: string; dominantColorRgb: string }>;
   private readonly storageKey: string;
 
   /**
@@ -921,44 +406,19 @@ class ImageFolderGalleryPanel {
     }
 
     const imageFiles = await scanFolderImages(folderPath);
-    let galleryImageMeta;
-    // Try to read the binary file with thumbnails
-    let binImages: Array<{src: string, name: string, type: string, size: number, width: number, height: number, thumbnail: Buffer}> = [];
-    try {
-      const binPath = path.join(folderPath, 'imageGalleryMeta.bin');
-      const buf = await fs.readFile(binPath);
-      binImages = deserializeGalleryImagesBinWithThumb(buf);
-    } catch {}
-    // Progressive display: show the gallery immediately with available info
-    galleryImageMeta = [];
-    if (binImages.length === imageFiles.length) {
-      // If binary cache is complete, use it
-      galleryImageMeta = binImages.map((img, idx) => ({
-        src: '',
-        filePath: imageFiles[idx],
-        name: img.name,
-        type: img.type,
-        size: img.size,
-        width: img.width,
-        height: img.height,
-        dominantColorHex: '#cccccc',
-        dominantColorRgb: 'rgb(204, 204, 204)',
-        thumbnail: img.thumbnail
-      }));
-    } else {
-      // Otherwise, show the gallery with placeholders
-      galleryImageMeta = imageFiles.map((filePath) => ({
-        src: '',
-        filePath,
-        name: path.basename(filePath),
-        type: 'Loading...',
-        size: 0,
-        width: 0,
-        height: 0,
-        dominantColorHex: '#cccccc',
-        dominantColorRgb: 'rgb(204, 204, 204)'
-      }));
-    }
+    // Simple gallery construction without binary
+    const galleryImageMeta = imageFiles.map((filePath) => ({
+      src: '',
+      thumbUrl: '',
+      filePath,
+      name: path.basename(filePath),
+      type: 'Loading...',
+      size: 0,
+      width: 0,
+      height: 0,
+      dominantColorHex: '#cccccc',
+      dominantColorRgb: 'rgb(204, 204, 204)'
+    }));
 
     const instance = new ImageFolderGalleryPanel(folderUri, galleryImageMeta, context);
     instance.imageFiles.forEach(img => {
@@ -966,57 +426,40 @@ class ImageFolderGalleryPanel {
     });
     ImageFolderGalleryPanel.activePanels.set(folderPath, instance);
 
-    // Progressive display: update each image as soon as its info is ready
-    if (binImages.length === imageFiles.length) {
-      // If cache, send info immediately
-      instance.imageFiles.forEach((img, index) => {
-        img.src = getWebviewImageSrc(instance.panel.webview, img.filePath);
-        instance.panel.webview.postMessage({
+    // Progressive metadata generation and update with bounded concurrency.
+    void processWithConcurrencyLimit(imageFiles, 4, async (filePath, index) => {
+      try {
+        const fileVersionInfo = await getFileVersionInfo(filePath);
+        const [details, thumbUrl] = await Promise.all([
+          getImageDetails(filePath, fileVersionInfo, {
+            includeDominantColor: true,
+            dominantColorQuality: DEFAULT_DOMINANT_COLOR_QUALITY,
+            dominantColorFastSampleSize: DEFAULT_DOMINANT_COLOR_FAST_SAMPLE_SIZE
+          }),
+          getGalleryThumbnailSource(filePath, fileVersionInfo)
+        ]);
+        instance.imageFiles[index] = {
+          src: getWebviewImageSrc(instance.panel.webview, filePath),
+          thumbUrl,
+          filePath,
+          name: details.fileName,
+          type: details.format,
+          size: details.sizeBytes,
+          width: details.width,
+          height: details.height,
+          dominantColorHex: details.dominantColorHex,
+          dominantColorRgb: details.dominantColorRgb
+        };
+        void instance.panel.webview.postMessage({
           type: 'update-image-meta',
           index,
           meta: instance.imageFiles[index]
         });
-      });
-    } else {
-      // Otherwise, generate and update as info becomes available
-      await Promise.all(imageFiles.map(async (filePath, index) => {
-        try {
-          const details = await getImageDetails(filePath, undefined, {
-            includeDominantColor: true,
-            dominantColorQuality: DEFAULT_DOMINANT_COLOR_QUALITY,
-            dominantColorFastSampleSize: DEFAULT_DOMINANT_COLOR_FAST_SAMPLE_SIZE
-          });
-          instance.imageFiles[index] = {
-            src: getWebviewImageSrc(instance.panel.webview, filePath),
-            filePath,
-            name: details.fileName,
-            type: details.format,
-            size: details.sizeBytes,
-            width: details.width,
-            height: details.height,
-            dominantColorHex: details.dominantColorHex,
-            dominantColorRgb: details.dominantColorRgb
-          };
-          instance.panel.webview.postMessage({
-            type: 'update-image-meta',
-            index,
-            meta: instance.imageFiles[index]
-          });
-          await context.workspaceState.update(storageKey, instance.imageFiles);
-        } catch {
-          // In case of error, keep the placeholder
-        }
-      }));
-      // Generate thumbnails and write binary file in background
-      prepareGalleryImagesWithThumb(instance.imageFiles.map(img => ({ ...img, filePath: img.filePath })))
-        .then(imagesWithThumb => {
-          const buf = serializeGalleryImagesBinWithThumb(imagesWithThumb);
-          return fs.writeFile(path.join(folderPath, 'imageGalleryMeta.bin'), buf);
-        })
-        .catch(err => {
-          console.error('Error while writing gallery binary file:', err);
-        });
-    }
+        await context.workspaceState.update(storageKey, instance.imageFiles);
+      } catch {
+        // On error, keep placeholder metadata.
+      }
+    });
   }
 
   /**
@@ -1028,12 +471,13 @@ class ImageFolderGalleryPanel {
    */
   private constructor(
     folderUri: vscode.Uri,
-    galleryImageMeta: Array<{ filePath: string; name: string; type: string; size: number; width: number; height: number; dominantColorHex: string; dominantColorRgb: string }>,
+    galleryImageMeta: Array<{ filePath: string; name: string; type: string; size: number; width: number; height: number; dominantColorHex: string; dominantColorRgb: string; thumbUrl?: string }>,
     context: vscode.ExtensionContext
   ) {
     this.imageFiles = galleryImageMeta.map(img => ({
       ...img,
-      src: '' // will be updated after
+      src: '', // will be updated after
+      thumbUrl: img.thumbUrl ?? ''
     }));
     const folderName = path.basename(folderUri.fsPath);
     // Panel initialization
@@ -1068,31 +512,88 @@ class ImageFolderGalleryPanel {
           return;
         }
 
-        const message = rawMessage as { type: string; index?: unknown; binPath?: string };
-        // Handler for gallery binary file request
-        if (message.type === 'request-gallery-meta-bin' && typeof message.binPath === 'string') {
-          // Lecture du fichier binaire avec miniatures
-          const binPath = path.join(folderUri.fsPath, message.binPath);
-          fs.readFile(binPath).then(buf => {
-            const images = deserializeGalleryImagesBinWithThumb(buf).map(img => ({
-              ...img,
-              thumbnail: img.thumbnail.length > 0 ? img.thumbnail.toString('base64') : undefined
-            }));
-            this.panel.webview.postMessage({
-              type: 'response-gallery-meta-bin',
-              binPath: message.binPath,
-              images
-            });
-          }).catch((err) => {
-            this.panel.webview.postMessage({
-              type: 'response-gallery-meta-bin',
-              binPath: message.binPath,
-              images: []
-            });
+        const message = rawMessage as { type: string; index?: unknown; binPath?: string; indexes?: number[] };
+        // Handler for explicit gallery data request (webview refresh)
+        if (message.type === 'request-gallery-data') {
+          this.panel.webview.postMessage({
+            type: 'gallery-data',
+            images: this.imageFiles
           });
           return;
         }
-        // Handler pour ouverture d'image
+        // Handler for image removal
+        if (message.type === 'remove-image' && Array.isArray(message.indexes)) {
+          // eslint-disable-next-line no-console
+          console.log('[ImageInspector] Message remove-image reçu côté extension', message.indexes);
+          // Actual deletion of selected image files
+          const toDelete = message.indexes
+            .map(idx => this.imageFiles[idx])
+            .filter(img => img && typeof img.filePath === 'string');
+          Promise.all(
+            toDelete.map(async img => {
+              try {
+                // Close VS Code editor if file is open
+                const docUri = vscode.Uri.file(img.filePath);
+                const openEditors = vscode.window.visibleTextEditors.filter(e => e.document.uri.fsPath === img.filePath);
+                for (const editor of openEditors) {
+                  await vscode.window.showTextDocument(editor.document, editor.viewColumn, false);
+                  await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+                }
+                await vscode.commands.executeCommand('workbench.action.closeEditorsInOtherGroups');
+                await fs.unlink(img.filePath);
+              } catch (err) {
+                // eslint-disable-next-line no-console
+                console.error('[ImageInspector] Erreur suppression fichier', img.filePath, err);
+              }
+            })
+          ).then(async () => {
+            // Rescan folder and rebuild image list from present files
+            const files = await fs.readdir(folderUri.fsPath);
+            const imageFiles = files
+              .filter((f: string) => /\.(jpe?g|png|webp|gif|bmp|avif|tiff?)$/i.test(f))
+              .map((f: string) => path.join(folderUri.fsPath, f));
+            // Mettre à jour la liste des images en mémoire
+            this.imageFiles.length = 0;
+            for (const filePath of imageFiles) {
+              try {
+                const details = await getImageDetails(filePath, undefined, {
+                  includeDominantColor: true,
+                  dominantColorQuality: DEFAULT_DOMINANT_COLOR_QUALITY,
+                  dominantColorFastSampleSize: DEFAULT_DOMINANT_COLOR_FAST_SAMPLE_SIZE
+                });
+                this.imageFiles.push({
+                  src: getWebviewImageSrc(this.panel.webview, filePath),
+                  thumbUrl: await getGalleryThumbnailSource(filePath),
+                  filePath,
+                  name: details.fileName,
+                  type: details.format,
+                  size: details.sizeBytes,
+                  width: details.width,
+                  height: details.height,
+                  dominantColorHex: details.dominantColorHex,
+                  dominantColorRgb: details.dominantColorRgb
+                });
+              } catch {
+                // Ignore unreadable files
+              }
+            }
+            // Explicitly regenerate gallery HTML (without JS reload)
+            try {
+              const html = buildFolderGalleryWebview(
+                this.panel.webview,
+                folderUri.fsPath,
+                this.imageFiles,
+                context.extensionUri
+              );
+              this.panel.webview.html = html;
+            } catch (err) {
+              // eslint-disable-next-line no-console
+              console.error('Error during gallery HTML regeneration:', err);
+            }
+          });
+          return;
+        }
+        // Handler for image opening
         if (message.type === 'open-image' && typeof message.index === 'number') {
           const index = Math.trunc(message.index);
           if (index < 0 || index >= this.imageFiles.length) {
@@ -1120,7 +621,6 @@ class ImageFolderGalleryPanel {
 
 /**
  * Activates the extension and registers commands and providers.
- *
  * @param context Extension context.
  */
 export function activate(context: vscode.ExtensionContext): void {
@@ -1211,7 +711,6 @@ export function activate(context: vscode.ExtensionContext): void {
 
 /**
  * Resolves a target image URI from command input, current editor, or picker.
- *
  * @param resource Optional URI provided by command invocation.
  * @returns Resolved image URI or undefined when selection is canceled.
  */
@@ -1238,7 +737,6 @@ async function resolveImageUri(resource?: vscode.Uri): Promise<vscode.Uri | unde
 
 /**
  * Resolves a folder URI from command input, current editor, or picker.
- *
  * @param resource Optional value provided by command invocation.
  * @param resources Optional list of selected values from explorer context.
  * @returns Resolved folder URI or undefined when selection is canceled.
@@ -1301,7 +799,6 @@ async function resolveFolderUri(resource?: unknown, resources?: unknown): Promis
 
 /**
  * Finds the first directory URI from an optional list of URIs.
- *
  * @param uris Candidate URIs.
  * @returns First URI that points to an existing directory.
  */
@@ -1321,7 +818,6 @@ async function findFirstDirectoryUri(uris?: vscode.Uri[]): Promise<vscode.Uri | 
 
 /**
  * Collects URI candidates from unknown command arguments.
- *
  * @param resources Value that may contain multiple selected entries.
  * @param resource Value that may contain a single selected entry.
  * @returns Normalized URI candidates.
@@ -1348,7 +844,6 @@ function collectUriCandidates(resources: unknown, resource: unknown): vscode.Uri
 
 /**
  * Tries to parse an unknown command argument into a URI.
- *
  * @param value Potential URI-like value.
  * @returns Parsed URI when successful.
  */
@@ -1393,7 +888,6 @@ function tryParseUriCandidate(value: unknown): vscode.Uri | undefined {
 
 /**
  * Checks whether a URI points to an existing directory.
- *
  * @param uri URI to validate.
  * @returns True when URI targets an existing directory.
  */
@@ -1412,7 +906,6 @@ async function isDirectoryUri(uri: vscode.Uri): Promise<boolean> {
 
 /**
  * Checks whether a file path uses a supported image extension.
- *
  * @param filePath File system path.
  * @returns True when the file extension is supported.
  */
@@ -1423,7 +916,6 @@ function isSupportedImage(filePath: string): boolean {
 
 /**
  * Builds a user-friendly image loading error message.
- *
  * @param filePath Absolute image path.
  * @param error Caught error object.
  * @returns Human-readable error message.
@@ -1446,7 +938,6 @@ function getImageLoadErrorMessage(filePath: string, error: unknown): string {
 
 /**
  * Extracts metadata and dominant color information from an image.
- *
  * @param filePath Absolute file system path.
  * @returns Consolidated image details.
  */
@@ -1474,8 +965,8 @@ async function getImageDetails(
     if (resolvedOptions.includeDominantColor) {
       const dominant = await computeDominantColor(
         filePath,
-        resolvedOptions.dominantColorQuality,
-        resolvedOptions.dominantColorFastSampleSize
+        resolvedOptions.dominantColorQuality ?? DEFAULT_DOMINANT_COLOR_QUALITY,
+        resolvedOptions.dominantColorFastSampleSize ?? DEFAULT_DOMINANT_COLOR_FAST_SAMPLE_SIZE
       );
       dominantColorHex = rgbToHex(dominant.r, dominant.g, dominant.b);
       dominantColorRgb = `rgb(${dominant.r}, ${dominant.g}, ${dominant.b})`;
@@ -1556,7 +1047,6 @@ async function getImageDetails(
 
 /**
  * Resolves image details options with safe defaults.
- *
  * @param options Candidate options.
  * @returns Normalized options.
  */
@@ -1574,7 +1064,6 @@ function resolveImageDetailsOptions(options?: GetImageDetailsOptions): GetImageD
 
 /**
  * Builds a cache key for image details according to extraction options.
- *
  * @param fileVersionKey Stable file version key.
  * @param options Normalized extraction options.
  * @returns Cache key.
@@ -1589,7 +1078,6 @@ function buildImageDetailsCacheKey(fileVersionKey: string, options: GetImageDeta
 
 /**
  * Computes dominant color for one image using full or fast mode.
- *
  * @param filePath Absolute image path.
  * @param quality Dominant color quality mode.
  * @param fastSampleSize Sampled size used in fast mode.
@@ -1612,7 +1100,6 @@ async function computeDominantColor(
 
 /**
  * Reads extension settings used by the webview and image analysis pipeline.
- *
  * @returns Normalized extension settings.
  */
 function getImageInspectorSettings(): ImageInspectorSettings {
@@ -1657,7 +1144,6 @@ function getImageInspectorSettings(): ImageInspectorSettings {
 
 /**
  * Clamps a numeric value to a min/max range.
- *
  * @param value Candidate value.
  * @param min Minimum allowed value.
  * @param max Maximum allowed value.
@@ -1669,7 +1155,6 @@ function clampNumber(value: number, min: number, max: number): number {
 
 /**
  * Clamps and rounds a numeric value to an integer range.
- *
  * @param value Candidate value.
  * @param min Minimum allowed value.
  * @param max Maximum allowed value.
@@ -1681,7 +1166,6 @@ function clampInteger(value: number, min: number, max: number): number {
 
 /**
  * Reads an ICO header and returns the most relevant icon entry.
- *
  * @param filePath Absolute ICO file path.
  * @returns Largest icon entry when available.
  */
@@ -1704,7 +1188,6 @@ async function getIcoPrimaryEntry(filePath: string): Promise<IcoImageEntry | und
 
 /**
  * Parses ICO directory entries from a file.
- *
  * @param source Absolute ICO file path or preloaded ICO buffer.
  * @returns Parsed icon entries in file order.
  */
@@ -1772,7 +1255,6 @@ async function parseIcoEntries(source: IcoSource): Promise<IcoImageEntry[]> {
 
 /**
  * Builds gallery variants for ICO files when entries contain PNG payloads.
- *
  * @param filePath Absolute ICO file path.
  * @returns Clickable icon variants for webview display.
  */
@@ -1825,7 +1307,6 @@ async function getIcoGalleryItems(filePath: string): Promise<IcoVariantViewModel
 
 /**
  * Detects whether a buffer starts with a PNG signature.
- *
  * @param buffer Binary payload to inspect.
  * @returns True when buffer contains a PNG image.
  */
@@ -1840,7 +1321,6 @@ function isPngBuffer(buffer: Buffer): boolean {
 
 /**
  * Converts a PNG buffer to a webview-compatible data URI.
- *
  * @param buffer PNG payload.
  * @returns Data URI string.
  */
@@ -1850,7 +1330,6 @@ function toPngDataUri(buffer: Buffer): string {
 
 /**
  * Chooses the default ICO variant source for initial preview.
- *
  * @param variants Parsed ICO variants.
  * @returns Source URL for the preferred initial variant.
  */
@@ -1871,7 +1350,6 @@ function getDefaultIcoVariantSource(variants: IcoVariantViewModel[]): string {
 
 /**
  * Resolves a webview image source compatible with browser rendering.
- *
  * @param filePath Absolute file path.
  * @param originalUri Original file URI.
  * @param webview Target webview.
@@ -1905,7 +1383,6 @@ async function getWebviewImageSource(
 
 /**
  * Formats a byte size into a human-readable unit string.
- *
  * @param bytes Raw file size in bytes.
  * @returns Formatted size string.
  */
@@ -1922,7 +1399,6 @@ function formatBytes(bytes: number): string {
 
 /**
  * Converts RGB numeric values to an uppercase hexadecimal color string.
- *
  * @param r Red component.
  * @param g Green component.
  * @param b Blue component.
@@ -1935,7 +1411,6 @@ function rgbToHex(r: number, g: number, b: number): string {
 
 /**
  * Resolves a user-provided accent color to a safe RGB tuple string.
- *
  * @param candidateColor Hex color candidate from settings (#RRGGBB).
  * @returns RGB tuple string usable in CSS variables (e.g. "0,200,110").
  */
@@ -1953,7 +1428,6 @@ function resolveThemeAccentRgb(candidateColor: string): string {
 
 /**
  * Converts a hex color (#RRGGBB) to an RGB tuple string.
- *
  * @param hexColor Hex color value.
  * @returns RGB tuple string (e.g. "255,0,0").
  */

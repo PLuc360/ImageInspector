@@ -263,7 +263,7 @@ export function buildCustomEditorWebview(
           ${hasIcoGallery ? `<span id="selected-ico-size" class="badge">Selected size: ${escapeHtml(initialIcoVariantLabel)}</span>` : ''}
         </div>
         <div class="overview-map" aria-label="Image overview">
-          <img id="overview-map-image" src="${imageSource}" alt="Image overview thumbnail" />
+          <img id="overview-map-image" src="${escapeHtml(imageSource)}" alt="Image overview thumbnail" />
           <div id="overview-map-viewport" class="overview-map-viewport" aria-hidden="true"></div>
         </div>
         <div id="pipette-hover-info" class="pipette-hover-info is-hidden" aria-live="polite">
@@ -281,7 +281,7 @@ export function buildCustomEditorWebview(
       </aside>
       <div class="preview-scroll">
         <div class="preview-body">
-          <img id="preview-image" src="${imageSource}" alt="${escapeHtml(details.fileName)}" class="img-pixelated" />
+          <img id="preview-image" src="${escapeHtml(imageSource)}" alt="${escapeHtml(details.fileName)}" class="img-pixelated" />
           <img id="compare-image" class="compare-image${hasComparisonImage ? '' : ' is-hidden'} img-pixelated" src="${hasComparisonImage ? escapeHtml(comparisonImageSource) : ''}" alt="Comparison image" />
           <div id="compare-divider" class="compare-divider${hasComparisonImage ? '' : ' is-hidden'}" aria-hidden="true"></div>
           <canvas id="pipette-canvas" class="canvas-hidden"></canvas>
@@ -320,11 +320,12 @@ export function buildFolderGalleryWebview(
   const folderName = path.basename(folderPath);
   const imageCount = imageFiles.length;
   const countLabel = imageCount === 1 ? '1 image' : `${String(imageCount)} images`;
+  const headerMarkup = `<header class="gallery-header"><div class="gallery-title" title="${escapeHtml(folderName)}">${escapeHtml(folderName)}</div><div class="gallery-count">${escapeHtml(countLabel)}</div></header>`;
 
   // On ne génère plus les miniatures côté HTML initial : la grille est vide, le JS s'en charge après chargement binaire
   const contentBody = imageFiles.length > 0
-    ? `<div class="gallery-grid"></div>`
-    : `<div class="gallery-empty"><p>No images found in this folder.</p></div>`;
+    ? `${headerMarkup}<div class="gallery-grid"></div>`
+    : `${headerMarkup}<div class="gallery-empty"><p>No images found in this folder.</p></div>`;
 
   // Génère un nonce sécurisé pour les scripts
   const nonce = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
@@ -346,7 +347,7 @@ export function buildFolderGalleryWebview(
   <link rel="stylesheet" href="${escapeHtml(styleUri.toString())}" />
   <link rel="stylesheet" href="${escapeHtml(badgeCssUri)}" />
 </head>
-<body data-badge-css-uri="${escapeHtml(badgeCssUri)}">
+<body data-badge-css-uri="${escapeHtml(badgeCssUri)}" data-gallery-id="${escapeHtml(folderPath)}">
   ${contentBody}
   <script src="${escapeHtml(scriptUri.toString())}" nonce="${nonce}"></script>
 </body>
