@@ -52,6 +52,63 @@ body {
   padding-inline: 2px;
 }
 
+.gallery-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.gallery-delete-button {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--vscode-button-border, var(--vscode-panel-border));
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+  font: inherit;
+  font-size: 0.9em;
+  font-weight: 600;
+  cursor: pointer;
+  transition: box-shadow 0.2s ease, border-color 0.15s ease, background-color 0.15s ease, opacity 0.15s ease;
+}
+
+.gallery-delete-button:hover:not(:disabled) {
+  border-color: var(--toolbar-green-accent-border);
+  background: var(--toolbar-green-accent-bg-hover);
+}
+
+.gallery-delete-button:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+}
+
+.gallery-delete-button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.gallery-delete-button.click-halo {
+  animation: toolbar-click-halo 240ms ease-out;
+}
+
+.gallery-delete-button-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.gallery-delete-button-count {
+  min-width: 1.6em;
+  text-align: center;
+  font-size: 0.82em;
+  font-weight: 700;
+  line-height: 1;
+}
+
 .gallery-menu {
   display: flex;
   align-items: center;
@@ -72,7 +129,12 @@ body {
   display: inline-flex;
   gap: 6px;
   align-items: center;
+  flex-wrap: wrap;
   color: var(--vscode-foreground);
+}
+
+.gallery-menu-field-filter {
+  max-width: min(100%, 680px);
 }
 
 .gallery-menu-label {
@@ -114,6 +176,45 @@ body {
 
 .gallery-menu select.click-halo {
   border-color: var(--toolbar-green-accent-border);
+  animation: toolbar-click-halo 240ms ease-out;
+}
+
+.gallery-type-filters {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.gallery-type-filter {
+  min-height: 26px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--vscode-button-border, var(--vscode-panel-border));
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+  font: inherit;
+  font-size: 0.95em;
+  cursor: pointer;
+  transition: box-shadow 0.2s ease, border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.gallery-type-filter:hover {
+  border-color: var(--toolbar-green-accent-border);
+  background: var(--toolbar-green-accent-bg-hover);
+}
+
+.gallery-type-filter:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+}
+
+.gallery-type-filter.is-active {
+  border-color: var(--toolbar-green-accent-border);
+  background: var(--toolbar-green-accent-bg);
+}
+
+.gallery-type-filter.click-halo {
   animation: toolbar-click-halo 240ms ease-out;
 }
 
@@ -165,7 +266,7 @@ body {
   font-size: 0.8em;
   text-align: center;
   word-break: break-all;
-  transition: background 0.1s, border-color 0.1s;
+  transition: background 0.1s, border-color 0.1s, box-shadow 0.2s ease;
 }
 
 .gallery-meta {
@@ -187,7 +288,12 @@ body {
 .gallery-item.is-selected {
   background: var(--vscode-list-activeSelectionBackground);
   color: var(--vscode-list-activeSelectionForeground);
-  border-color: transparent;
+  border-color: var(--toolbar-green-accent-border);
+  box-shadow: 0 0 0 1px rgba(var(--toolbar-green-accent-rgb), 0.18), 0 0 0 3px rgba(var(--toolbar-green-accent-rgb), 0.12);
+}
+
+.gallery-item.click-halo {
+  animation: toolbar-click-halo 240ms ease-out;
 }
 
 .gallery-thumb {

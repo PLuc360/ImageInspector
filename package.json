@@ -2,7 +2,7 @@
   "name": "image-inspector",
   "displayName": "Image Inspector",
   "description": "Displays image information (dimensions, size, format, dominant colors).",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "publisher": "pierre-luc-guegan",
   "icon": "assets/icon.png",
   "repository": {

@@ -11,7 +11,7 @@
 
   let galleryImages = [];
   let selectedIndexes = [];
-  let currentFilterType = 'all';
+  let currentFilterTypes = [];
   let currentSort = 'name';
   let currentSortOrder = 'asc';
   const MIN_THUMB_SIZE = 196;
@@ -25,6 +25,7 @@
   const EMPTY_IMAGE_SRC = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
   let galleryImageObserver = null;
   let scheduledRowPreload = 0;
+  let scheduledScrollSave = 0;
   const loadedImageSources = new Set();
 
   /**
@@ -42,19 +43,86 @@
   }
 
   /**
+   * Returns a stable lowercase type key for sorting and filtering.
+   * It prefers the file extension so the menu matches the badge shown on each tile.
+   * @param {any} img
+   * @returns {string}
+   */
+  function getImageTypeKey(img) {
+    const fileName = String(img?.name ?? '').trim();
+    const extMatch = fileName.match(/\.([a-z0-9]+)$/i);
+    if (extMatch) {
+      return extMatch[1].toLowerCase();
+    }
+
+    const rawType = String(img?.type ?? '').trim().toLowerCase();
+    if (!rawType || rawType === 'loading...' || rawType === 'unknown' || rawType === 'n/a') {
+      return '';
+    }
+
+    return rawType;
+  }
+
+  /**
+   * Returns the user-facing type label displayed in the gallery UI.
+   * @param {any} img
+   * @returns {string}
+   */
+  function getImageTypeLabel(img) {
+    const typeKey = getImageTypeKey(img);
+    return typeKey ? typeKey.toUpperCase() : 'UNKNOWN';
+  }
+
+  /**
+   * Normalizes a list of selected type keys.
+   * @param {Iterable<string>} values
+   * @returns {string[]}
+   */
+  function normalizeTypeFilters(values) {
+    return Array.from(
+      new Set(
+        Array.from(values, (value) => String(value ?? '').trim().toLowerCase())
+          .filter(Boolean)
+      )
+    ).sort((left, right) => left.localeCompare(right, undefined, { sensitivity: 'base', numeric: true }));
+  }
+
+  /**
+   * Indicates whether one or more type filters are currently active.
+   * @returns {boolean}
+   */
+  function hasActiveTypeFilters() {
+    return currentFilterTypes.length > 0;
+  }
+
+  /**
    * Returns the current gallery items with stable original indexes.
    * @returns {Array<{ img: any, index: number }>}
    */
   function getFilteredSortedImages() {
     const images = galleryImages
       .map((img, index) => ({ img, index }))
-      .filter(({ img }) => currentFilterType === 'all' || img.type === currentFilterType);
+      .filter(({ img }) => !hasActiveTypeFilters() || currentFilterTypes.includes(getImageTypeKey(img)));
 
     images.sort((left, right) => {
+      const leftName = String(left.img?.name ?? '');
+      const rightName = String(right.img?.name ?? '');
+      const leftType = getImageTypeLabel(left.img);
+      const rightType = getImageTypeLabel(right.img);
+      const leftSize = typeof left.img?.size === 'number' ? left.img.size : 0;
+      const rightSize = typeof right.img?.size === 'number' ? right.img.size : 0;
       let cmp = 0;
-      if (currentSort === 'name') cmp = left.img.name.localeCompare(right.img.name);
-      else if (currentSort === 'type') cmp = left.img.type.localeCompare(right.img.type);
-      else if (currentSort === 'size') cmp = left.img.size - right.img.size;
+
+      if (currentSort === 'name') {
+        cmp = leftName.localeCompare(rightName, undefined, { sensitivity: 'base', numeric: true });
+      } else if (currentSort === 'type') {
+        cmp = leftType.localeCompare(rightType, undefined, { sensitivity: 'base', numeric: true })
+          || leftName.localeCompare(rightName, undefined, { sensitivity: 'base', numeric: true });
+      } else if (currentSort === 'size') {
+        cmp = (leftSize - rightSize)
+          || leftName.localeCompare(rightName, undefined, { sensitivity: 'base', numeric: true });
+      }
+
       return currentSortOrder === 'asc' ? cmp : -cmp;
     });
 
@@ -70,6 +138,29 @@
       const idx = parseInt(el.dataset.index ?? '-1', 10);
       el.classList.toggle('is-selected', selectedIndexes.includes(idx));
     });
+
+    updateSelectionToolbar();
+  }
+
+  /**
+   * Updates the delete action and selection counter in the toolbar.
+   */
+  function updateSelectionToolbar() {
+    const selectedCount = selectedIndexes.length;
+    const deleteButton = document.getElementById('delete-selected-button');
+    const selectionCount = document.getElementById('gallery-selection-count');
+
+    if (selectionCount instanceof HTMLElement) {
+      selectionCount.textContent = String(selectedCount);
+    }
+
+    if (deleteButton instanceof HTMLButtonElement) {
+      deleteButton.disabled = selectedCount === 0;
+      deleteButton.title = selectedCount > 0
+        ? (selectedCount === 1 ? 'Delete 1 selected image' : `Delete ${selectedCount} selected images`)
+        : 'Select images to delete';
+      deleteButton.setAttribute('aria-label', deleteButton.title);
+    }
   }
 
   /**
@@ -111,6 +202,7 @@
   function buildGalleryItemMarkup(img, index) {
     const extMatch = img.name.match(/\.([a-z0-9]+)$/i);
     const ext = extMatch ? extMatch[1].toLowerCase() : '';
+    const typeLabel = getImageTypeLabel(img);
     const badgeClass = [
       'png','jpg','jpeg','gif','bmp','webp','svg','tiff','tif','avif','heic','heif','ico'
     ].includes(ext) ? `badge badge-ext-${ext}` : 'badge';
@@ -131,7 +223,7 @@
         </div>
         <div class="gallery-label">${escapeHtml(img.name)}</div>
         <div class="gallery-meta">
-          <span class="meta-type ${badgeClass}">${escapeHtml(ext.toUpperCase() || img.type.toUpperCase())}</span>
+          <span class="meta-type ${badgeClass}">${escapeHtml(typeLabel)}</span>
           <span class="meta-size badge">${sizeVal}</span>
           <span class="meta-dim badge">${dimVal}</span>
         </div>
@@ -183,6 +275,17 @@
     scheduledRowPreload = window.requestAnimationFrame(() => {
       scheduledRowPreload = 0;
       preloadNearbyGalleryRows();
+    });
+  }
+
+  /**
+   * Persists the current scroll position at most once per animation frame.
+   */
+  function scheduleScrollPositionSave() {
+    if (scheduledScrollSave) return;
+    scheduledScrollSave = window.requestAnimationFrame(() => {
+      scheduledScrollSave = 0;
+      localStorage.setItem(scrollKey, String(window.scrollY));
     });
   }
 
@@ -268,6 +371,52 @@
   }
 
   /**
+   * Keeps selected indexes in sync with the current gallery content.
+   * @param {number[]} indexes
+   * @returns {number[]}
+   */
+  function sanitizeSelectedIndexes(indexes) {
+    return Array.from(new Set(
+      indexes.filter((index) => Number.isInteger(index) && index >= 0 && index < galleryImages.length)
+    )).sort((left, right) => left - right);
+  }
+
+  /**
+   * Removes deleted items from the in-memory gallery immediately.
+   * @param {number[]} indexes
+   */
+  function removeImagesFromGallery(indexes) {
+    const indexesToRemove = new Set(
+      indexes.filter((index) => Number.isInteger(index) && index >= 0 && index < galleryImages.length)
+    );
+
+    if (indexesToRemove.size === 0) {
+      return;
+    }
+
+    galleryImages = galleryImages.filter((_, index) => !indexesToRemove.has(index));
+    selectedIndexes = [];
+    localStorage.setItem(window.selectionKey, JSON.stringify(selectedIndexes));
+    refreshGalleryView();
+  }
+
+  /**
+   * Removes the currently selected images from the gallery and notifies the extension.
+   * @param {number[]} indexes
+   */
+  function deleteSelectedImages(indexes) {
+    const indexesToRemove = sanitizeSelectedIndexes(indexes);
+    if (indexesToRemove.length === 0) {
+      return;
+    }
+
+    removeImagesFromGallery(indexesToRemove);
+    if (window.vscodeApi && typeof window.vscodeApi.postMessage === 'function') {
+      window.vscodeApi.postMessage({ type: 'remove-image', indexes: indexesToRemove });
+    }
+  }
+
+  /**
    * Applies the current thumbnail size to the gallery grid.
    */
   function applyThumbSizeToGrid() {
@@ -283,9 +432,14 @@
     if (!grid) return;
 
     const images = getFilteredSortedImages();
-    if (galleryImages.length > 0) {
-      updateGalleryCount(images.length, galleryImages.length);
+    updateGalleryCount(images.length, galleryImages.length);
+
+    if (galleryImages.length === 0) {
+      grid.innerHTML = '<div class="gallery-empty"><p>No images found in this folder.</p></div>';
+      applyThumbSizeToGrid();
+      return;
     }
+
     grid.innerHTML = images.map(({ img, index }) => buildGalleryItemMarkup(img, index)).join('');
     applyThumbSizeToGrid();
 
@@ -313,21 +467,23 @@
     const availableTypes = Array.from(
       new Set(
         galleryImages
-          .map((img) => String(img?.type ?? '').trim().toLowerCase())
+          .map((img) => getImageTypeKey(img))
           .filter(Boolean)
       )
-    ).sort();
+    ).sort((left, right) => left.localeCompare(right, undefined, { sensitivity: 'base', numeric: true }));
 
-    if (currentFilterType !== 'all' && !availableTypes.includes(currentFilterType)) {
-      currentFilterType = 'all';
-    }
+    currentFilterTypes = normalizeTypeFilters(
+      currentFilterTypes.filter((type) => availableTypes.includes(type))
+    );
 
-    const typeOptions = ['all', ...availableTypes]
-      .map((type) => {
-        const label = type === 'all' ? 'All' : type.toUpperCase();
-        return `<option value="${escapeHtml(type)}">${escapeHtml(label)}</option>`;
+    const isShowingAllTypes = !hasActiveTypeFilters();
+    const typeFiltersMarkup = [
+      `<button type="button" class="gallery-type-filter${isShowingAllTypes ? ' is-active' : ''}" data-type="all" aria-pressed="${isShowingAllTypes ? 'true' : 'false'}">All</button>`,
+      ...availableTypes.map((type) => {
+        const isActive = currentFilterTypes.includes(type);
+        return `<button type="button" class="gallery-type-filter${isActive ? ' is-active' : ''}" data-type="${escapeHtml(type)}" aria-pressed="${isActive ? 'true' : 'false'}">${escapeHtml(type.toUpperCase())}</button>`;
       })
-      .join('');
+    ].join('');
 
     const menu = document.createElement('div');
     menu.className = 'gallery-menu';
@@ -350,30 +506,31 @@
             <option value="desc">Descending</option>
           </select>
         </label>
-        <label class="gallery-menu-field">
-          <span class="gallery-menu-label">Filter</span>
-          <select id="filter-type-select">${typeOptions}</select>
-        </label>
+        <div class="gallery-menu-field gallery-menu-field-filter">
+          <span class="gallery-menu-label">Filters</span>
+          <div id="filter-type-group" class="gallery-type-filters" role="group" aria-label="Filter by type">
+            ${typeFiltersMarkup}
+          </div>
+        </div>
       </div>
     `;
     header.appendChild(menu);
 
     const sortSelect = menu.querySelector('#sort-select');
     const sortOrderSelect = menu.querySelector('#sort-order-select');
-    const filterTypeSelect = menu.querySelector('#filter-type-select');
+    const typeFilterButtons = Array.from(menu.querySelectorAll('.gallery-type-filter'));
     if (!(sortSelect instanceof HTMLSelectElement)
-      || !(sortOrderSelect instanceof HTMLSelectElement)
-      || !(filterTypeSelect instanceof HTMLSelectElement)) {
+      || !(sortOrderSelect instanceof HTMLSelectElement)) {
       return;
     }
 
     sortSelect.value = currentSort;
     sortOrderSelect.value = currentSortOrder;
-    filterTypeSelect.value = currentFilterType;
 
-    [sortSelect, sortOrderSelect, filterTypeSelect].forEach((selectElement) => {
-      selectElement.addEventListener('pointerdown', () => {
-        showToolbarClickHalo(selectElement);
+    [sortSelect, sortOrderSelect, ...typeFilterButtons].forEach((controlElement) => {
+      if (!(controlElement instanceof HTMLElement)) return;
+      controlElement.addEventListener('pointerdown', () => {
+        showToolbarClickHalo(controlElement);
       }, { passive: true });
     });
 
@@ -391,13 +548,24 @@
       currentSortOrder = target.value;
       renderGallery();
     }, { passive: true });
-    filterTypeSelect.addEventListener('change', (event) => {
-      const target = event.target;
-      if (!(target instanceof HTMLSelectElement)) return;
-      showToolbarClickHalo(target);
-      currentFilterType = target.value;
-      renderGallery();
-    }, { passive: true });
+
+    typeFilterButtons.forEach((button) => {
+      if (!(button instanceof HTMLButtonElement)) return;
+      button.addEventListener('click', () => {
+        showToolbarClickHalo(button);
+        const selectedType = String(button.dataset.type ?? '').trim().toLowerCase();
+
+        if (!selectedType || selectedType === 'all') {
+          currentFilterTypes = [];
+        } else if (currentFilterTypes.includes(selectedType)) {
+          currentFilterTypes = currentFilterTypes.filter((type) => type !== selectedType);
+        } else {
+          currentFilterTypes = normalizeTypeFilters([...currentFilterTypes, selectedType]);
+        }
+
+        refreshGalleryView();
+      });
+    });
   }
 
   /**
@@ -418,6 +586,9 @@
       selectedIndexes = [index];
     }
     syncSelectionClasses();
+    if (selectedIndexes.includes(index)) {
+      showToolbarClickHalo(item);
+    }
     localStorage.setItem(window.selectionKey, JSON.stringify(selectedIndexes));
   }
 
@@ -427,21 +598,31 @@
   function refreshGalleryView() {
     buildGalleryMenu();
     renderGallery();
-    applyThumbSizeToGrid();
     const savedIndexes = JSON.parse(localStorage.getItem(window.selectionKey) || '[]');
-    if (Array.isArray(savedIndexes) && savedIndexes.length > 0) {
-      selectedIndexes = savedIndexes.filter(i => typeof i === 'number' && i >= 0);
+    if (Array.isArray(savedIndexes)) {
+      selectedIndexes = sanitizeSelectedIndexes(savedIndexes);
       syncSelectionClasses();
+    } else {
+      updateSelectionToolbar();
     }
   }
 
   window.addEventListener('DOMContentLoaded', () => {
     refreshGalleryView();
+
+    const deleteButton = document.getElementById('delete-selected-button');
+    if (deleteButton instanceof HTMLButtonElement) {
+      deleteButton.addEventListener('click', () => {
+        showToolbarClickHalo(deleteButton);
+        deleteSelectedImages(selectedIndexes);
+      });
+    }
+
     if (window.vscodeApi && typeof window.vscodeApi.postMessage === 'function') {
       window.vscodeApi.postMessage({ type: 'request-gallery-data' });
     }
     window.addEventListener('scroll', () => {
-      localStorage.setItem(scrollKey, String(window.scrollY));
+      scheduleScrollPositionSave();
       scheduleNearbyRowPreload();
     }, { passive: true });
     window.addEventListener('resize', () => {
@@ -450,6 +631,14 @@
     }, { passive: true });
     window.addEventListener('beforeunload', () => {
       disposeGalleryImageObserver();
+      if (scheduledRowPreload) {
+        window.cancelAnimationFrame(scheduledRowPreload);
+        scheduledRowPreload = 0;
+      }
+      if (scheduledScrollSave) {
+        window.cancelAnimationFrame(scheduledScrollSave);
+        scheduledScrollSave = 0;
+      }
     });
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
@@ -468,6 +657,8 @@
     if (msg.type === 'gallery-data') {
       if (Array.isArray(msg.images)) {
         galleryImages = msg.images;
+        selectedIndexes = sanitizeSelectedIndexes(selectedIndexes);
+        localStorage.setItem(window.selectionKey, JSON.stringify(selectedIndexes));
         if (document.readyState === 'complete' || document.readyState === 'interactive') {
           refreshGalleryView();
         } else {
@@ -482,7 +673,7 @@
       galleryImages[index] = { ...previousImage, ...meta };
 
       const requiresFullRerender = currentSort !== 'name'
-        || currentFilterType !== 'all'
+        || hasActiveTypeFilters()
         || (typeof meta.name === 'string' && meta.name !== previousImage.name);
 
       if (requiresFullRerender) {
@@ -514,7 +705,7 @@
           ].includes(ext)) {
             metaType.classList.add(`badge-ext-${ext}`);
           }
-          metaType.textContent = ext.toUpperCase() || meta.type.toUpperCase();
+          metaType.textContent = getImageTypeLabel(galleryImages[index]);
         }
         const metaSize = item.querySelector('.meta-size');
         if (metaSize) metaSize.textContent = formatFileSize(meta.size);
@@ -558,6 +749,23 @@
     const item = target.closest('.gallery-item');
     if (item instanceof HTMLElement) {
       event.preventDefault();
+
+      const idx = parseInt(item.dataset.index ?? '-1', 10);
+      if (isNaN(idx) || idx < 0) return;
+
+      if (!selectedIndexes.includes(idx)) {
+        selectedIndexes = [idx];
+        localStorage.setItem(window.selectionKey, JSON.stringify(selectedIndexes));
+        syncSelectionClasses();
+      }
+
+      const indexesToRemove = selectedIndexes.includes(idx) && selectedIndexes.length > 1
+        ? [...selectedIndexes]
+        : [idx];
+      const removeLabel = indexesToRemove.length > 1
+        ? `Remove ${indexesToRemove.length} images`
+        : 'Remove image';
+
       const menu = document.createElement('div');
       menu.className = 'gallery-context-menu';
       menu.style.position = 'fixed';
@@ -570,14 +778,11 @@
       menu.style.borderRadius = '4px';
       menu.style.boxShadow = '0 2px 8px rgba(0,0,0,0.2)';
       menu.style.cursor = 'pointer';
-      menu.textContent = 'Remove';
+      menu.textContent = removeLabel;
       document.body.appendChild(menu);
       const removeMenu = () => { if (menu.parentNode) menu.parentNode.removeChild(menu); document.removeEventListener('click', removeMenu, true); };
       menu.addEventListener('click', () => {
-        const idx = parseInt(item.dataset.index ?? '-1', 10);
-        if (!isNaN(idx) && idx >= 0 && window.vscodeApi) {
-          window.vscodeApi.postMessage({ type: 'remove-image', indexes: [idx] });
-        }
+        deleteSelectedImages(indexesToRemove);
         removeMenu();
       });
       setTimeout(() => document.addEventListener('click', removeMenu, true), 0);

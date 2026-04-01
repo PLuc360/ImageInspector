@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.9.0] - 2026-04-01
+### Added
+- Added a dedicated gallery toolbar with sorting, filtering, and bulk-selection actions.
+- Added the ability to delete selected images directly from the gallery.
+
+### Changed
+- Optimized the gallery pipeline by removing the temporary binary gallery file and keeping thumbnail/metadata updates fully in memory.
+
 ## [1.8.0] - 2026-03-27
 ### Added
 - Progressive gallery loading: images and metadata now appear as soon as available, improving perceived performance for large folders.

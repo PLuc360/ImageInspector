@@ -5,8 +5,8 @@ const MAX_CONVERTED_PREVIEW_CACHE_ENTRIES = 16;
 const MAX_GALLERY_THUMBNAIL_CACHE_ENTRIES = 128;
 
 const imageDetailsCache = new Map<string, ImageDetailsViewModel>();
-const icoEntriesCache = new Map<string, any>();
-const icoGalleryCache = new Map<string, any>();
+const icoEntriesCache = new Map<string, IcoImageEntry[]>();
+const icoGalleryCache = new Map<string, IcoVariantViewModel[]>();
 const convertedPreviewCache = new Map<string, string>();
 const galleryThumbnailCache = new Map<string, string>();
 
@@ -108,12 +108,18 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
         ]
       };
 
-      const details = await getImageDetails(filePath, undefined, {
+      const fileVersionInfo = await getFileVersionInfo(filePath);
+      const details = await getImageDetails(filePath, fileVersionInfo, {
         includeDominantColor: true,
         dominantColorQuality: settings.dominantColorQuality,
         dominantColorFastSampleSize: settings.dominantColorFastSampleSize
       });
-      const imageSrc = getWebviewImageSrc(webviewPanel.webview, filePath);
+      const imageSrc = await getWebviewImageSource(
+        filePath,
+        document.uri,
+        webviewPanel.webview,
+        fileVersionInfo.key
+      );
       webviewPanel.webview.html = buildCustomEditorWebview(
         webviewPanel.webview,
         imageSrc,
@@ -160,7 +166,7 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
         });
       }
     } catch (err) {
-      webviewPanel.webview.html = `<html><body><h2>Erreur lors du chargement de l'image</h2><pre>${String(err)}</pre></body></html>`;
+      webviewPanel.webview.html = buildErrorWebview(getImageLoadErrorMessage(document.uri.fsPath, err));
     }
   }
 
@@ -246,9 +252,16 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
       localResourceRoots: Array.from(localResourceRoots.values())
     };
 
+    const comparisonFileVersion = await getFileVersionInfo(comparisonImageUri.fsPath);
+
     await panel.webview.postMessage({
       type: 'set-compare-image',
-      source: getWebviewImageSrc(panel.webview, comparisonImageUri.fsPath),
+      source: await getWebviewImageSource(
+        comparisonImageUri.fsPath,
+        comparisonImageUri,
+        panel.webview,
+        comparisonFileVersion.key
+      ),
       label: path.basename(comparisonImageUri.fsPath)
     });
   }
@@ -388,7 +401,6 @@ class ImageFolderGalleryPanel {
   private static readonly activePanels = new Map<string, ImageFolderGalleryPanel>();
   private readonly panel: vscode.WebviewPanel;
   private readonly imageFiles: Array<{ src: string; thumbUrl?: string; filePath: string; name: string; type: string; size: number; width: number; height: number; dominantColorHex: string; dominantColorRgb: string }>;
-  private readonly storageKey: string;
 
   /**
    * Opens or reveals the gallery panel for the given folder.
@@ -398,7 +410,6 @@ class ImageFolderGalleryPanel {
    */
   static async open(folderUri: vscode.Uri, context: vscode.ExtensionContext): Promise<void> {
     const folderPath = folderUri.fsPath;
-    const storageKey = `galleryMeta:${folderPath}`;
     const existing = ImageFolderGalleryPanel.activePanels.get(folderPath);
     if (existing) {
       existing.panel.reveal();
@@ -455,7 +466,6 @@ class ImageFolderGalleryPanel {
           index,
           meta: instance.imageFiles[index]
         });
-        await context.workspaceState.update(storageKey, instance.imageFiles);
       } catch {
         // On error, keep placeholder metadata.
       }
@@ -483,7 +493,7 @@ class ImageFolderGalleryPanel {
     // Panel initialization
     this.panel = vscode.window.createWebviewPanel(
       'imageInspector.folderGallery',
-      `Gallery : ${folderName}`,
+      `Gallery: ${folderName}`,
       vscode.ViewColumn.One,
       {
         enableScripts: true,
@@ -497,8 +507,6 @@ class ImageFolderGalleryPanel {
     this.imageFiles.forEach(img => {
       img.src = getWebviewImageSrc(this.panel.webview, img.filePath);
     });
-    this.storageKey = `galleryMeta:${folderUri.fsPath}`;
-
     const settings = getImageInspectorSettings();
 
     this.panel.webview.html = buildFolderGalleryWebview(
@@ -528,77 +536,81 @@ class ImageFolderGalleryPanel {
         }
         // Handler for image removal
         if (message.type === 'remove-image' && Array.isArray(message.indexes)) {
-          // eslint-disable-next-line no-console
-          console.log('[ImageInspector] Message remove-image reçu côté extension', message.indexes);
-          // Actual deletion of selected image files
-          const toDelete = message.indexes
-            .map(idx => this.imageFiles[idx])
-            .filter(img => img && typeof img.filePath === 'string');
-          Promise.all(
-            toDelete.map(async img => {
-              try {
-                // Close VS Code editor if file is open
-                const docUri = vscode.Uri.file(img.filePath);
-                const openEditors = vscode.window.visibleTextEditors.filter(e => e.document.uri.fsPath === img.filePath);
-                for (const editor of openEditors) {
-                  await vscode.window.showTextDocument(editor.document, editor.viewColumn, false);
-                  await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+          const indexes = [...message.indexes];
+
+          void (async () => {
+            const toDelete = indexes
+              .map((idx) => this.imageFiles[idx])
+              .filter((img) => img && typeof img.filePath === 'string');
+
+            await Promise.all(
+              toDelete.map(async (img) => {
+                try {
+                  const openEditors = vscode.window.visibleTextEditors.filter((editor) => editor.document.uri.fsPath === img.filePath);
+                  for (const editor of openEditors) {
+                    await vscode.window.showTextDocument(editor.document, editor.viewColumn, false);
+                    await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+                  }
+
+                  await fs.unlink(img.filePath);
+                } catch (err) {
+                  // eslint-disable-next-line no-console
+                  console.error('[ImageInspector] Failed to delete image file', img.filePath, err);
                 }
-                await vscode.commands.executeCommand('workbench.action.closeEditorsInOtherGroups');
-                await fs.unlink(img.filePath);
-              } catch (err) {
-                // eslint-disable-next-line no-console
-                console.error('[ImageInspector] Erreur suppression fichier', img.filePath, err);
-              }
-            })
-          ).then(async () => {
-            // Rescan folder and rebuild image list from present files
-            const files = await fs.readdir(folderUri.fsPath);
-            const imageFiles = files
-              .filter((f: string) => /\.(jpe?g|png|webp|gif|bmp|avif|tiff?)$/i.test(f))
-              .map((f: string) => path.join(folderUri.fsPath, f));
-            // Mettre à jour la liste des images en mémoire
+              })
+            );
+
+            const refreshedFilePaths = await scanFolderImages(folderUri.fsPath);
+            const refreshedImages = await Promise.all(
+              refreshedFilePaths.map(async (filePath) => {
+                try {
+                  const fileVersionInfo = await getFileVersionInfo(filePath);
+                  const [details, thumbUrl] = await Promise.all([
+                    getImageDetails(filePath, fileVersionInfo, {
+                      includeDominantColor: true,
+                      dominantColorQuality: DEFAULT_DOMINANT_COLOR_QUALITY,
+                      dominantColorFastSampleSize: DEFAULT_DOMINANT_COLOR_FAST_SAMPLE_SIZE
+                    }),
+                    getGalleryThumbnailSource(filePath, fileVersionInfo)
+                  ]);
+
+                  return {
+                    src: getWebviewImageSrc(this.panel.webview, filePath),
+                    thumbUrl,
+                    filePath,
+                    name: details.fileName,
+                    type: details.format,
+                    size: details.sizeBytes,
+                    width: details.width,
+                    height: details.height,
+                    dominantColorHex: details.dominantColorHex,
+                    dominantColorRgb: details.dominantColorRgb
+                  };
+                } catch {
+                  return {
+                    src: getWebviewImageSrc(this.panel.webview, filePath),
+                    thumbUrl: '',
+                    filePath,
+                    name: path.basename(filePath),
+                    type: 'Unknown',
+                    size: 0,
+                    width: 0,
+                    height: 0,
+                    dominantColorHex: '#cccccc',
+                    dominantColorRgb: 'rgb(204, 204, 204)'
+                  };
+                }
+              })
+            );
+
             this.imageFiles.length = 0;
-            for (const filePath of imageFiles) {
-              try {
-                const details = await getImageDetails(filePath, undefined, {
-                  includeDominantColor: true,
-                  dominantColorQuality: DEFAULT_DOMINANT_COLOR_QUALITY,
-                  dominantColorFastSampleSize: DEFAULT_DOMINANT_COLOR_FAST_SAMPLE_SIZE
-                });
-                this.imageFiles.push({
-                  src: getWebviewImageSrc(this.panel.webview, filePath),
-                  thumbUrl: await getGalleryThumbnailSource(filePath),
-                  filePath,
-                  name: details.fileName,
-                  type: details.format,
-                  size: details.sizeBytes,
-                  width: details.width,
-                  height: details.height,
-                  dominantColorHex: details.dominantColorHex,
-                  dominantColorRgb: details.dominantColorRgb
-                });
-              } catch {
-                // Ignore unreadable files
-              }
-            }
-            // Explicitly regenerate gallery HTML (without JS reload)
-            try {
-              const html = buildFolderGalleryWebview(
-                this.panel.webview,
-                folderUri.fsPath,
-                this.imageFiles,
-                context.extensionUri,
-                {
-                  themeAccentRgb: getImageInspectorSettings().themeAccentRgb
-                }
-              );
-              this.panel.webview.html = html;
-            } catch (err) {
-              // eslint-disable-next-line no-console
-              console.error('Error during gallery HTML regeneration:', err);
-            }
-          });
+            this.imageFiles.push(...refreshedImages);
+
+            await this.panel.webview.postMessage({
+              type: 'gallery-data',
+              images: this.imageFiles
+            });
+          })();
           return;
         }
         // Handler for image opening
@@ -620,8 +632,6 @@ class ImageFolderGalleryPanel {
     );
 
     this.panel.onDidDispose(() => {
-      // Final metadata save
-      context.workspaceState.update(this.storageKey, this.imageFiles);
       ImageFolderGalleryPanel.activePanels.delete(folderUri.fsPath);
     }, undefined, context.subscriptions);
   }
@@ -777,10 +787,8 @@ async function resolveFolderUri(resource?: unknown, resources?: unknown): Promis
 
     if (selectedWorkspace?.uri && await isDirectoryUri(selectedWorkspace.uri)) {
       return selectedWorkspace.uri;
-          // Écriture du fichier binaire de galerie (avec miniatures)
     }
   }
-        // Écriture du fichier binaire de galerie (avec miniatures)
 
   const editorUri = vscode.window.activeTextEditor?.document.uri;
   if (workspaceFolders.length === 0 && editorUri?.scheme === 'file') {
@@ -1292,8 +1300,8 @@ async function getIcoGalleryItems(filePath: string): Promise<IcoVariantViewModel
       const dominant = stats.dominant;
       dominantColorHex = rgbToHex(dominant.r, dominant.g, dominant.b);
       dominantColorRgb = `rgb(${dominant.r}, ${dominant.g}, ${dominant.b})`;
-    } catch (e) {
-      // fallback couleur grise
+    } catch {
+      // Fall back to a neutral gray color.
     }
 
     return {

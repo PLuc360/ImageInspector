@@ -102,7 +102,7 @@ export function buildCustomEditorWebview(
     .map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(value)}</td></tr>`)
     .join('')}<tr><th>Dominant color</th><td id="dominant-color-table">${escapeHtml(details.dominantColorHex)} (${escapeHtml(details.dominantColorRgb)})</td></tr>`;
 
-  // Génère un nonce sécurisé pour les scripts
+  // Generate a secure nonce for inline scripts.
   const nonce = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
   const contentSecurityPolicy = [
     "default-src 'none'",
@@ -329,14 +329,32 @@ export function buildFolderGalleryWebview(
       <div class="gallery-summary">
         <div class="gallery-count" aria-label="Image count">${escapeHtml(countLabel)}</div>
       </div>
+      <div class="gallery-toolbar-actions">
+        <button
+          id="delete-selected-button"
+          class="gallery-delete-button"
+          type="button"
+          aria-label="Remove selected images"
+          title="Remove selected images"
+          disabled
+        >
+          <span class="gallery-delete-button-icon" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M7 3.5h6l.55 1.5H17a.75.75 0 0 1 0 1.5h-.7l-.62 8.03A2 2 0 0 1 13.69 16H6.31a2 2 0 0 1-1.99-1.47L3.7 6.5H3a.75.75 0 0 1 0-1.5h3.45L7 3.5zM8 3.5V3a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M8 8v4.5M12 8v4.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+            </svg>
+          </span>
+          <span id="gallery-selection-count" class="gallery-delete-button-count" aria-live="polite">0</span>
+        </button>
+      </div>
     </header>`;
 
-  // On ne génère plus les miniatures côté HTML initial : la grille est vide, le JS s'en charge après chargement binaire
+  // The initial HTML leaves the grid empty; the webview script loads thumbnails progressively.
   const contentBody = imageFiles.length > 0
     ? `${headerMarkup}<div class="gallery-grid"></div>`
     : `${headerMarkup}<div class="gallery-empty"><p>No images found in this folder.</p></div>`;
 
-  // Génère un nonce sécurisé pour les scripts
+  // Generate a secure nonce for inline scripts.
   const nonce = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
   const contentSecurityPolicy = [
     "default-src 'none'",
