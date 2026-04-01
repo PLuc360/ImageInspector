@@ -1,8 +1,8 @@
 {
   "name": "image-inspector",
   "displayName": "Image Inspector",
-  "description": "Displays image information (dimensions, size, format, dominant colors).",
-  "version": "1.9.1",
+  "description": "Displays image information (dimensions, size, format, metadata).",
+  "version": "1.10.0",
   "publisher": "pierre-luc-guegan",
   "icon": "assets/icon.png",
   "repository": {
@@ -86,20 +86,6 @@
           "minimum": 0.25,
           "maximum": 100,
           "description": "Loupe zoom target when image zoom is at its maximum (max zoom-in)."
-        },
-        "imageInspector.dominantColorQuality": {
-          "type": "string",
-          "enum": ["full", "fast"],
-          "default": "full",
-          "description": "Dominant color extraction mode. Use 'fast' to estimate from a reduced sample for better performance."
-        },
-        "imageInspector.dominantColorFastSampleSize": {
-          "type": "number",
-          "default": 64,
-          "minimum": 16,
-          "maximum": 512,
-          "multipleOf": 1,
-          "description": "Sample size used in fast dominant color mode (higher value = more accuracy, lower value = more speed)."
         }
       }
     },

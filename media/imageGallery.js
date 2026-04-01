@@ -25,10 +25,16 @@
   })();
   const LAZY_IMAGE_PRELOAD_MARGIN_PX = 1400;
   const EMPTY_IMAGE_SRC = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
+  const THUMB_SIZE_CLASS_PREFIX = 'thumb-size-';
   let galleryImageObserver = null;
   let scheduledRowPreload = 0;
   let scheduledScrollSave = 0;
+  let scheduledGalleryRefresh = 0;
+  let scheduledMetaUpdateFlush = 0;
+  const pendingMetaUpdates = new Map();
   const loadedImageSources = new Set();
+  let activeContextMenu = null;
+  let activeContextMenuCleanup = null;
 
   /**
    * Escapes a string so it can be safely injected into HTML.
@@ -269,6 +275,63 @@
   }
 
   /**
+   * Updates the temporary gallery loading progress UI in the toolbar.
+   * @param {{ active?: boolean; completed?: number; total?: number; label?: string }} progress
+   */
+  function updateGalleryLoadingProgress(progress) {
+    const progressContainer = document.getElementById('gallery-load-progress');
+    const progressLabel = document.getElementById('gallery-load-progress-label');
+    const progressTrack = document.querySelector('.gallery-load-progress-track');
+    const progressBar = document.getElementById('gallery-load-progress-bar');
+
+    if (!(progressContainer instanceof HTMLElement)
+      || !(progressLabel instanceof HTMLElement)
+      || !(progressTrack instanceof HTMLElement)
+      || !(progressBar instanceof HTMLElement)) {
+      return;
+    }
+
+    const isActive = progress?.active === true;
+    if (!isActive) {
+      progressContainer.hidden = true;
+      progressContainer.style.display = 'none';
+      progressTrack.setAttribute('aria-valuenow', '100');
+      progressBar.style.width = '100%';
+      return;
+    }
+
+    const total = Math.max(0, Number.isFinite(progress?.total) ? Number(progress.total) : 0);
+    const completed = Math.max(0, Number.isFinite(progress?.completed) ? Number(progress.completed) : 0);
+    const safeTotal = total > 0 ? total : 1;
+    const ratio = Math.max(0, Math.min(1, completed / safeTotal));
+    const percent = Math.round(ratio * 100);
+    const labelPrefix = typeof progress?.label === 'string' && progress.label.trim().length > 0
+      ? progress.label.trim()
+      : 'Loading gallery metadata...';
+
+    progressContainer.hidden = false;
+    progressContainer.style.display = 'inline-flex';
+    progressLabel.textContent = `${labelPrefix} ${percent}%`;
+    progressTrack.setAttribute('aria-valuenow', String(percent));
+    progressBar.style.width = `${String(percent)}%`;
+  }
+
+  /**
+   * Closes the currently opened gallery context menu when present.
+   */
+  function closeActiveContextMenu() {
+    if (typeof activeContextMenuCleanup === 'function') {
+      activeContextMenuCleanup();
+      return;
+    }
+
+    if (activeContextMenu && activeContextMenu.parentNode) {
+      activeContextMenu.parentNode.removeChild(activeContextMenu);
+    }
+    activeContextMenu = null;
+  }
+
+  /**
    * Builds the HTML for one gallery card.
    * @param {any} img
    * @param {number} index
@@ -285,7 +348,6 @@
     const dimVal = (typeof img.width === 'number' && typeof img.height === 'number' && img.width > 0 && img.height > 0 && !isNaN(img.width) && !isNaN(img.height)) ? `${img.width}×${img.height}` : 'N/A';
     const rawThumbSrc = img.thumbUrl || img.src || '';
     const thumbSrc = escapeHtml(rawThumbSrc);
-    const thumbPlaceholder = escapeHtml(img.dominantColorHex || '#2b2b2b');
     const isLoaded = loadedImageSources.has(rawThumbSrc);
     const initialSrc = isLoaded ? thumbSrc : EMPTY_IMAGE_SRC;
     const imageClassName = isLoaded ? 'is-loaded' : '';
@@ -293,7 +355,7 @@
 
     return `
       <div class="gallery-item" data-index="${index}" data-name="${escapeHtml(img.name)}" data-type="${escapeHtml(img.type)}" data-size="${img.size}" data-width="${img.width}" data-height="${img.height}">
-        <div class="gallery-thumb" style="--thumb-placeholder:${thumbPlaceholder}">
+        <div class="gallery-thumb">
           <img class="${imageClassName}" src="${initialSrc}" data-src="${thumbSrc}" data-loaded="${loadedState}" alt="${escapeHtml(img.name)}" decoding="async" />
         </div>
         <div class="gallery-label">${escapeHtml(img.name)}</div>
@@ -457,6 +519,28 @@
   }
 
   /**
+   * Resolves a metadata update to the current gallery index, even after deletions.
+   * @param {number} index
+   * @param {any} meta
+   * @returns {number}
+   */
+  function resolveMetaUpdateIndex(index, meta) {
+    if (Number.isInteger(index)
+      && index >= 0
+      && index < galleryImages.length
+      && (!meta?.filePath || galleryImages[index]?.filePath === meta.filePath)) {
+      return index;
+    }
+
+    const filePath = typeof meta?.filePath === 'string' ? meta.filePath : '';
+    if (!filePath) {
+      return -1;
+    }
+
+    return galleryImages.findIndex((image) => image?.filePath === filePath);
+  }
+
+  /**
    * Removes deleted items from the in-memory gallery immediately.
    * @param {number[]} indexes
    */
@@ -516,7 +600,12 @@
    */
   function applyThumbSizeToGrid() {
     const grid = document.querySelector('.gallery-grid');
-    if (grid) grid.style.setProperty('--thumb-size', `${currentThumbSize}px`);
+    if (!(grid instanceof HTMLElement)) return;
+
+    for (let size = MIN_THUMB_SIZE; size <= MAX_THUMB_SIZE; size += ZOOM_STEP) {
+      grid.classList.remove(`${THUMB_SIZE_CLASS_PREFIX}${size}`);
+    }
+    grid.classList.add(`${THUMB_SIZE_CLASS_PREFIX}${currentThumbSize}`);
   }
 
   /**
@@ -706,6 +795,140 @@
     }
   }
 
+  /**
+   * Schedules a single gallery refresh in the next animation frame.
+   */
+  function scheduleGalleryRefresh() {
+    if (scheduledGalleryRefresh) {
+      return;
+    }
+
+    scheduledGalleryRefresh = window.requestAnimationFrame(() => {
+      scheduledGalleryRefresh = 0;
+      refreshGalleryView();
+    });
+  }
+
+  /**
+   * Applies metadata updates directly to an existing rendered card.
+   * @param {number} index
+   * @param {any} meta
+   */
+  function patchRenderedItemMeta(index, meta) {
+    const resolvedIndex = resolveMetaUpdateIndex(index, meta);
+    if (resolvedIndex < 0) {
+      return;
+    }
+
+    const item = document.querySelector(`.gallery-item[data-index="${resolvedIndex}"]`);
+    if (!(item instanceof HTMLElement)) {
+      return;
+    }
+
+    const currentImage = galleryImages[resolvedIndex] || {};
+
+    item.dataset.name = meta.name;
+    item.dataset.type = meta.type;
+    item.dataset.size = String(meta.size);
+    item.dataset.width = String(meta.width);
+    item.dataset.height = String(meta.height);
+
+    const label = item.querySelector('.gallery-label');
+    if (label) {
+      label.textContent = meta.name;
+    }
+
+    const image = item.querySelector('.gallery-thumb img');
+    if (image instanceof HTMLImageElement) {
+      image.dataset.src = meta.thumbUrl || meta.src || currentImage.thumbUrl || currentImage.src || '';
+      loadGalleryImageIfNearViewport(image);
+    }
+
+    const metaType = item.querySelector('.meta-type');
+    if (metaType) {
+      const extMatch = meta.name.match(/\.([a-z0-9]+)$/i);
+      const ext = extMatch ? extMatch[1].toLowerCase() : '';
+      metaType.className = 'meta-type badge';
+      if ([
+        'png','jpg','jpeg','gif','bmp','webp','svg','tiff','tif','avif','heic','heif','ico'
+      ].includes(ext)) {
+        metaType.classList.add(`badge-ext-${ext}`);
+      }
+      metaType.textContent = getImageTypeLabel(currentImage);
+    }
+
+    const metaSize = item.querySelector('.meta-size');
+    if (metaSize) {
+      metaSize.textContent = formatFileSize(meta.size);
+    }
+
+    const metaDim = item.querySelector('.meta-dim');
+    const dimVal = (typeof meta.width === 'number' && typeof meta.height === 'number' && meta.width > 0 && meta.height > 0 && !isNaN(meta.width) && !isNaN(meta.height)) ? `${meta.width}×${meta.height}` : 'N/A';
+    if (metaDim) {
+      metaDim.textContent = dimVal;
+    }
+  }
+
+  /**
+   * Flushes queued metadata updates in one frame to avoid repeated sync layout work.
+   */
+  function flushPendingMetaUpdates() {
+    scheduledMetaUpdateFlush = 0;
+    if (pendingMetaUpdates.size === 0) {
+      return;
+    }
+
+    let requiresFullRerender = false;
+    for (const { index, meta } of pendingMetaUpdates.values()) {
+      const resolvedIndex = resolveMetaUpdateIndex(index, meta);
+      if (resolvedIndex < 0) {
+        continue;
+      }
+
+      const previousImage = galleryImages[resolvedIndex] || {};
+      galleryImages[resolvedIndex] = { ...previousImage, ...meta };
+
+      const itemRequiresFullRerender = currentSort !== 'name'
+        || hasActiveTypeFilters()
+        || (typeof meta.name === 'string' && meta.name !== previousImage.name);
+
+      if (itemRequiresFullRerender) {
+        requiresFullRerender = true;
+      }
+    }
+
+    if (requiresFullRerender) {
+      renderGallery();
+      pendingMetaUpdates.clear();
+      return;
+    }
+
+    for (const { index, meta } of pendingMetaUpdates.values()) {
+      patchRenderedItemMeta(index, meta);
+    }
+    pendingMetaUpdates.clear();
+  }
+
+  /**
+   * Queues one metadata update and applies all pending updates on the next frame.
+   * @param {number} index
+   * @param {any} meta
+   */
+  function enqueueMetaUpdate(index, meta) {
+    const updateKey = typeof meta?.filePath === 'string' && meta.filePath
+      ? meta.filePath
+      : (galleryImages[index]?.filePath || String(index));
+
+    pendingMetaUpdates.set(updateKey, { index, meta });
+    if (scheduledMetaUpdateFlush) {
+      return;
+    }
+
+    scheduledMetaUpdateFlush = window.requestAnimationFrame(() => {
+      flushPendingMetaUpdates();
+    });
+  }
+
   window.addEventListener('DOMContentLoaded', () => {
     refreshGalleryView();
 
@@ -729,7 +952,10 @@
     if (deleteButton instanceof HTMLButtonElement) {
       deleteButton.addEventListener('click', () => {
         showToolbarClickHalo(deleteButton);
-        deleteSelectedImages(selectedIndexes);
+        const indexesToRemove = [...selectedIndexes];
+        window.requestAnimationFrame(() => {
+          deleteSelectedImages(indexesToRemove);
+        });
       });
     }
 
@@ -749,6 +975,14 @@
       if (scheduledRowPreload) {
         window.cancelAnimationFrame(scheduledRowPreload);
         scheduledRowPreload = 0;
+      }
+      if (scheduledGalleryRefresh) {
+        window.cancelAnimationFrame(scheduledGalleryRefresh);
+        scheduledGalleryRefresh = 0;
+      }
+      if (scheduledMetaUpdateFlush) {
+        window.cancelAnimationFrame(scheduledMetaUpdateFlush);
+        scheduledMetaUpdateFlush = 0;
       }
       if (scheduledScrollSave) {
         window.cancelAnimationFrame(scheduledScrollSave);
@@ -772,65 +1006,43 @@
     if (msg.type === 'gallery-data') {
       if (Array.isArray(msg.images)) {
         galleryImages = msg.images;
+        const totalImages = galleryImages.length;
+        const pendingImages = galleryImages.reduce((count, image) => (
+          String(image?.type ?? '').trim().toLowerCase() === 'loading...' ? count + 1 : count
+        ), 0);
+        if (pendingImages > 0) {
+          updateGalleryLoadingProgress({
+            active: true,
+            completed: totalImages - pendingImages,
+            total: totalImages,
+            label: 'Loading gallery metadata...'
+          });
+        } else {
+          updateGalleryLoadingProgress({ active: false, completed: totalImages, total: totalImages });
+        }
         selectedIndexes = sanitizeSelectedIndexes(selectedIndexes);
         localStorage.setItem(window.selectionKey, JSON.stringify(selectedIndexes));
         if (document.readyState === 'complete' || document.readyState === 'interactive') {
-          refreshGalleryView();
+          scheduleGalleryRefresh();
         } else {
-          window.addEventListener('DOMContentLoaded', refreshGalleryView, { once: true });
+          window.addEventListener('DOMContentLoaded', scheduleGalleryRefresh, { once: true });
         }
       }
     }
     if (msg.type === 'update-image-meta') {
       const { index, meta } = msg;
       if (typeof index !== 'number' || !meta) return;
-      const previousImage = galleryImages[index] || {};
-      galleryImages[index] = { ...previousImage, ...meta };
-
-      const requiresFullRerender = currentSort !== 'name'
-        || hasActiveTypeFilters()
-        || (typeof meta.name === 'string' && meta.name !== previousImage.name);
-
-      if (requiresFullRerender) {
-        renderGallery();
-        return;
-      }
-
-      const item = document.querySelector(`.gallery-item[data-index="${index}"]`);
-      if (item instanceof HTMLElement) {
-        item.dataset.name = meta.name;
-        item.dataset.type = meta.type;
-        item.dataset.size = String(meta.size);
-        item.dataset.width = String(meta.width);
-        item.dataset.height = String(meta.height);
-        const label = item.querySelector('.gallery-label');
-        if (label) label.textContent = meta.name;
-        const image = item.querySelector('.gallery-thumb img');
-        if (image instanceof HTMLImageElement) {
-          image.dataset.src = meta.thumbUrl || meta.src || galleryImages[index].thumbUrl || galleryImages[index].src || '';
-          loadGalleryImageIfNearViewport(image);
-        }
-        const metaType = item.querySelector('.meta-type');
-        if (metaType) {
-          const extMatch = meta.name.match(/\.([a-z0-9]+)$/i);
-          const ext = extMatch ? extMatch[1].toLowerCase() : '';
-          metaType.className = 'meta-type badge';
-          if ([
-            'png','jpg','jpeg','gif','bmp','webp','svg','tiff','tif','avif','heic','heif','ico'
-          ].includes(ext)) {
-            metaType.classList.add(`badge-ext-${ext}`);
-          }
-          metaType.textContent = getImageTypeLabel(galleryImages[index]);
-        }
-        const metaSize = item.querySelector('.meta-size');
-        if (metaSize) metaSize.textContent = formatFileSize(meta.size);
-        const metaDim = item.querySelector('.meta-dim');
-        const dimVal = (typeof meta.width === 'number' && typeof meta.height === 'number' && meta.width > 0 && meta.height > 0 && !isNaN(meta.width) && !isNaN(meta.height)) ? `${meta.width}×${meta.height}` : 'N/A';
-        if (metaDim) metaDim.textContent = dimVal;
-      }
+      enqueueMetaUpdate(index, meta);
     }
     if (msg.type === 'refresh-gallery') {
-      window.location.reload();
+      if (window.vscodeApi && typeof window.vscodeApi.postMessage === 'function') {
+        window.vscodeApi.postMessage({ type: 'request-gallery-data' });
+      } else {
+        scheduleGalleryRefresh();
+      }
+    }
+    if (msg.type === 'gallery-load-progress') {
+      updateGalleryLoadingProgress(msg);
     }
   });
 
@@ -864,6 +1076,7 @@
     const item = target.closest('.gallery-item');
     if (item instanceof HTMLElement) {
       event.preventDefault();
+      closeActiveContextMenu();
 
       const idx = parseInt(item.dataset.index ?? '-1', 10);
       if (isNaN(idx) || idx < 0) return;
@@ -883,19 +1096,30 @@
 
       const menu = document.createElement('div');
       menu.className = 'gallery-context-menu';
-      menu.style.position = 'fixed';
-      menu.style.zIndex = 10000;
-      menu.style.left = event.clientX + 'px';
-      menu.style.top = event.clientY + 'px';
-      menu.style.background = '#222';
-      menu.style.color = '#fff';
-      menu.style.padding = '6px 16px';
-      menu.style.borderRadius = '4px';
-      menu.style.boxShadow = '0 2px 8px rgba(0,0,0,0.2)';
-      menu.style.cursor = 'pointer';
       menu.textContent = removeLabel;
       document.body.appendChild(menu);
-      const removeMenu = () => { if (menu.parentNode) menu.parentNode.removeChild(menu); document.removeEventListener('click', removeMenu, true); };
+      activeContextMenu = menu;
+
+      const cursorOffsetPx = 6;
+      const viewportMarginPx = 8;
+      const maxLeft = Math.max(viewportMarginPx, window.innerWidth - menu.offsetWidth - viewportMarginPx);
+      const maxTop = Math.max(viewportMarginPx, window.innerHeight - menu.offsetHeight - viewportMarginPx);
+      const left = Math.min(Math.max(viewportMarginPx, event.clientX + cursorOffsetPx), maxLeft);
+      const top = Math.min(Math.max(viewportMarginPx, event.clientY + cursorOffsetPx), maxTop);
+      menu.style.left = `${String(left)}px`;
+      menu.style.top = `${String(top)}px`;
+
+      const removeMenu = () => {
+        if (menu.parentNode) {
+          menu.parentNode.removeChild(menu);
+        }
+        document.removeEventListener('click', removeMenu, true);
+        if (activeContextMenu === menu) {
+          activeContextMenu = null;
+          activeContextMenuCleanup = null;
+        }
+      };
+      activeContextMenuCleanup = removeMenu;
       menu.addEventListener('click', () => {
         deleteSelectedImages(indexesToRemove);
         removeMenu();
@@ -904,11 +1128,51 @@
     }
   }, { passive: false });
 
-  document.addEventListener('wheel', (event) => {
-    if (!event.ctrlKey) return;
-    event.preventDefault();
+  let isWheelZoomListenerActive = false;
+
+  /**
+   * Handles Ctrl/Cmd + wheel to resize gallery thumbnails.
+   * @param {WheelEvent} event
+   */
+  function handleWheelZoom(event) {
+    if (!event.ctrlKey && !event.metaKey) return;
+    if (event.cancelable) {
+      event.preventDefault();
+    }
     adjustThumbSize(event.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP);
-  }, { passive: false });
+  }
+
+  /**
+   * Enables the non-passive wheel zoom handler only when needed.
+   */
+  function enableWheelZoomListener() {
+    if (isWheelZoomListenerActive) return;
+    document.addEventListener('wheel', handleWheelZoom, { passive: false });
+    isWheelZoomListenerActive = true;
+  }
+
+  /**
+   * Disables the non-passive wheel zoom handler when modifier keys are released.
+   */
+  function disableWheelZoomListener() {
+    if (!isWheelZoomListenerActive) return;
+    document.removeEventListener('wheel', handleWheelZoom);
+    isWheelZoomListenerActive = false;
+  }
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Control' || event.key === 'Meta') {
+      enableWheelZoomListener();
+    }
+  }, { passive: true });
+
+  document.addEventListener('keyup', (event) => {
+    if ((event.key === 'Control' || event.key === 'Meta') && !event.ctrlKey && !event.metaKey) {
+      disableWheelZoomListener();
+    }
+  }, { passive: true });
+
+  window.addEventListener('blur', disableWheelZoomListener, { passive: true });
 
   /**
    * Adjusts the thumbnail size by a given delta.

@@ -29,8 +29,6 @@ export interface ImageDetailsViewModel {
   channels: number;
   hasAlpha: boolean;
   density?: number;
-  dominantColorHex: string;
-  dominantColorRgb: string;
 }
 
 /**
@@ -42,8 +40,6 @@ export interface IcoVariantViewModel {
   width: number;
   height: number;
   imageSource: string;
-  dominantColorHex: string;
-  dominantColorRgb: string;
 }
 
 /**
@@ -98,9 +94,9 @@ export function buildCustomEditorWebview(
      ['DPI', details.density ? String(details.density) : 'N/A']
   ];
 
-  const tableRows = `${rows
+  const tableRows = rows
     .map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(value)}</td></tr>`)
-    .join('')}<tr><th>Dominant color</th><td id="dominant-color-table">${escapeHtml(details.dominantColorHex)} (${escapeHtml(details.dominantColorRgb)})</td></tr>`;
+    .join('');
 
   // Generate a secure nonce for inline scripts.
   const nonce = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
@@ -132,8 +128,6 @@ export function buildCustomEditorWebview(
         class="ico-gallery-item${index === 0 ? ' is-active' : ''}"
         data-image-source="${escapeHtml(variant.imageSource)}"
         data-size-label="${escapeHtml(variant.label)}"
-        data-dominant-color-hex="${escapeHtml(variant.dominantColorHex)}"
-        data-dominant-color-rgb="${escapeHtml(variant.dominantColorRgb)}"
         title="${escapeHtml(variant.label)}"
         aria-label="Show ${escapeHtml(variant.label)} icon"
         aria-pressed="${index === 0 ? 'true' : 'false'}"
@@ -157,7 +151,7 @@ export function buildCustomEditorWebview(
 <body>
   <div
     class="layout"
-    style="--dominant-color: ${escapeHtml(details.dominantColorHex)}; --toolbar-green-accent-rgb: ${escapeHtml(themeAccentRgb)};"
+    data-toolbar-green-accent-rgb="${escapeHtml(themeAccentRgb)}"
     data-loupe-diameter="${String(loupeDiameter)}"
     data-loupe-virtual-resolution="${String(loupeVirtualResolution)}"
     data-loupe-zoom-at-min-image-zoom="${String(loupeZoomAtMinImageZoom)}"
@@ -216,7 +210,7 @@ export function buildCustomEditorWebview(
         </button>
         <button id="compare-orientation" type="button" class="compare-orientation-button" aria-label="Switch to horizontal split" data-orientation="vertical">
           <span class="icon" aria-hidden="true">
-            <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:inline;vertical-align:middle">
+            <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle">
               <rect x="3" y="3" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.4"/>
               <path d="M10 4v12" stroke="currentColor" stroke-width="1.4"/>
             </svg>
@@ -232,7 +226,7 @@ export function buildCustomEditorWebview(
         </button>
         <button id="compare-diff-target" type="button" class="compare-diff-nav compare-diff-target" aria-label="Show differences on left image" title="Show differences on left image" data-target="left">
           <span class="icon" aria-hidden="true">
-            <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:inline;vertical-align:middle">
+            <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle">
               <rect x="2.5" y="3.5" width="7.5" height="13" rx="1.6" fill="currentColor" fill-opacity="0.18" stroke="currentColor" stroke-width="1.2"/>
               <rect x="10" y="3.5" width="7.5" height="13" rx="1.6" stroke="currentColor" stroke-width="1.2"/>
             </svg>
@@ -240,7 +234,7 @@ export function buildCustomEditorWebview(
         </button>
         <button id="compare-diff-autocenter" type="button" class="compare-diff-nav compare-diff-autocenter" aria-label="Auto-center selected difference" title="Auto-center selected difference" aria-pressed="false">
           <span class="icon" aria-hidden="true">
-            <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:inline;vertical-align:middle">
+            <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle">
               <circle cx="10" cy="10" r="5.2" stroke="currentColor" stroke-width="1.2"/>
               <circle cx="10" cy="10" r="1.6" fill="currentColor"/>
               <path d="M10 2.5v2.2M10 15.3v2.2M2.5 10h2.2M15.3 10h2.2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
@@ -257,7 +251,6 @@ export function buildCustomEditorWebview(
           <span class="drag-title">Image info</span>
         </div>
         <div class="meta-row compact">
-          <span><span class="color-chip"></span><span id="dominant-color-meta">${escapeHtml(details.dominantColorHex)}</span></span>
           <span class="badge ${extClass}">${extLabel}</span>
           <span class="badge">${details.width} × ${details.height}</span>
           ${hasIcoGallery ? `<span id="selected-ico-size" class="badge">Selected size: ${escapeHtml(initialIcoVariantLabel)}</span>` : ''}
@@ -310,7 +303,7 @@ export function buildCustomEditorWebview(
 export function buildFolderGalleryWebview(
   webview: vscode.Webview,
   folderPath: string,
-  imageFiles: Array<{ filePath: string; name: string; type: string; size: number; width: number; height: number; dominantColorHex: string; dominantColorRgb: string }>,
+  imageFiles: Array<{ filePath: string; name: string; type: string; size: number; width: number; height: number }>,
   extensionUri: vscode.Uri,
   options?: {
     themeAccentRgb?: string;
@@ -328,6 +321,12 @@ export function buildFolderGalleryWebview(
     <header class="gallery-header" aria-label="Gallery toolbar">
       <div class="gallery-summary">
         <div class="gallery-count" aria-label="Image count">${escapeHtml(countLabel)}</div>
+        <div id="gallery-load-progress" class="gallery-load-progress" hidden aria-live="polite">
+          <span id="gallery-load-progress-label" class="gallery-load-progress-label">Loading gallery metadata... 0%</span>
+          <div class="gallery-load-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Gallery loading progress">
+            <div id="gallery-load-progress-bar" class="gallery-load-progress-bar"></div>
+          </div>
+        </div>
       </div>
       <div class="gallery-toolbar-actions">
         <button
@@ -404,7 +403,7 @@ export function buildFolderGalleryWebview(
 <body
   data-badge-css-uri="${escapeHtml(badgeCssUri)}"
   data-gallery-id="${escapeHtml(folderPath)}"
-  style="--toolbar-green-accent-rgb: ${escapeHtml(themeAccentRgb)};"
+  data-toolbar-green-accent-rgb="${escapeHtml(themeAccentRgb)}"
 >
   ${contentBody}
   <script src="${escapeHtml(scriptUri.toString())}" nonce="${nonce}"></script>
@@ -425,14 +424,6 @@ export function buildErrorWebview(message: string): string {
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Image Details</title>
-  <style>
-    body {
-      padding: 16px;
-      color: var(--vscode-foreground);
-      background: var(--vscode-editor-background);
-      font-family: var(--vscode-font-family);
-    }
-  </style>
 </head>
 <body>
   <h1>Unable to load image</h1>

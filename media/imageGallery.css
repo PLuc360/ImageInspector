@@ -52,6 +52,44 @@ body {
   padding-inline: 2px;
 }
 
+.gallery-load-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 220px;
+  max-width: min(56vw, 420px);
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  background: var(--vscode-button-secondaryBackground);
+}
+
+.gallery-load-progress[hidden] {
+  display: none !important;
+}
+
+.gallery-load-progress-label {
+  font-size: 0.76em;
+  color: var(--vscode-descriptionForeground);
+  white-space: nowrap;
+}
+
+.gallery-load-progress-track {
+  position: relative;
+  width: 120px;
+  height: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(var(--toolbar-green-accent-rgb), 0.16);
+}
+
+.gallery-load-progress-bar {
+  width: 0%;
+  height: 100%;
+  background: rgba(var(--toolbar-green-accent-rgb), 0.9);
+  transition: width 120ms ease-out;
+}
+
 .gallery-toolbar-actions {
   display: flex;
   align-items: center;
@@ -265,6 +303,46 @@ body {
   grid-template-columns: repeat(auto-fill, minmax(calc(var(--thumb-size, 96px) + 8px), 1fr));
   gap: 4px;
   align-items: start;
+}
+
+.gallery-grid.thumb-size-196 { --thumb-size: 196px; }
+.gallery-grid.thumb-size-212 { --thumb-size: 212px; }
+.gallery-grid.thumb-size-228 { --thumb-size: 228px; }
+.gallery-grid.thumb-size-244 { --thumb-size: 244px; }
+.gallery-grid.thumb-size-260 { --thumb-size: 260px; }
+.gallery-grid.thumb-size-276 { --thumb-size: 276px; }
+.gallery-grid.thumb-size-292 { --thumb-size: 292px; }
+.gallery-grid.thumb-size-308 { --thumb-size: 308px; }
+.gallery-grid.thumb-size-324 { --thumb-size: 324px; }
+.gallery-grid.thumb-size-340 { --thumb-size: 340px; }
+.gallery-grid.thumb-size-356 { --thumb-size: 356px; }
+.gallery-grid.thumb-size-372 { --thumb-size: 372px; }
+.gallery-grid.thumb-size-388 { --thumb-size: 388px; }
+.gallery-grid.thumb-size-404 { --thumb-size: 404px; }
+.gallery-grid.thumb-size-420 { --thumb-size: 420px; }
+.gallery-grid.thumb-size-436 { --thumb-size: 436px; }
+.gallery-grid.thumb-size-452 { --thumb-size: 452px; }
+.gallery-grid.thumb-size-468 { --thumb-size: 468px; }
+.gallery-grid.thumb-size-484 { --thumb-size: 484px; }
+.gallery-grid.thumb-size-500 { --thumb-size: 500px; }
+.gallery-grid.thumb-size-512 { --thumb-size: 512px; }
+
+.gallery-context-menu {
+  position: fixed;
+  z-index: 10000;
+  min-width: 120px;
+  background: var(--vscode-menu-background, #222);
+  color: var(--vscode-menu-foreground, #fff);
+  border: 1px solid var(--vscode-menu-border, rgba(255, 255, 255, 0.15));
+  padding: 6px 16px;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+  user-select: none;
+}
+
+.gallery-context-menu:hover {
+  background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.08));
 }
 
 .gallery-item {

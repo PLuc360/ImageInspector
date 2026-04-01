@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.10.0] - 2026-04-01
+### Added
+- Added a gallery metadata loading progress indicator to make large folder scans more transparent.
+
+### Changed
+- Refocused the extension on lightweight image metadata by removing dominant color extraction from the inspector, ICO variants, and gallery metadata updates.
+- Improved gallery responsiveness with safer incremental refresh scheduling, better handling of stale async updates, and more reliable state preservation after image deletion or refresh.
+- Refined gallery interactions with improved context menu placement, modifier-aware `Ctrl/Cmd + mouse wheel` thumbnail zoom, and small webview markup/style cleanups.
+- Updated the package description and documentation to reflect the metadata-first behavior.
+
+### Removed
+- Removed dominant color-related settings and UI output from the inspector and gallery.
+
 ## [1.9.1] - 2026-04-01
 ### Added
 - Added gallery toolbar comparison buttons matching the viewer tools to launch `before/after` or `side-by-side` mode directly from two selected images.

@@ -89,6 +89,20 @@
   font-size: 12px;
 }
 
+.pipette-color-result-swatch {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid #ccc;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
+.pipette-color-result-label {
+  vertical-align: middle;
+}
+
 .pipette-zoom-loupe {
   display: none;
   position: fixed;

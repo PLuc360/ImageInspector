@@ -25,13 +25,6 @@ function setBoundedCachedValue<T>(cache: Map<string, T>, key: string, value: T, 
   cache.set(key, value);
 }
 
-// Missing option types
-interface GetImageDetailsOptions {
-  includeDominantColor?: boolean;
-  dominantColorQuality?: DominantColorQuality;
-  dominantColorFastSampleSize?: number;
-}
-
 interface ImageInspectorSettings {
   toolbarPosition: string;
   themeAccentRgb: string;
@@ -39,8 +32,6 @@ interface ImageInspectorSettings {
   pipetteLoupeVirtualResolution: number;
   pipetteLoupeZoomAtMinImageZoom: number;
   pipetteLoupeZoomAtMaxImageZoom: number;
-  dominantColorQuality: DominantColorQuality;
-  dominantColorFastSampleSize: number;
 }
 
 interface IcoImageEntry {
@@ -109,11 +100,7 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
       };
 
       const fileVersionInfo = await getFileVersionInfo(filePath);
-      const details = await getImageDetails(filePath, fileVersionInfo, {
-        includeDominantColor: true,
-        dominantColorQuality: settings.dominantColorQuality,
-        dominantColorFastSampleSize: settings.dominantColorFastSampleSize
-      });
+      const details = await getImageDetails(filePath, fileVersionInfo);
       const imageSrc = await getWebviewImageSource(
         filePath,
         document.uri,
@@ -343,11 +330,8 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
 // Types and constants for gallery and inspector
 const SUPPORTED_IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tif', '.tiff', '.avif', '.ico', '.svg', '.heic', '.heif'];
 const SUPPORTED_IMAGE_FILTER_EXTENSIONS = SUPPORTED_IMAGE_EXTENSIONS.map((extension) => extension.replace('.', ''));
-const DEFAULT_DOMINANT_COLOR_QUALITY = 'full';
-const DEFAULT_DOMINANT_COLOR_FAST_SAMPLE_SIZE = 64;
 const DEFAULT_THEME_ACCENT_HEX = '#00C86E';
 
-type DominantColorQuality = 'fast' | 'full';
 type CompareViewMode = 'split' | 'side-by-side';
 
 function getWebviewImageSrc(webview: vscode.Webview, filePath: string): string {
@@ -475,7 +459,10 @@ async function processWithConcurrencyLimit<T>(
 class ImageFolderGalleryPanel {
   private static readonly activePanels = new Map<string, ImageFolderGalleryPanel>();
   private readonly panel: vscode.WebviewPanel;
-  private readonly imageFiles: Array<{ src: string; thumbUrl?: string; filePath: string; name: string; type: string; size: number; width: number; height: number; dominantColorHex: string; dominantColorRgb: string }>;
+  private readonly imageFiles: Array<{ src: string; thumbUrl?: string; filePath: string; name: string; type: string; size: number; width: number; height: number }>;
+  private readonly panelDisposables: vscode.Disposable[] = [];
+  private isDisposed = false;
+  private refreshGeneration = 0;
 
   /**
    * Opens or reveals the gallery panel for the given folder.
@@ -506,9 +493,7 @@ class ImageFolderGalleryPanel {
       type: 'Loading...',
       size: 0,
       width: 0,
-      height: 0,
-      dominantColorHex: '#cccccc',
-      dominantColorRgb: 'rgb(204, 204, 204)'
+      height: 0
     }));
 
     const instance = new ImageFolderGalleryPanel(folderUri, galleryImageMeta, context, provider);
@@ -517,19 +502,56 @@ class ImageFolderGalleryPanel {
     });
     ImageFolderGalleryPanel.activePanels.set(folderPath, instance);
 
+    const initialRefreshGeneration = instance.refreshGeneration;
+    const initialTotal = imageFiles.length;
+    let initialCompleted = 0;
+    const postInitialProgress = (force = false): void => {
+      if (instance.isDisposed || initialRefreshGeneration !== instance.refreshGeneration) {
+        return;
+      }
+
+      if (!force && initialCompleted < initialTotal && initialCompleted % 8 !== 0) {
+        return;
+      }
+
+      void instance.panel.webview.postMessage({
+        type: 'gallery-load-progress',
+        active: initialCompleted < initialTotal,
+        completed: initialCompleted,
+        total: initialTotal,
+        label: 'Loading gallery metadata...'
+      });
+    };
+
+    postInitialProgress(true);
+    if (initialTotal === 0) {
+      void instance.panel.webview.postMessage({
+        type: 'gallery-load-progress',
+        active: false,
+        completed: 0,
+        total: 0,
+        label: 'Loading gallery metadata...'
+      });
+    }
+
     // Progressive metadata generation and update with bounded concurrency.
     void processWithConcurrencyLimit(imageFiles, 4, async (filePath, index) => {
       try {
+        if (instance.isDisposed || initialRefreshGeneration !== instance.refreshGeneration) {
+          return;
+        }
+
         const fileVersionInfo = await getFileVersionInfo(filePath);
         const [details, thumbUrl] = await Promise.all([
-          getImageDetails(filePath, fileVersionInfo, {
-            includeDominantColor: true,
-            dominantColorQuality: DEFAULT_DOMINANT_COLOR_QUALITY,
-            dominantColorFastSampleSize: DEFAULT_DOMINANT_COLOR_FAST_SAMPLE_SIZE
-          }),
+          getImageDetails(filePath, fileVersionInfo),
           getGalleryThumbnailSource(filePath, fileVersionInfo)
         ]);
-        instance.imageFiles[index] = {
+
+        if (instance.isDisposed || initialRefreshGeneration !== instance.refreshGeneration) {
+          return;
+        }
+
+        const updatedMeta = {
           src: getWebviewImageSrc(instance.panel.webview, filePath),
           thumbUrl,
           filePath,
@@ -537,17 +559,25 @@ class ImageFolderGalleryPanel {
           type: details.format,
           size: details.sizeBytes,
           width: details.width,
-          height: details.height,
-          dominantColorHex: details.dominantColorHex,
-          dominantColorRgb: details.dominantColorRgb
+          height: details.height
         };
+        const currentIndex = instance.imageFiles.findIndex((img) => img.filePath === filePath);
+        if (currentIndex === -1) {
+          return;
+        }
+
+        instance.imageFiles[currentIndex] = updatedMeta;
         void instance.panel.webview.postMessage({
           type: 'update-image-meta',
-          index,
-          meta: instance.imageFiles[index]
+          index: currentIndex,
+          filePath,
+          meta: updatedMeta
         });
       } catch {
         // On error, keep placeholder metadata.
+      } finally {
+        initialCompleted += 1;
+        postInitialProgress(initialCompleted >= initialTotal);
       }
     });
   }
@@ -562,7 +592,7 @@ class ImageFolderGalleryPanel {
    */
   private constructor(
     folderUri: vscode.Uri,
-    galleryImageMeta: Array<{ filePath: string; name: string; type: string; size: number; width: number; height: number; dominantColorHex: string; dominantColorRgb: string; thumbUrl?: string }>,
+    galleryImageMeta: Array<{ filePath: string; name: string; type: string; size: number; width: number; height: number; thumbUrl?: string }>,
     context: vscode.ExtensionContext,
     provider: ImageDetailsCustomEditorProvider
   ) {
@@ -601,8 +631,12 @@ class ImageFolderGalleryPanel {
       }
     );
 
-    this.panel.webview.onDidReceiveMessage(
+    const messageDisposable = this.panel.webview.onDidReceiveMessage(
       (rawMessage: unknown) => {
+        if (this.isDisposed) {
+          return;
+        }
+
         if (!rawMessage || typeof rawMessage !== 'object' || !('type' in rawMessage)) {
           return;
         }
@@ -618,15 +652,27 @@ class ImageFolderGalleryPanel {
         }
         // Handler for image removal
         if (message.type === 'remove-image' && Array.isArray(message.indexes)) {
-          const indexes = [...message.indexes];
+          const indexes = Array.from(new Set(
+            message.indexes
+              .filter((value): value is number => typeof value === 'number')
+              .map((value) => Math.trunc(value))
+              .filter((index) => index >= 0 && index < this.imageFiles.length)
+          )).sort((left, right) => left - right);
+
+          if (indexes.length === 0) {
+            return;
+          }
 
           void (async () => {
-            const toDelete = indexes
-              .map((idx) => this.imageFiles[idx])
-              .filter((img) => img && typeof img.filePath === 'string');
+            const deletedPaths = new Set<string>();
 
             await Promise.all(
-              toDelete.map(async (img) => {
+              indexes.map(async (index) => {
+                const img = this.imageFiles[index];
+                if (!img || typeof img.filePath !== 'string') {
+                  return;
+                }
+
                 try {
                   const openEditors = vscode.window.visibleTextEditors.filter((editor) => editor.document.uri.fsPath === img.filePath);
                   for (const editor of openEditors) {
@@ -635,6 +681,7 @@ class ImageFolderGalleryPanel {
                   }
 
                   await fs.unlink(img.filePath);
+                  deletedPaths.add(img.filePath);
                 } catch (err) {
                   // eslint-disable-next-line no-console
                   console.error('[ImageInspector] Failed to delete image file', img.filePath, err);
@@ -642,51 +689,15 @@ class ImageFolderGalleryPanel {
               })
             );
 
-            const refreshedFilePaths = await scanFolderImages(folderUri.fsPath);
-            const refreshedImages = await Promise.all(
-              refreshedFilePaths.map(async (filePath) => {
-                try {
-                  const fileVersionInfo = await getFileVersionInfo(filePath);
-                  const [details, thumbUrl] = await Promise.all([
-                    getImageDetails(filePath, fileVersionInfo, {
-                      includeDominantColor: true,
-                      dominantColorQuality: DEFAULT_DOMINANT_COLOR_QUALITY,
-                      dominantColorFastSampleSize: DEFAULT_DOMINANT_COLOR_FAST_SAMPLE_SIZE
-                    }),
-                    getGalleryThumbnailSource(filePath, fileVersionInfo)
-                  ]);
+            if (this.isDisposed) {
+              return;
+            }
 
-                  return {
-                    src: getWebviewImageSrc(this.panel.webview, filePath),
-                    thumbUrl,
-                    filePath,
-                    name: details.fileName,
-                    type: details.format,
-                    size: details.sizeBytes,
-                    width: details.width,
-                    height: details.height,
-                    dominantColorHex: details.dominantColorHex,
-                    dominantColorRgb: details.dominantColorRgb
-                  };
-                } catch {
-                  return {
-                    src: getWebviewImageSrc(this.panel.webview, filePath),
-                    thumbUrl: '',
-                    filePath,
-                    name: path.basename(filePath),
-                    type: 'Unknown',
-                    size: 0,
-                    width: 0,
-                    height: 0,
-                    dominantColorHex: '#cccccc',
-                    dominantColorRgb: 'rgb(204, 204, 204)'
-                  };
-                }
-              })
-            );
-
-            this.imageFiles.length = 0;
-            this.imageFiles.push(...refreshedImages);
+            if (deletedPaths.size > 0) {
+              const remainingImages = this.imageFiles.filter((img) => !deletedPaths.has(img.filePath));
+              this.imageFiles.length = 0;
+              this.imageFiles.push(...remainingImages);
+            }
 
             await this.panel.webview.postMessage({
               type: 'gallery-data',
@@ -737,14 +748,24 @@ class ImageFolderGalleryPanel {
             ImageDetailsCustomEditorProvider.viewType
           );
         }
-      },
-      undefined,
-      context.subscriptions
+      }
     );
+    this.panelDisposables.push(messageDisposable);
 
-    this.panel.onDidDispose(() => {
+    const disposeDisposable = this.panel.onDidDispose(() => {
+      this.isDisposed = true;
+      this.refreshGeneration += 1;
       ImageFolderGalleryPanel.activePanels.delete(folderUri.fsPath);
-    }, undefined, context.subscriptions);
+      while (this.panelDisposables.length > 0) {
+        const disposable = this.panelDisposables.pop();
+        try {
+          disposable?.dispose();
+        } catch {
+          // Ignore disposal errors during panel teardown.
+        }
+      }
+    });
+    this.panelDisposables.push(disposeDisposable);
   }
 }
 
@@ -1064,18 +1085,16 @@ function getImageLoadErrorMessage(filePath: string, error: unknown): string {
 }
 
 /**
- * Extracts metadata and dominant color information from an image.
+ * Extracts metadata from an image.
  * @param filePath Absolute file system path.
  * @returns Consolidated image details.
  */
 async function getImageDetails(
   filePath: string,
-  fileVersionInfo?: FileVersionInfo,
-  options?: GetImageDetailsOptions
+  fileVersionInfo?: FileVersionInfo
 ): Promise<ImageDetailsViewModel> {
   const resolvedFileVersion = fileVersionInfo ?? await getFileVersionInfo(filePath);
-  const resolvedOptions = resolveImageDetailsOptions(options);
-  const detailsCacheKey = buildImageDetailsCacheKey(resolvedFileVersion.key, resolvedOptions);
+  const detailsCacheKey = buildImageDetailsCacheKey(resolvedFileVersion.key);
   const cachedDetails = getCachedValue(imageDetailsCache, detailsCacheKey);
   if (cachedDetails) {
     return cachedDetails;
@@ -1086,18 +1105,6 @@ async function getImageDetails(
 
     const width = metadata.width ?? 0;
     const height = metadata.height ?? 0;
-    let dominantColorHex = '#808080';
-    let dominantColorRgb = 'rgb(128, 128, 128)';
-
-    if (resolvedOptions.includeDominantColor) {
-      const dominant = await computeDominantColor(
-        filePath,
-        resolvedOptions.dominantColorQuality ?? DEFAULT_DOMINANT_COLOR_QUALITY,
-        resolvedOptions.dominantColorFastSampleSize ?? DEFAULT_DOMINANT_COLOR_FAST_SAMPLE_SIZE
-      );
-      dominantColorHex = rgbToHex(dominant.r, dominant.g, dominant.b);
-      dominantColorRgb = `rgb(${dominant.r}, ${dominant.g}, ${dominant.b})`;
-    }
 
     const details: ImageDetailsViewModel = {
       fileName: path.basename(filePath),
@@ -1111,9 +1118,7 @@ async function getImageDetails(
       space: metadata.space ?? 'Unknown',
       channels: metadata.channels ?? 0,
       hasAlpha: Boolean(metadata.hasAlpha),
-      density: metadata.density,
-      dominantColorHex,
-      dominantColorRgb
+      density: metadata.density
     };
 
     setBoundedCachedValue(imageDetailsCache, detailsCacheKey, details, MAX_IMAGE_DETAILS_CACHE_ENTRIES);
@@ -1132,24 +1137,6 @@ async function getImageDetails(
     const height = primaryEntry?.height ?? 0;
     const estimatedChannels = Math.max(1, Math.ceil((primaryEntry?.bitCount ?? 0) / 8));
 
-    let dominantColorHex = '#808080';
-    let dominantColorRgb = 'rgb(128, 128, 128)';
-
-    if (resolvedOptions?.includeDominantColor && primaryEntry) {
-      const imageEndOffset = primaryEntry.imageOffset + primaryEntry.bytesInResource;
-      if (primaryEntry.isPng && primaryEntry.imageOffset < buffer.length && imageEndOffset <= buffer.length) {
-        const imageBuffer = buffer.subarray(primaryEntry.imageOffset, imageEndOffset);
-        try {
-          const stats = await sharp(imageBuffer).stats();
-          const dominant = stats.dominant;
-          dominantColorHex = rgbToHex(dominant.r, dominant.g, dominant.b);
-          dominantColorRgb = `rgb(${dominant.r}, ${dominant.g}, ${dominant.b})`;
-        } catch (e) {
-          // fallback to gray color
-        }
-      }
-    }
-
     const details: ImageDetailsViewModel = {
       fileName: path.basename(filePath),
       absolutePath: filePath,
@@ -1162,9 +1149,7 @@ async function getImageDetails(
       space: 'Unknown',
       channels: estimatedChannels,
       hasAlpha: (primaryEntry?.bitCount ?? 0) >= 32,
-      density: undefined,
-      dominantColorHex,
-      dominantColorRgb
+      density: undefined
     };
 
     setBoundedCachedValue(imageDetailsCache, detailsCacheKey, details, MAX_IMAGE_DETAILS_CACHE_ENTRIES);
@@ -1173,73 +1158,21 @@ async function getImageDetails(
 }
 
 /**
- * Resolves image details options with safe defaults.
- * @param options Candidate options.
- * @returns Normalized options.
- */
-function resolveImageDetailsOptions(options?: GetImageDetailsOptions): GetImageDetailsOptions {
-  return {
-    includeDominantColor: options?.includeDominantColor ?? true,
-    dominantColorQuality: options?.dominantColorQuality ?? DEFAULT_DOMINANT_COLOR_QUALITY,
-    dominantColorFastSampleSize: clampInteger(
-      options?.dominantColorFastSampleSize ?? DEFAULT_DOMINANT_COLOR_FAST_SAMPLE_SIZE,
-      16,
-      512
-    )
-  };
-}
-
-/**
- * Builds a cache key for image details according to extraction options.
+ * Builds a cache key for image details according to the file version.
  * @param fileVersionKey Stable file version key.
- * @param options Normalized extraction options.
  * @returns Cache key.
  */
-function buildImageDetailsCacheKey(fileVersionKey: string, options: GetImageDetailsOptions): string {
-  if (!options.includeDominantColor) {
-    return `${fileVersionKey}::details::meta`;
-  }
-
-  return `${fileVersionKey}::details::dominant::${options.dominantColorQuality}::${String(options.dominantColorFastSampleSize)}`;
+function buildImageDetailsCacheKey(fileVersionKey: string): string {
+  return `${fileVersionKey}::details::meta`;
 }
 
 /**
- * Computes dominant color for one image using full or fast mode.
- * @param filePath Absolute image path.
- * @param quality Dominant color quality mode.
- * @param fastSampleSize Sampled size used in fast mode.
- * @returns Dominant color channels.
- */
-async function computeDominantColor(
-  filePath: string,
-  quality: DominantColorQuality,
-  fastSampleSize: number
-): Promise<{ r: number; g: number; b: number }> {
-  const imagePipeline = sharp(filePath, { limitInputPixels: false });
-  const stats = quality === 'fast'
-    ? await imagePipeline
-      .resize(fastSampleSize, fastSampleSize, { fit: 'inside', withoutEnlargement: true })
-      .stats()
-    : await imagePipeline.stats();
-
-  return stats.dominant;
-}
-
-/**
- * Reads extension settings used by the webview and image analysis pipeline.
+ * Reads extension settings used by the webview.
  * @returns Normalized extension settings.
  */
 function getImageInspectorSettings(): ImageInspectorSettings {
   const imageInspectorConfig = vscode.workspace.getConfiguration('imageInspector');
   const themeAccentColor = imageInspectorConfig.get<string>('themeAccentColor', DEFAULT_THEME_ACCENT_HEX);
-
-  const dominantColorQualityCandidate = imageInspectorConfig.get<string>(
-    'dominantColorQuality',
-    DEFAULT_DOMINANT_COLOR_QUALITY
-  );
-  const dominantColorQuality: DominantColorQuality = dominantColorQualityCandidate === 'fast'
-    ? 'fast'
-    : DEFAULT_DOMINANT_COLOR_QUALITY;
 
   return {
     toolbarPosition: imageInspectorConfig.get<string>('toolbarPosition', 'top'),
@@ -1259,12 +1192,6 @@ function getImageInspectorSettings(): ImageInspectorSettings {
       imageInspectorConfig.get<number>('pipetteLoupeZoomAtMaxImageZoom', 1),
       0.25,
       100
-    ),
-    dominantColorQuality,
-    dominantColorFastSampleSize: clampInteger(
-      imageInspectorConfig.get<number>('dominantColorFastSampleSize', DEFAULT_DOMINANT_COLOR_FAST_SAMPLE_SIZE),
-      16,
-      512
     )
   };
 }
@@ -1404,25 +1331,12 @@ async function getIcoGalleryItems(filePath: string): Promise<IcoVariantViewModel
     const imageBuffer = buffer.subarray(entry.imageOffset, imageEndOffset);
     const label = `${entry.width}x${entry.height}`;
 
-    let dominantColorHex = '#808080';
-    let dominantColorRgb = 'rgb(128, 128, 128)';
-    try {
-      const stats = await sharp(imageBuffer).stats();
-      const dominant = stats.dominant;
-      dominantColorHex = rgbToHex(dominant.r, dominant.g, dominant.b);
-      dominantColorRgb = `rgb(${dominant.r}, ${dominant.g}, ${dominant.b})`;
-    } catch {
-      // Fall back to a neutral gray color.
-    }
-
     return {
       id: `ico-variant-${String(index + 1)}`,
       label,
       width: entry.width,
       height: entry.height,
-      imageSource: toPngDataUri(imageBuffer),
-      dominantColorHex,
-      dominantColorRgb
+      imageSource: toPngDataUri(imageBuffer)
     } as IcoVariantViewModel;
   });
   const variantsRaw = await Promise.all(variantPromises);
@@ -1522,18 +1436,6 @@ function formatBytes(bytes: number): string {
   const unitIndex = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
   const value = bytes / 1024 ** unitIndex;
   return `${value.toFixed(unitIndex === 0 ? 0 : 2)} ${units[unitIndex]}`;
-}
-
-/**
- * Converts RGB numeric values to an uppercase hexadecimal color string.
- * @param r Red component.
- * @param g Green component.
- * @param b Blue component.
- * @returns Hex color string.
- */
-function rgbToHex(r: number, g: number, b: number): string {
-  const toHex = (value: number) => Math.max(0, Math.min(255, value)).toString(16).padStart(2, '0');
-  return `#${toHex(r)}${toHex(g)}${toHex(b)}`.toUpperCase();
 }
 
 /**

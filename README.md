@@ -2,12 +2,12 @@
 
 Image Inspector is a VS Code extension that opens images in a dedicated custom editor to inspect visual content and metadata side by side.
 
-Current version: 1.9.0
+Current version: 1.9.1
 
 ## Highlights
 
 - Integrated image preview in a VS Code custom editor
-- Key metadata: dimensions, file size, format, color space, channels, alpha, DPI, dominant color
+- Key metadata: dimensions, file size, format, color space, channels, alpha, DPI
 - Advanced zoom workflow: toolbar, keyboard shortcuts, wheel zoom, fit mode, selection zoom
 - Color picker tool with pixel loupe and live pixel info (position + color)
 - Overview minimap with current viewport rectangle and click/drag recentering
@@ -198,18 +198,6 @@ Recommended flow:
 2. npm run compile
 3. Press F5 in VS Code to start Extension Development Host
 
-## Recent updates
-
-Version 1.6.0 notably includes:
-
-- side-by-side comparison mode
-- visual difference detection overlays with one-at-a-time navigation
-- difference overlay target selector (left/right/both)
-- optional auto-center on selected difference
-- improved comparison detection pipeline (nested-region filtering and nearby-region merge)
-- improved fit and pan behavior in side-by-side mode for large landscape images
-
-See CHANGELOG.md for full release notes.
 
 ## License
 
@@ -221,12 +209,12 @@ This project is distributed under the MIT License. See LICENSE.
 
 Image Inspector est une extension VS Code qui ouvre les images dans un éditeur personnalisé pour inspecter visuellement les fichiers et leurs métadonnées.
 
-Version actuelle: 1.7.0
+Version actuelle: 1.9.1
 
 ## Points forts
 
 - Aperçu image intégré dans un custom editor VS Code
-- Métadonnées principales: dimensions, taille, format, espace colorimétrique, canaux, alpha, DPI, couleur dominante
+- Métadonnées principales: dimensions, taille, format, espace colorimétrique, canaux, alpha, DPI
 - Zoom avancé: boutons, raccourcis clavier, molette, fit, zoom de sélection
 - Outil pipette avec loupe pixel et informations en direct (coordonnées + couleur)
 - Mini-carte (overview) avec rectangle de viewport et recentrage par clic/glisser
@@ -416,19 +404,6 @@ Cycle recommandé:
 1. npm install
 2. npm run compile
 3. F5 dans VS Code pour ouvrir un Extension Development Host
-
-## Historique récent
-
-La version 1.6.0 apporte notamment:
-
-- mode comparaison côte à côte
-- détection visuelle des différences avec navigation zone par zone
-- sélecteur de cible d'overlay des différences (gauche/droite/les deux)
-- auto-centrage optionnel sur la différence sélectionnée
-- amélioration de la détection (filtrage des zones imbriquées et fusion des zones proches)
-- amélioration du fit/pan en comparaison côte à côte sur images larges
-
-Consulter CHANGELOG.md pour le détail complet.
 
 ## Licence
 

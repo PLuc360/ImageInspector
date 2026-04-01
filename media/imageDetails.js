@@ -72,8 +72,6 @@ const pipetteHoverInfo = document.getElementById('pipette-hover-info');
 const pipetteHoverPosition = document.getElementById('pipette-hover-position');
 const pipetteHoverColor = document.getElementById('pipette-hover-color');
 const pipetteHoverSwatch = document.getElementById('pipette-hover-swatch');
-const dominantColorMeta = document.getElementById('dominant-color-meta');
-const dominantColorTable = document.getElementById('dominant-color-table');
 const overviewMapImage = document.getElementById('overview-map-image');
 const overviewMapViewport = document.getElementById('overview-map-viewport');
 const PIPETTE_RESULT_VISIBLE_DURATION_MS = 500;
@@ -92,13 +90,6 @@ function attachIcoGalleryListeners() {
       }
 
       setActiveIcoGalleryItem(galleryItem);
-
-      // Update dominant color
-      const dominantColorHex = galleryItem.getAttribute('data-dominant-color-hex');
-      const dominantColorRgb = galleryItem.getAttribute('data-dominant-color-rgb');
-      if (dominantColorHex) {
-        applyDominantColor(dominantColorHex, dominantColorRgb || '');
-      }
 
       image.setAttribute('src', nextSource);
       syncOverviewMapSource();
@@ -155,11 +146,11 @@ let compareDiffCurrentIndex = -1;
 let compareDiffOverlayTarget = 'left';
 let compareDiffAutoCenterEnabled = false;
 let initialViewModeDecisionToken = 0;
-const COMPARE_ORIENTATION_VERTICAL_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:inline;vertical-align:middle"><rect x="3" y="3" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.4"/><path d="M10 4v12" stroke="currentColor" stroke-width="1.4"/></svg>';
-const COMPARE_ORIENTATION_HORIZONTAL_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:inline;vertical-align:middle"><rect x="3" y="3" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.4"/><path d="M4 10h12" stroke="currentColor" stroke-width="1.4"/></svg>';
-const COMPARE_DIFF_TARGET_LEFT_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:inline;vertical-align:middle"><rect x="2.5" y="3.5" width="7.5" height="13" rx="1.6" fill="currentColor" fill-opacity="0.18" stroke="currentColor" stroke-width="1.2"/><rect x="10" y="3.5" width="7.5" height="13" rx="1.6" stroke="currentColor" stroke-width="1.2"/></svg>';
-const COMPARE_DIFF_TARGET_RIGHT_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:inline;vertical-align:middle"><rect x="2.5" y="3.5" width="7.5" height="13" rx="1.6" stroke="currentColor" stroke-width="1.2"/><rect x="10" y="3.5" width="7.5" height="13" rx="1.6" fill="currentColor" fill-opacity="0.18" stroke="currentColor" stroke-width="1.2"/></svg>';
-const COMPARE_DIFF_TARGET_BOTH_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:inline;vertical-align:middle"><rect x="2.5" y="3.5" width="7.5" height="13" rx="1.6" fill="currentColor" fill-opacity="0.14" stroke="currentColor" stroke-width="1.2"/><rect x="10" y="3.5" width="7.5" height="13" rx="1.6" fill="currentColor" fill-opacity="0.14" stroke="currentColor" stroke-width="1.2"/></svg>';
+const COMPARE_ORIENTATION_VERTICAL_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle"><rect x="3" y="3" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.4"/><path d="M10 4v12" stroke="currentColor" stroke-width="1.4"/></svg>';
+const COMPARE_ORIENTATION_HORIZONTAL_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle"><rect x="3" y="3" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.4"/><path d="M4 10h12" stroke="currentColor" stroke-width="1.4"/></svg>';
+const COMPARE_DIFF_TARGET_LEFT_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle"><rect x="2.5" y="3.5" width="7.5" height="13" rx="1.6" fill="currentColor" fill-opacity="0.18" stroke="currentColor" stroke-width="1.2"/><rect x="10" y="3.5" width="7.5" height="13" rx="1.6" stroke="currentColor" stroke-width="1.2"/></svg>';
+const COMPARE_DIFF_TARGET_RIGHT_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle"><rect x="2.5" y="3.5" width="7.5" height="13" rx="1.6" stroke="currentColor" stroke-width="1.2"/><rect x="10" y="3.5" width="7.5" height="13" rx="1.6" fill="currentColor" fill-opacity="0.18" stroke="currentColor" stroke-width="1.2"/></svg>';
+const COMPARE_DIFF_TARGET_BOTH_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle"><rect x="2.5" y="3.5" width="7.5" height="13" rx="1.6" fill="currentColor" fill-opacity="0.14" stroke="currentColor" stroke-width="1.2"/><rect x="10" y="3.5" width="7.5" height="13" rx="1.6" fill="currentColor" fill-opacity="0.14" stroke="currentColor" stroke-width="1.2"/></svg>';
 
 function toClampedNumber(value, min, max, fallbackValue) {
   const numericValue = Number.parseFloat(String(value));
@@ -206,6 +197,17 @@ function initializeLoupeSettingsFromDom() {
     zoomAtMinImageZoom: layoutElement?.dataset.loupeZoomAtMinImageZoom,
     zoomAtMaxImageZoom: layoutElement?.dataset.loupeZoomAtMaxImageZoom
   });
+}
+
+function initializeThemeFromDom() {
+  if (!layoutElement) {
+    return;
+  }
+
+  const accentRgb = layoutElement.dataset.toolbarGreenAccentRgb;
+  if (typeof accentRgb === 'string' && accentRgb.trim().length > 0) {
+    applyThemeAccentRgb(accentRgb);
+  }
 }
 
 function ensurePipetteBufferContext() {
@@ -257,29 +259,6 @@ function applyThemeAccentRgb(accentRgb) {
   }
 
   layoutElement.style.setProperty('--toolbar-green-accent-rgb', accentRgb.trim());
-}
-
-function applyDominantColor(hexColor, rgbColor) {
-  if (!layoutElement || typeof hexColor !== 'string' || hexColor.trim().length === 0) {
-    return;
-  }
-
-  const normalizedHex = hexColor.trim();
-  const normalizedRgb = typeof rgbColor === 'string' && rgbColor.trim().length > 0
-    ? rgbColor.trim()
-    : '';
-
-  layoutElement.style.setProperty('--dominant-color', normalizedHex);
-
-  if (dominantColorMeta) {
-    dominantColorMeta.textContent = normalizedHex;
-  }
-
-  if (dominantColorTable) {
-    dominantColorTable.textContent = normalizedRgb
-      ? `${normalizedHex} (${normalizedRgb})`
-      : normalizedHex;
-  }
 }
 
 function updateSelectionModeUi() {
@@ -1371,15 +1350,6 @@ function initializeIcoGallery() {
 
       setActiveIcoGalleryItem(galleryItem);
 
-      // Update dominant color
-      const dominantColorHex = galleryItem.getAttribute('data-dominant-color-hex');
-      const dominantColorRgb = galleryItem.getAttribute('data-dominant-color-rgb');
-      if (dominantColorHex) {
-        applyDominantColor(dominantColorHex, dominantColorRgb || '');
-      }
-
-      // Always apply dominant color, even if the image does not change
-
       if (pipetteMode) {
         setPipetteMode(false);
       }
@@ -1770,7 +1740,21 @@ previewBody?.addEventListener('click', (event) => {
     // Place the bubble to the right of the loupe.
     pipetteColorResult.style.left = (event.clientX + 48) + 'px';
     pipetteColorResult.style.top = (event.clientY - 24) + 'px';
-    pipetteColorResult.innerHTML = `<span style="display:inline-block;width:16px;height:16px;border-radius:50%;background:${hex};border:1px solid #ccc;vertical-align:middle;margin-right:6px;"></span><span style="vertical-align:middle;">${hex} <small>(copied)</small></span>`;
+    pipetteColorResult.textContent = '';
+
+    const colorSwatch = document.createElement('span');
+    colorSwatch.className = 'pipette-color-result-swatch';
+    colorSwatch.style.background = hex;
+    pipetteColorResult.appendChild(colorSwatch);
+
+    const copiedLabel = document.createElement('span');
+    copiedLabel.className = 'pipette-color-result-label';
+    copiedLabel.textContent = `${hex} `;
+    const copiedSuffix = document.createElement('small');
+    copiedSuffix.textContent = '(copied)';
+    copiedLabel.appendChild(copiedSuffix);
+    pipetteColorResult.appendChild(copiedLabel);
+
     pipetteColorResult.style.background = '#fff';
     pipetteColorResult.style.color = '#000';
     pipetteColorResult.style.border = '1px solid #ccc';
@@ -2523,21 +2507,63 @@ window.addEventListener('blur', () => {
   if (isDraggingCompareDivider) {
     endCompareDividerDrag();
   }
+
+  disablePreviewWheelZoomListener();
 });
 
-preview?.addEventListener(
-  'wheel',
-  (event) => {
-    if (!event.ctrlKey) {
-      return;
-    }
+let isPreviewWheelZoomListenerActive = false;
 
+/**
+ * Handles Ctrl/Cmd + wheel zoom on the preview area.
+ * @param {WheelEvent} event
+ */
+function handlePreviewWheelZoom(event) {
+  if (!event.ctrlKey && !event.metaKey) {
+    return;
+  }
+
+  if (event.cancelable) {
     event.preventDefault();
-    const direction = event.deltaY < 0 ? 1 : -1;
-    applyZoomDelta(direction * ZOOM_STEP);
-  },
-  { passive: false }
-);
+  }
+  const direction = event.deltaY < 0 ? 1 : -1;
+  applyZoomDelta(direction * ZOOM_STEP);
+}
+
+/**
+ * Enables non-passive wheel zoom handling only while modifiers are active.
+ */
+function enablePreviewWheelZoomListener() {
+  if (isPreviewWheelZoomListenerActive || !preview) {
+    return;
+  }
+
+  preview.addEventListener('wheel', handlePreviewWheelZoom, { passive: false });
+  isPreviewWheelZoomListenerActive = true;
+}
+
+/**
+ * Disables the non-passive wheel zoom handler when no longer needed.
+ */
+function disablePreviewWheelZoomListener() {
+  if (!isPreviewWheelZoomListenerActive || !preview) {
+    return;
+  }
+
+  preview.removeEventListener('wheel', handlePreviewWheelZoom);
+  isPreviewWheelZoomListenerActive = false;
+}
+
+window.addEventListener('keydown', (event) => {
+  if (event.key === 'Control' || event.key === 'Meta') {
+    enablePreviewWheelZoomListener();
+  }
+}, { passive: true });
+
+window.addEventListener('keyup', (event) => {
+  if ((event.key === 'Control' || event.key === 'Meta') && !event.ctrlKey && !event.metaKey) {
+    disablePreviewWheelZoomListener();
+  }
+}, { passive: true });
 
 previewBody?.addEventListener('pointerdown', () => {
   window.focus();
@@ -2720,11 +2746,6 @@ window.addEventListener('message', (event) => {
     case 'clear-compare-image':
       clearComparisonImage();
       break;
-    case 'set-dominant-color':
-      if (typeof message.hexColor === 'string') {
-        applyDominantColor(message.hexColor, typeof message.rgbColor === 'string' ? message.rgbColor : '');
-      }
-      break;
     case 'update-settings':
       if (message.settings && typeof message.settings === 'object') {
         applyToolbarPosition(typeof message.settings.toolbarPosition === 'string' ? message.settings.toolbarPosition : 'top');
@@ -2747,6 +2768,7 @@ window.addEventListener('message', (event) => {
 });
 
 initializeLoupeSettingsFromDom();
+initializeThemeFromDom();
 initializeInfoOverlayVisibility();
 initializeInfoOverlayPosition();
 initializeIcoGallery();
