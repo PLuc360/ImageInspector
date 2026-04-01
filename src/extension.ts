@@ -499,11 +499,16 @@ class ImageFolderGalleryPanel {
     });
     this.storageKey = `galleryMeta:${folderUri.fsPath}`;
 
+    const settings = getImageInspectorSettings();
+
     this.panel.webview.html = buildFolderGalleryWebview(
       this.panel.webview,
       folderUri.fsPath,
       galleryImageMeta,
-      context.extensionUri
+      context.extensionUri,
+      {
+        themeAccentRgb: settings.themeAccentRgb
+      }
     );
 
     this.panel.webview.onDidReceiveMessage(
@@ -583,7 +588,10 @@ class ImageFolderGalleryPanel {
                 this.panel.webview,
                 folderUri.fsPath,
                 this.imageFiles,
-                context.extensionUri
+                context.extensionUri,
+                {
+                  themeAccentRgb: getImageInspectorSettings().themeAccentRgb
+                }
               );
               this.panel.webview.html = html;
             } catch (err) {

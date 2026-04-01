@@ -73,6 +73,36 @@
   }
 
   /**
+   * Displays the toolbar halo animation on interaction.
+   * @param {HTMLElement | null | undefined} element
+   */
+  function showToolbarClickHalo(element) {
+    if (!(element instanceof HTMLElement)) return;
+    element.classList.remove('click-halo');
+    void element.offsetWidth;
+    element.classList.add('click-halo');
+  }
+
+  /**
+   * Updates the toolbar count label according to the current filters.
+   * @param {number} visibleCount
+   * @param {number} totalCount
+   */
+  function updateGalleryCount(visibleCount, totalCount) {
+    const countElement = document.querySelector('.gallery-count');
+    if (!(countElement instanceof HTMLElement)) return;
+
+    const visibleLabel = visibleCount === 1 ? '1 image' : `${visibleCount} images`;
+    if (visibleCount === totalCount) {
+      countElement.textContent = visibleLabel;
+      return;
+    }
+
+    const totalLabel = totalCount === 1 ? '1 image' : `${totalCount} images`;
+    countElement.textContent = `${visibleLabel} shown / ${totalLabel}`;
+  }
+
+  /**
    * Builds the HTML for one gallery card.
    * @param {any} img
    * @param {number} index
@@ -253,6 +283,9 @@
     if (!grid) return;
 
     const images = getFilteredSortedImages();
+    if (galleryImages.length > 0) {
+      updateGalleryCount(images.length, galleryImages.length);
+    }
     grid.innerHTML = images.map(({ img, index }) => buildGalleryItemMarkup(img, index)).join('');
     applyThumbSizeToGrid();
 
@@ -276,43 +309,93 @@
     if (!header) return;
     const oldMenu = header.querySelector('.gallery-menu');
     if (oldMenu) oldMenu.remove();
+
+    const availableTypes = Array.from(
+      new Set(
+        galleryImages
+          .map((img) => String(img?.type ?? '').trim().toLowerCase())
+          .filter(Boolean)
+      )
+    ).sort();
+
+    if (currentFilterType !== 'all' && !availableTypes.includes(currentFilterType)) {
+      currentFilterType = 'all';
+    }
+
+    const typeOptions = ['all', ...availableTypes]
+      .map((type) => {
+        const label = type === 'all' ? 'All' : type.toUpperCase();
+        return `<option value="${escapeHtml(type)}">${escapeHtml(label)}</option>`;
+      })
+      .join('');
+
     const menu = document.createElement('div');
     menu.className = 'gallery-menu';
+    menu.setAttribute('role', 'toolbar');
+    menu.setAttribute('aria-label', 'Gallery filters and sorting');
     menu.innerHTML = `
-      <label>Sort:
-        <select id="sort-select">
-          <option value="name">Name</option>
-          <option value="type">Type</option>
-          <option value="size">Size</option>
-        </select>
-        <select id="sort-order-select">
-          <option value="asc">Ascending</option>
-          <option value="desc">Descending</option>
-        </select>
-      </label>
-      <label>Filter:
-        <select id="filter-type-select">
-          <option value="all">All</option>
-          <option value="avif">AVIF</option>
-          <option value="jpg">JPG</option>
-          <option value="png">PNG</option>
-        </select>
-      </label>
+      <div class="gallery-menu-group">
+        <label class="gallery-menu-field">
+          <span class="gallery-menu-label">Sort</span>
+          <select id="sort-select">
+            <option value="name">Name</option>
+            <option value="type">Type</option>
+            <option value="size">Size</option>
+          </select>
+        </label>
+        <label class="gallery-menu-field">
+          <span class="gallery-menu-label">Order</span>
+          <select id="sort-order-select">
+            <option value="asc">Ascending</option>
+            <option value="desc">Descending</option>
+          </select>
+        </label>
+        <label class="gallery-menu-field">
+          <span class="gallery-menu-label">Filter</span>
+          <select id="filter-type-select">${typeOptions}</select>
+        </label>
+      </div>
     `;
     header.appendChild(menu);
-    menu.querySelector('#sort-select').value = currentSort;
-    menu.querySelector('#sort-order-select').value = currentSortOrder;
-    menu.querySelector('#filter-type-select').value = currentFilterType;
-    menu.querySelector('#sort-select').addEventListener('change', e => {
-      currentSort = e.target.value;
+
+    const sortSelect = menu.querySelector('#sort-select');
+    const sortOrderSelect = menu.querySelector('#sort-order-select');
+    const filterTypeSelect = menu.querySelector('#filter-type-select');
+    if (!(sortSelect instanceof HTMLSelectElement)
+      || !(sortOrderSelect instanceof HTMLSelectElement)
+      || !(filterTypeSelect instanceof HTMLSelectElement)) {
+      return;
+    }
+
+    sortSelect.value = currentSort;
+    sortOrderSelect.value = currentSortOrder;
+    filterTypeSelect.value = currentFilterType;
+
+    [sortSelect, sortOrderSelect, filterTypeSelect].forEach((selectElement) => {
+      selectElement.addEventListener('pointerdown', () => {
+        showToolbarClickHalo(selectElement);
+      }, { passive: true });
+    });
+
+    sortSelect.addEventListener('change', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLSelectElement)) return;
+      showToolbarClickHalo(target);
+      currentSort = target.value;
       renderGallery();
     }, { passive: true });
-    menu.querySelector('#sort-order-select').addEventListener('change', e => {
-      currentSortOrder = e.target.value;
+    sortOrderSelect.addEventListener('change', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLSelectElement)) return;
+      showToolbarClickHalo(target);
+      currentSortOrder = target.value;
       renderGallery();
     }, { passive: true });
-    menu.querySelector('#filter-type-select').addEventListener('change', e => {
-      currentFilterType = e.target.value;
+    filterTypeSelect.addEventListener('change', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLSelectElement)) return;
+      showToolbarClickHalo(target);
+      currentFilterType = target.value;
       renderGallery();
     }, { passive: true });
   }

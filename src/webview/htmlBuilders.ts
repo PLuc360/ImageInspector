@@ -311,7 +311,10 @@ export function buildFolderGalleryWebview(
   webview: vscode.Webview,
   folderPath: string,
   imageFiles: Array<{ filePath: string; name: string; type: string; size: number; width: number; height: number; dominantColorHex: string; dominantColorRgb: string }>,
-  extensionUri: vscode.Uri
+  extensionUri: vscode.Uri,
+  options?: {
+    themeAccentRgb?: string;
+  }
 ): string {
   const mediaRootUri = vscode.Uri.joinPath(extensionUri, 'media');
   const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(mediaRootUri, 'imageGallery.css'));
@@ -320,7 +323,13 @@ export function buildFolderGalleryWebview(
   const folderName = path.basename(folderPath);
   const imageCount = imageFiles.length;
   const countLabel = imageCount === 1 ? '1 image' : `${String(imageCount)} images`;
-  const headerMarkup = `<header class="gallery-header"><div class="gallery-title" title="${escapeHtml(folderName)}">${escapeHtml(folderName)}</div><div class="gallery-count">${escapeHtml(countLabel)}</div></header>`;
+  const themeAccentRgb = options?.themeAccentRgb ?? '0,200,110';
+  const headerMarkup = `
+    <header class="gallery-header" aria-label="Gallery toolbar">
+      <div class="gallery-summary">
+        <div class="gallery-count" aria-label="Image count">${escapeHtml(countLabel)}</div>
+      </div>
+    </header>`;
 
   // On ne génère plus les miniatures côté HTML initial : la grille est vide, le JS s'en charge après chargement binaire
   const contentBody = imageFiles.length > 0
@@ -347,7 +356,11 @@ export function buildFolderGalleryWebview(
   <link rel="stylesheet" href="${escapeHtml(styleUri.toString())}" />
   <link rel="stylesheet" href="${escapeHtml(badgeCssUri)}" />
 </head>
-<body data-badge-css-uri="${escapeHtml(badgeCssUri)}" data-gallery-id="${escapeHtml(folderPath)}">
+<body
+  data-badge-css-uri="${escapeHtml(badgeCssUri)}"
+  data-gallery-id="${escapeHtml(folderPath)}"
+  style="--toolbar-green-accent-rgb: ${escapeHtml(themeAccentRgb)};"
+>
   ${contentBody}
   <script src="${escapeHtml(scriptUri.toString())}" nonce="${nonce}"></script>
 </body>

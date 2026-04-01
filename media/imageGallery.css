@@ -6,55 +6,141 @@
   padding: 0;
 }
 
+:root {
+  color-scheme: light dark;
+}
+
 body {
+  --toolbar-green-accent-rgb: 0, 200, 110;
+  --toolbar-green-accent-border: rgba(var(--toolbar-green-accent-rgb), 0.6);
+  --toolbar-green-accent-bg: rgba(var(--toolbar-green-accent-rgb), 0.2);
+  --toolbar-green-accent-bg-hover: rgba(var(--toolbar-green-accent-rgb), 0.28);
+  --toolbar-green-halo-strong: rgba(var(--toolbar-green-accent-rgb), 0.5);
+  --toolbar-green-halo-mid: rgba(var(--toolbar-green-accent-rgb), 0.22);
   background: var(--vscode-editor-background);
   color: var(--vscode-editor-foreground);
   font-family: var(--vscode-font-family);
   font-size: var(--vscode-font-size);
-  padding: 16px;
+  padding: 12px 16px 16px;
   position: relative;
 }
 
 .gallery-header {
+  position: sticky;
+  top: 8px;
+  z-index: 10;
   display: flex;
-  align-items: baseline;
-  gap: 12px;
-  margin-bottom: 16px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--vscode-panel-border);
+  width: fit-content;
+  max-width: min(100%, calc(100vw - 32px));
+  align-items: center;
+  justify-content: center;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+  margin: 0 auto 14px;
+  padding: 5px 8px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 999px;
+  background: var(--vscode-editorWidget-background);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.08);
+}
+
+.gallery-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding-inline: 2px;
 }
 
 .gallery-menu {
   display: flex;
-  gap: 16px;
   align-items: center;
-  font-size: 0.95em;
+  justify-content: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 0.9em;
 }
-.gallery-menu label {
+
+.gallery-menu-group {
   display: flex;
   gap: 6px;
   align-items: center;
-}
-.gallery-menu select {
-  padding: 2px 6px;
-  border-radius: 3px;
-  border: 1px solid var(--vscode-panel-border);
-  background: var(--vscode-editor-background);
-  color: var(--vscode-editor-foreground);
+  flex-wrap: wrap;
 }
 
-.gallery-title {
-  font-size: 1.1em;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.gallery-menu-field {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--vscode-foreground);
+}
+
+.gallery-menu-label {
+  font-size: 0.9em;
+  font-weight: 700;
   white-space: nowrap;
+  color: var(--vscode-descriptionForeground);
+}
+
+.gallery-menu select {
+  min-height: 26px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border));
+  background: var(--vscode-dropdown-background, var(--vscode-input-background));
+  color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground));
+  font-size: 0.95em;
+  font-weight: 500;
+  cursor: pointer;
+  appearance: auto;
+  -webkit-appearance: menulist;
+  box-shadow: none;
+  transition: box-shadow 0.2s ease, border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.gallery-menu select:hover {
+  background: var(--vscode-dropdown-background, var(--vscode-input-background));
+  border-color: var(--toolbar-green-accent-border);
+}
+
+.gallery-menu select:active {
+  background: var(--vscode-dropdown-background, var(--vscode-input-background));
+}
+
+.gallery-menu select:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+}
+
+.gallery-menu select.click-halo {
+  border-color: var(--toolbar-green-accent-border);
+  animation: toolbar-click-halo 240ms ease-out;
 }
 
 .gallery-count {
-  font-size: 0.85em;
-  opacity: 0.65;
+  font-size: 0.78em;
+  font-weight: 600;
+  opacity: 0.95;
   white-space: nowrap;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+}
+
+@keyframes toolbar-click-halo {
+  0% {
+    box-shadow: 0 0 0 0 var(--toolbar-green-halo-strong);
+  }
+
+  55% {
+    box-shadow: 0 0 0 4px var(--toolbar-green-halo-mid);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 rgba(0, 0, 0, 0);
+  }
 }
 
 .gallery-grid {
