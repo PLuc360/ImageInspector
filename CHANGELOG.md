@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.9.1] - 2026-04-01
+### Added
+- Added gallery toolbar comparison buttons matching the viewer tools to launch `before/after` or `side-by-side` mode directly from two selected images.
+
+### Changed
+- The gallery now preserves its sort order and active type filters between refreshes and reopenings.
+- Updated gallery toolbar styling and comparison messaging so the requested compare mode opens immediately from the gallery selection.
+
 ## [1.9.0] - 2026-04-01
 ### Added
 - Added a dedicated gallery toolbar with sorting, filtering, and bulk-selection actions.

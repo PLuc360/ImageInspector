@@ -214,30 +214,75 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
   }
 
   /**
-   * Prompts the user for a comparison image and sends it to the target webview.
-   * @param panel Target image inspector panel.
-   * @param currentImageUri URI of the currently displayed image.
+   * Opens the primary image and loads the second image in comparison mode.
+   * @param primaryImageUri Base image URI shown in the viewer.
+   * @param comparisonImageUri Secondary image URI used for the comparison.
+   * @param viewMode Comparison mode to activate.
    */
-  private async promptComparisonImageForPanel(
-    panel: vscode.WebviewPanel,
-    currentImageUri: vscode.Uri
+  async openComparisonForImages(
+    primaryImageUri: vscode.Uri,
+    comparisonImageUri: vscode.Uri,
+    viewMode: CompareViewMode
   ): Promise<void> {
-    const selectedUris = await vscode.window.showOpenDialog({
-      canSelectFiles: true,
-      canSelectFolders: false,
-      canSelectMany: false,
-      defaultUri: vscode.Uri.file(path.dirname(currentImageUri.fsPath)),
-      openLabel: 'Select comparison image',
-      filters: {
-        Images: SUPPORTED_IMAGE_FILTER_EXTENSIONS
-      }
-    });
+    await vscode.commands.executeCommand(
+      'vscode.openWith',
+      primaryImageUri,
+      ImageDetailsCustomEditorProvider.viewType
+    );
 
-    const comparisonImageUri = selectedUris?.[0];
-    if (!comparisonImageUri) {
+    const panel = await this.waitForPanelForUri(primaryImageUri);
+    if (!panel) {
+      void vscode.window.showWarningMessage('Unable to open the selected image comparison.');
       return;
     }
 
+    await this.setComparisonImageForPanel(panel, comparisonImageUri, viewMode);
+  }
+
+  /**
+   * Finds an opened image inspector panel for the given image URI.
+   * @param imageUri Image URI associated with the panel.
+   * @returns Matching webview panel when available.
+   */
+  private findPanelForUri(imageUri: vscode.Uri): vscode.WebviewPanel | undefined {
+    for (const [panel, openedUri] of this.openPanels.entries()) {
+      if (openedUri.toString() === imageUri.toString()) {
+        return panel;
+      }
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Waits briefly for the panel associated with the given URI to be ready.
+   * @param imageUri Image URI associated with the panel.
+   * @returns Resolved webview panel when it becomes available.
+   */
+  private async waitForPanelForUri(imageUri: vscode.Uri): Promise<vscode.WebviewPanel | undefined> {
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const panel = this.findPanelForUri(imageUri);
+      if (panel) {
+        return panel;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Sends the comparison image to the target webview panel.
+   * @param panel Target image inspector panel.
+   * @param comparisonImageUri Comparison image URI.
+   * @param viewMode Comparison mode to activate when provided.
+   */
+  private async setComparisonImageForPanel(
+    panel: vscode.WebviewPanel,
+    comparisonImageUri: vscode.Uri,
+    viewMode?: CompareViewMode
+  ): Promise<void> {
     const localResourceRoots = new Map<string, vscode.Uri>();
     for (const resourceRoot of panel.webview.options.localResourceRoots ?? []) {
       localResourceRoots.set(resourceRoot.toString(), resourceRoot);
@@ -262,8 +307,37 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
         panel.webview,
         comparisonFileVersion.key
       ),
-      label: path.basename(comparisonImageUri.fsPath)
+      label: path.basename(comparisonImageUri.fsPath),
+      ...(viewMode ? { mode: viewMode } : {})
     });
+  }
+
+  /**
+   * Prompts the user for a comparison image and sends it to the target webview.
+   * @param panel Target image inspector panel.
+   * @param currentImageUri URI of the currently displayed image.
+   */
+  private async promptComparisonImageForPanel(
+    panel: vscode.WebviewPanel,
+    currentImageUri: vscode.Uri
+  ): Promise<void> {
+    const selectedUris = await vscode.window.showOpenDialog({
+      canSelectFiles: true,
+      canSelectFolders: false,
+      canSelectMany: false,
+      defaultUri: vscode.Uri.file(path.dirname(currentImageUri.fsPath)),
+      openLabel: 'Select comparison image',
+      filters: {
+        Images: SUPPORTED_IMAGE_FILTER_EXTENSIONS
+      }
+    });
+
+    const comparisonImageUri = selectedUris?.[0];
+    if (!comparisonImageUri) {
+      return;
+    }
+
+    await this.setComparisonImageForPanel(panel, comparisonImageUri);
   }
 }
 // Types and constants for gallery and inspector
@@ -274,6 +348,7 @@ const DEFAULT_DOMINANT_COLOR_FAST_SAMPLE_SIZE = 64;
 const DEFAULT_THEME_ACCENT_HEX = '#00C86E';
 
 type DominantColorQuality = 'fast' | 'full';
+type CompareViewMode = 'split' | 'side-by-side';
 
 function getWebviewImageSrc(webview: vscode.Webview, filePath: string): string {
   return webview.asWebviewUri(vscode.Uri.file(filePath)).toString();
@@ -407,8 +482,13 @@ class ImageFolderGalleryPanel {
    *
    * @param folderUri URI of the folder to display images from.
    * @param context Extension context.
+   * @param provider Shared image details provider used to open comparisons.
    */
-  static async open(folderUri: vscode.Uri, context: vscode.ExtensionContext): Promise<void> {
+  static async open(
+    folderUri: vscode.Uri,
+    context: vscode.ExtensionContext,
+    provider: ImageDetailsCustomEditorProvider
+  ): Promise<void> {
     const folderPath = folderUri.fsPath;
     const existing = ImageFolderGalleryPanel.activePanels.get(folderPath);
     if (existing) {
@@ -431,7 +511,7 @@ class ImageFolderGalleryPanel {
       dominantColorRgb: 'rgb(204, 204, 204)'
     }));
 
-    const instance = new ImageFolderGalleryPanel(folderUri, galleryImageMeta, context);
+    const instance = new ImageFolderGalleryPanel(folderUri, galleryImageMeta, context, provider);
     instance.imageFiles.forEach(img => {
       img.src = getWebviewImageSrc(instance.panel.webview, img.filePath);
     });
@@ -478,11 +558,13 @@ class ImageFolderGalleryPanel {
    * @param folderUri URI of the folder being displayed.
    * @param imageFiles Absolute paths of images found in the folder.
    * @param context Extension context.
+   * @param provider Shared image details provider used to open comparisons.
    */
   private constructor(
     folderUri: vscode.Uri,
     galleryImageMeta: Array<{ filePath: string; name: string; type: string; size: number; width: number; height: number; dominantColorHex: string; dominantColorRgb: string; thumbUrl?: string }>,
-    context: vscode.ExtensionContext
+    context: vscode.ExtensionContext,
+    provider: ImageDetailsCustomEditorProvider
   ) {
     this.imageFiles = galleryImageMeta.map(img => ({
       ...img,
@@ -525,7 +607,7 @@ class ImageFolderGalleryPanel {
           return;
         }
 
-        const message = rawMessage as { type: string; index?: unknown; binPath?: string; indexes?: number[] };
+        const message = rawMessage as { type: string; index?: unknown; binPath?: string; indexes?: number[]; mode?: unknown };
         // Handler for explicit gallery data request (webview refresh)
         if (message.type === 'request-gallery-data') {
           this.panel.webview.postMessage({
@@ -613,6 +695,35 @@ class ImageFolderGalleryPanel {
           })();
           return;
         }
+        // Handler for comparison opening from the gallery toolbar
+        if (message.type === 'compare-images' && Array.isArray(message.indexes)) {
+          const indexes = Array.from(new Set(
+            message.indexes
+              .filter((value): value is number => typeof value === 'number')
+              .map((value) => Math.trunc(value))
+              .filter((index) => index >= 0 && index < this.imageFiles.length)
+          ));
+
+          if (indexes.length !== 2) {
+            void vscode.window.showInformationMessage('Select exactly 2 images in the gallery to compare them.');
+            return;
+          }
+
+          const primaryImage = this.imageFiles[indexes[0]];
+          const comparisonImage = this.imageFiles[indexes[1]];
+          if (!primaryImage || !comparisonImage) {
+            return;
+          }
+
+          const viewMode: CompareViewMode = message.mode === 'side-by-side' ? 'side-by-side' : 'split';
+          void provider.openComparisonForImages(
+            vscode.Uri.file(primaryImage.filePath),
+            vscode.Uri.file(comparisonImage.filePath),
+            viewMode
+          );
+          return;
+        }
+
         // Handler for image opening
         if (message.type === 'open-image' && typeof message.index === 'number') {
           const index = Math.trunc(message.index);
@@ -710,7 +821,7 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
 
-      await ImageFolderGalleryPanel.open(folderUri, context);
+      await ImageFolderGalleryPanel.open(folderUri, context, provider);
     }
   );
 

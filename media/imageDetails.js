@@ -2705,6 +2705,14 @@ window.addEventListener('message', (event) => {
       break;
     case 'set-compare-image':
       if (typeof message.source === 'string') {
+        if (message.mode === 'side-by-side') {
+          enableSideBySideOnNextComparePick = true;
+          compareViewMode = 'side-by-side';
+        } else if (message.mode === 'split') {
+          enableSideBySideOnNextComparePick = false;
+          compareViewMode = 'split';
+        }
+
         setComparisonImage(message.source, typeof message.label === 'string' ? message.label : 'Comparison image');
         updateView();
       }

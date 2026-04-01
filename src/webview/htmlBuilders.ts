@@ -331,6 +331,33 @@ export function buildFolderGalleryWebview(
       </div>
       <div class="gallery-toolbar-actions">
         <button
+          id="compare-selected-split-button"
+          class="gallery-compare-button"
+          type="button"
+          aria-label="Compare 2 selected images with before/after"
+          title="Select 2 images to compare with before/after"
+          disabled
+        >
+          <span class="gallery-compare-button-icon" aria-hidden="true">⇆</span>
+        </button>
+        <button
+          id="compare-selected-side-by-side-button"
+          class="gallery-compare-button"
+          type="button"
+          aria-label="Compare 2 selected images side by side"
+          title="Select 2 images to compare side by side"
+          disabled
+        >
+          <span class="gallery-compare-button-icon" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle">
+              <rect x="2.5" y="4" width="6.5" height="11" rx="1.4" stroke="currentColor" stroke-width="1.4"/>
+              <rect x="11" y="4" width="6.5" height="11" rx="1.4" stroke="currentColor" stroke-width="1.4"/>
+              <path d="M10 5.2v8.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-dasharray="1.8 1.8"/>
+              <path d="M9.2 2.7l.65 1.35 1.5.18-1.1 1.02.3 1.47-1.35-.72-1.35.72.3-1.47-1.1-1.02 1.5-.18.65-1.35z" fill="currentColor"/>
+            </svg>
+          </span>
+        </button>
+        <button
           id="delete-selected-button"
           class="gallery-delete-button"
           type="button"

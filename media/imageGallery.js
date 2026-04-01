@@ -6,14 +6,16 @@
   window.vscodeApi = window.vscodeApi || (typeof window.acquireVsCodeApi === 'function' ? window.acquireVsCodeApi() : undefined);
   const galleryId = document.body?.dataset?.galleryId || location.pathname;
   const storageKey = `galleryThumbSize:${galleryId}`;
+  const galleryStateKey = `galleryViewState:${galleryId}`;
   window.selectionKey = `gallerySelectedIndexes:${galleryId}`;
   const scrollKey = `galleryScrollY:${galleryId}`;
+  const persistedGalleryState = readPersistedGalleryState();
 
   let galleryImages = [];
   let selectedIndexes = [];
-  let currentFilterTypes = [];
-  let currentSort = 'name';
-  let currentSortOrder = 'asc';
+  let currentFilterTypes = persistedGalleryState.filterTypes;
+  let currentSort = persistedGalleryState.sort;
+  let currentSortOrder = persistedGalleryState.sortOrder;
   const MIN_THUMB_SIZE = 196;
   const MAX_THUMB_SIZE = 512;
   const ZOOM_STEP = 16;
@@ -88,6 +90,39 @@
   }
 
   /**
+   * Reads the persisted sort and filter state for this gallery.
+   * @returns {{ filterTypes: string[], sort: string, sortOrder: string }}
+   */
+  function readPersistedGalleryState() {
+    try {
+      const rawState = localStorage.getItem(galleryStateKey);
+      if (!rawState) {
+        return { filterTypes: [], sort: 'name', sortOrder: 'asc' };
+      }
+
+      const savedState = JSON.parse(rawState);
+      const filterTypes = normalizeTypeFilters(Array.isArray(savedState?.filterTypes) ? savedState.filterTypes : []);
+      const sort = ['name', 'type', 'size'].includes(savedState?.sort) ? savedState.sort : 'name';
+      const sortOrder = savedState?.sortOrder === 'desc' ? 'desc' : 'asc';
+
+      return { filterTypes, sort, sortOrder };
+    } catch {
+      return { filterTypes: [], sort: 'name', sortOrder: 'asc' };
+    }
+  }
+
+  /**
+   * Persists the current sort and filter state for this gallery.
+   */
+  function persistGalleryState() {
+    localStorage.setItem(galleryStateKey, JSON.stringify({
+      filterTypes: currentFilterTypes,
+      sort: currentSort,
+      sortOrder: currentSortOrder
+    }));
+  }
+
+  /**
    * Indicates whether one or more type filters are currently active.
    * @returns {boolean}
    */
@@ -143,15 +178,55 @@
   }
 
   /**
-   * Updates the delete action and selection counter in the toolbar.
+   * Returns valid selected indexes while preserving the selection order.
+   * @returns {number[]}
+   */
+  function getOrderedSelectedIndexes() {
+    const orderedIndexes = [];
+
+    for (const index of selectedIndexes) {
+      if (!Number.isInteger(index) || index < 0 || index >= galleryImages.length || orderedIndexes.includes(index)) {
+        continue;
+      }
+
+      orderedIndexes.push(index);
+    }
+
+    return orderedIndexes;
+  }
+
+  /**
+   * Updates the compare/delete actions and selection counter in the toolbar.
    */
   function updateSelectionToolbar() {
-    const selectedCount = selectedIndexes.length;
+    const orderedSelectedIndexes = getOrderedSelectedIndexes();
+    const selectedCount = orderedSelectedIndexes.length;
     const deleteButton = document.getElementById('delete-selected-button');
+    const compareSplitButton = document.getElementById('compare-selected-split-button');
+    const compareSideBySideButton = document.getElementById('compare-selected-side-by-side-button');
     const selectionCount = document.getElementById('gallery-selection-count');
+    const compareActionLabel = selectedCount === 2
+      ? 'Compare the 2 selected images'
+      : (selectedCount > 2 ? 'Select exactly 2 images to compare' : 'Select 2 images to compare');
 
     if (selectionCount instanceof HTMLElement) {
       selectionCount.textContent = String(selectedCount);
+    }
+
+    if (compareSplitButton instanceof HTMLButtonElement) {
+      compareSplitButton.disabled = selectedCount !== 2;
+      compareSplitButton.title = selectedCount === 2
+        ? 'Compare the 2 selected images with before/after'
+        : compareActionLabel;
+      compareSplitButton.setAttribute('aria-label', compareSplitButton.title);
+    }
+
+    if (compareSideBySideButton instanceof HTMLButtonElement) {
+      compareSideBySideButton.disabled = selectedCount !== 2;
+      compareSideBySideButton.title = selectedCount === 2
+        ? 'Compare the 2 selected images side by side'
+        : compareActionLabel;
+      compareSideBySideButton.setAttribute('aria-label', compareSideBySideButton.title);
     }
 
     if (deleteButton instanceof HTMLButtonElement) {
@@ -417,6 +492,26 @@
   }
 
   /**
+   * Opens the selected images in the requested comparison mode.
+   * @param {'split' | 'side-by-side'} mode
+   */
+  function startComparisonForSelectedImages(mode) {
+    const indexesToCompare = getOrderedSelectedIndexes();
+    if (indexesToCompare.length !== 2) {
+      updateSelectionToolbar();
+      return;
+    }
+
+    if (window.vscodeApi && typeof window.vscodeApi.postMessage === 'function') {
+      window.vscodeApi.postMessage({
+        type: 'compare-images',
+        indexes: indexesToCompare,
+        mode: mode === 'side-by-side' ? 'side-by-side' : 'split'
+      });
+    }
+  }
+
+  /**
    * Applies the current thumbnail size to the gallery grid.
    */
   function applyThumbSizeToGrid() {
@@ -475,6 +570,7 @@
     currentFilterTypes = normalizeTypeFilters(
       currentFilterTypes.filter((type) => availableTypes.includes(type))
     );
+    persistGalleryState();
 
     const isShowingAllTypes = !hasActiveTypeFilters();
     const typeFiltersMarkup = [
@@ -539,6 +635,7 @@
       if (!(target instanceof HTMLSelectElement)) return;
       showToolbarClickHalo(target);
       currentSort = target.value;
+      persistGalleryState();
       renderGallery();
     }, { passive: true });
     sortOrderSelect.addEventListener('change', (event) => {
@@ -546,6 +643,7 @@
       if (!(target instanceof HTMLSelectElement)) return;
       showToolbarClickHalo(target);
       currentSortOrder = target.value;
+      persistGalleryState();
       renderGallery();
     }, { passive: true });
 
@@ -563,6 +661,7 @@
           currentFilterTypes = normalizeTypeFilters([...currentFilterTypes, selectedType]);
         }
 
+        persistGalleryState();
         refreshGalleryView();
       });
     });
@@ -609,6 +708,22 @@
 
   window.addEventListener('DOMContentLoaded', () => {
     refreshGalleryView();
+
+    const compareSplitButton = document.getElementById('compare-selected-split-button');
+    if (compareSplitButton instanceof HTMLButtonElement) {
+      compareSplitButton.addEventListener('click', () => {
+        showToolbarClickHalo(compareSplitButton);
+        startComparisonForSelectedImages('split');
+      });
+    }
+
+    const compareSideBySideButton = document.getElementById('compare-selected-side-by-side-button');
+    if (compareSideBySideButton instanceof HTMLButtonElement) {
+      compareSideBySideButton.addEventListener('click', () => {
+        showToolbarClickHalo(compareSideBySideButton);
+        startComparisonForSelectedImages('side-by-side');
+      });
+    }
 
     const deleteButton = document.getElementById('delete-selected-button');
     if (deleteButton instanceof HTMLButtonElement) {

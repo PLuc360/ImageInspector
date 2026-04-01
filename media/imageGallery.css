@@ -59,7 +59,8 @@ body {
   flex-wrap: wrap;
 }
 
-.gallery-delete-button {
+.gallery-delete-button,
+.gallery-compare-button {
   min-height: 28px;
   display: inline-flex;
   align-items: center;
@@ -76,29 +77,44 @@ body {
   transition: box-shadow 0.2s ease, border-color 0.15s ease, background-color 0.15s ease, opacity 0.15s ease;
 }
 
-.gallery-delete-button:hover:not(:disabled) {
+.gallery-delete-button:hover:not(:disabled),
+.gallery-compare-button:hover:not(:disabled) {
   border-color: var(--toolbar-green-accent-border);
   background: var(--toolbar-green-accent-bg-hover);
 }
 
-.gallery-delete-button:focus-visible {
+.gallery-delete-button:focus-visible,
+.gallery-compare-button:focus-visible {
   outline: 1px solid var(--vscode-focusBorder);
   outline-offset: 1px;
 }
 
-.gallery-delete-button:disabled {
+.gallery-delete-button:disabled,
+.gallery-compare-button:disabled {
   opacity: 0.55;
   cursor: default;
 }
 
-.gallery-delete-button.click-halo {
+.gallery-delete-button.click-halo,
+.gallery-compare-button.click-halo {
   animation: toolbar-click-halo 240ms ease-out;
 }
 
-.gallery-delete-button-icon {
+.gallery-compare-button {
+  min-width: 30px;
+  padding: 4px 8px;
+  justify-content: center;
+}
+
+.gallery-delete-button-icon,
+.gallery-compare-button-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+.gallery-compare-button-icon {
+  line-height: 1;
 }
 
 .gallery-delete-button-count {
