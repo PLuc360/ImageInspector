@@ -292,6 +292,59 @@ export function buildCustomEditorWebview(
 }
 
 /**
+ * Builds a lightweight loading page shown immediately while the gallery is being prepared.
+ *
+ * @param webview Target webview instance.
+ * @param folderPath Absolute path to the folder being opened.
+ * @param extensionUri Extension root URI.
+ * @param options Rendering options for the loading state.
+ * @returns Complete HTML payload for the temporary loading webview.
+ */
+export function buildFolderGalleryLoadingWebview(
+  webview: vscode.Webview,
+  folderPath: string,
+  extensionUri: vscode.Uri,
+  options?: {
+    themeAccentRgb?: string;
+    title?: string;
+    message?: string;
+  }
+): string {
+  const mediaRootUri = vscode.Uri.joinPath(extensionUri, 'media');
+  const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(mediaRootUri, 'imageGallery.css'));
+  const folderName = path.basename(folderPath);
+  const themeAccentRgb = options?.themeAccentRgb ?? '0,200,110';
+  const title = options?.title?.trim() || 'Opening gallery...';
+  const message = options?.message?.trim() || 'Scanning the folder and preparing previews.';
+
+  const contentSecurityPolicy = [
+    "default-src 'none'",
+    `style-src ${webview.cspSource}`
+  ].join('; ');
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="${contentSecurityPolicy}" />
+  <title>Gallery – ${escapeHtml(folderName)}</title>
+  <link rel="stylesheet" href="${escapeHtml(styleUri.toString())}" />
+</head>
+<body data-toolbar-green-accent-rgb="${escapeHtml(themeAccentRgb)}">
+  <section class="gallery-loading" aria-live="polite" aria-busy="true">
+    <div class="gallery-loading-card">
+      <div class="gallery-loading-spinner" aria-hidden="true"></div>
+      <h1 class="gallery-loading-title">${escapeHtml(title)}</h1>
+      <p class="gallery-loading-folder">${escapeHtml(folderName)}</p>
+      <p class="gallery-loading-text">${escapeHtml(message)}</p>
+    </div>
+  </section>
+</body>
+</html>`;
+}
+
+/**
  * Builds the image gallery HTML for a folder.
  *
  * @param webview Target webview instance.
@@ -307,6 +360,12 @@ export function buildFolderGalleryWebview(
   extensionUri: vscode.Uri,
   options?: {
     themeAccentRgb?: string;
+    initialProgress?: {
+      active?: boolean;
+      completed?: number;
+      total?: number;
+      label?: string;
+    };
   }
 ): string {
   const mediaRootUri = vscode.Uri.joinPath(extensionUri, 'media');
@@ -317,14 +376,24 @@ export function buildFolderGalleryWebview(
   const imageCount = imageFiles.length;
   const countLabel = imageCount === 1 ? '1 image' : `${String(imageCount)} images`;
   const themeAccentRgb = options?.themeAccentRgb ?? '0,200,110';
+  const progressLabel = options?.initialProgress?.label?.trim() || 'Loading gallery metadata...';
+  const progressTotal = Math.max(0, Number.isFinite(options?.initialProgress?.total)
+    ? Number(options?.initialProgress?.total)
+    : imageCount);
+  const progressCompleted = Math.max(0, Number.isFinite(options?.initialProgress?.completed)
+    ? Number(options?.initialProgress?.completed)
+    : 0);
+  const progressRatio = progressTotal > 0 ? Math.max(0, Math.min(1, progressCompleted / progressTotal)) : 0;
+  const progressPercent = Math.round(progressRatio * 100);
+  const showInitialProgress = options?.initialProgress?.active === true;
   const headerMarkup = `
     <header class="gallery-header" aria-label="Gallery toolbar">
       <div class="gallery-summary">
         <div class="gallery-count" aria-label="Image count">${escapeHtml(countLabel)}</div>
-        <div id="gallery-load-progress" class="gallery-load-progress" hidden aria-live="polite">
-          <span id="gallery-load-progress-label" class="gallery-load-progress-label">Loading gallery metadata... 0%</span>
-          <div class="gallery-load-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Gallery loading progress">
-            <div id="gallery-load-progress-bar" class="gallery-load-progress-bar"></div>
+        <div id="gallery-load-progress" class="gallery-load-progress"${showInitialProgress ? '' : ' hidden'} aria-live="polite">
+          <span id="gallery-load-progress-label" class="gallery-load-progress-label">${escapeHtml(`${progressLabel} ${String(progressPercent)}%`)}</span>
+          <div class="gallery-load-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${String(progressPercent)}" aria-label="Gallery loading progress">
+            <div id="gallery-load-progress-bar" class="gallery-load-progress-bar" style="width:${String(progressPercent)}%"></div>
           </div>
         </div>
       </div>

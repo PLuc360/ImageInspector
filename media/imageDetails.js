@@ -1382,6 +1382,7 @@ function hideOverviewMapViewport() {
   }
 
   overviewMapViewport.classList.add('is-hidden');
+  overviewMapViewport.style.display = 'none';
 }
 
 function getOverviewMapContentRect() {
@@ -1455,6 +1456,7 @@ function updateOverviewMapViewport() {
   const normalizedWidth = clamp(visibleWidth / imageRect.width, 0, 1);
   const normalizedHeight = clamp(visibleHeight / imageRect.height, 0, 1);
 
+  overviewMapViewport.classList.remove('is-hidden');
   overviewMapViewport.style.display = 'block';
   overviewMapViewport.style.left = `${String(mapContentRect.left + normalizedLeft * mapContentRect.width)}px`;
   overviewMapViewport.style.top = `${String(mapContentRect.top + normalizedTop * mapContentRect.height)}px`;

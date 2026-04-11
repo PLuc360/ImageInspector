@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.10.2] - 2026-04-11
+### Changed
+- Improved gallery opening feedback with an immediate loading screen and visible progress so opening a folder feels responsive right away.
+- Deferred heavy image-processing initialization during gallery startup to reduce the initial blank wait before the webview appears.
+
+### Fixed
+- Restored the overview viewport rectangle in the `Image info` panel so the thumbnail once again shows which part of the image is currently visible.
+
 ## [1.10.1] - 2026-04-11
 ### Changed
 - Replaced the gallery file type toolbar chips with a compact multi-select dropdown so the toolbar stays usable even when many formats are present.

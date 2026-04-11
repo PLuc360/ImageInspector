@@ -340,18 +340,38 @@ function getWebviewImageSrc(webview: vscode.Webview, filePath: string): string {
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
-import sharp from 'sharp';
-
 // Buffer is global in Node.js, but can be imported explicitly if needed
 import { Buffer } from 'buffer';
 import * as vscode from 'vscode';
 import {
   buildCustomEditorWebview,
   buildErrorWebview,
+  buildFolderGalleryLoadingWebview,
   buildFolderGalleryWebview,
   type IcoVariantViewModel,
   type ImageDetailsViewModel
 } from './webview';
+
+type SharpModule = typeof import('sharp');
+
+let sharpModulePromise: Promise<SharpModule> | undefined;
+
+/**
+ * Loads `sharp` lazily so the gallery can appear before native image processing starts.
+ *
+ * @returns The `sharp` image processing factory.
+ */
+async function getSharp(): Promise<SharpModule> {
+  if (!sharpModulePromise) {
+    sharpModulePromise = import('sharp').then((module) => {
+      const resolvedSharp = (module as unknown as { default?: SharpModule }).default
+        ?? (module as unknown as SharpModule);
+      return resolvedSharp;
+    });
+  }
+
+  return sharpModulePromise;
+}
 // Utilities for file version management (cache, refresh)
 type FileVersionInfo = {
   key: string;
@@ -409,6 +429,7 @@ async function getGalleryThumbnailSource(
   }
 
   try {
+    const sharp = await getSharp();
     const thumbnailBuffer = await sharp(filePath)
       .rotate()
       .resize({
@@ -459,6 +480,8 @@ async function processWithConcurrencyLimit<T>(
 class ImageFolderGalleryPanel {
   private static readonly activePanels = new Map<string, ImageFolderGalleryPanel>();
   private readonly panel: vscode.WebviewPanel;
+  private readonly folderUri: vscode.Uri;
+  private readonly extensionUri: vscode.Uri;
   private readonly imageFiles: Array<{ src: string; thumbUrl?: string; filePath: string; name: string; type: string; size: number; width: number; height: number }>;
   private readonly panelDisposables: vscode.Disposable[] = [];
   private isDisposed = false;
@@ -483,10 +506,34 @@ class ImageFolderGalleryPanel {
       return;
     }
 
-    const imageFiles = await scanFolderImages(folderPath);
-    // Simple gallery construction without binary
-    const galleryImageMeta = imageFiles.map((filePath) => ({
-      src: '',
+    const instance = new ImageFolderGalleryPanel(folderUri, context, provider);
+    ImageFolderGalleryPanel.activePanels.set(folderPath, instance);
+
+    try {
+      await instance.initializeGalleryContent();
+    } catch (error) {
+      if (!instance.isDisposed) {
+        instance.panel.title = `Gallery: ${path.basename(folderPath)}`;
+        instance.panel.webview.html = buildErrorWebview(getImageLoadErrorMessage(folderPath, error));
+      }
+      ImageFolderGalleryPanel.activePanels.delete(folderPath);
+    }
+  }
+
+  /**
+   * Loads the folder images and progressively enriches the gallery metadata.
+   */
+  private async initializeGalleryContent(): Promise<void> {
+    const folderPath = this.folderUri.fsPath;
+    const imagePaths = await scanFolderImages(folderPath);
+
+    if (this.isDisposed) {
+      return;
+    }
+
+    this.imageFiles.length = 0;
+    this.imageFiles.push(...imagePaths.map((filePath) => ({
+      src: getWebviewImageSrc(this.panel.webview, filePath),
       thumbUrl: '',
       filePath,
       name: path.basename(filePath),
@@ -494,19 +541,31 @@ class ImageFolderGalleryPanel {
       size: 0,
       width: 0,
       height: 0
-    }));
+    })));
 
-    const instance = new ImageFolderGalleryPanel(folderUri, galleryImageMeta, context, provider);
-    instance.imageFiles.forEach(img => {
-      img.src = getWebviewImageSrc(instance.panel.webview, img.filePath);
-    });
-    ImageFolderGalleryPanel.activePanels.set(folderPath, instance);
+    const settings = getImageInspectorSettings();
+    this.panel.title = `Gallery: ${path.basename(folderPath)}`;
+    this.panel.webview.html = buildFolderGalleryWebview(
+      this.panel.webview,
+      folderPath,
+      this.imageFiles,
+      this.extensionUri,
+      {
+        themeAccentRgb: settings.themeAccentRgb,
+        initialProgress: {
+          active: imagePaths.length > 0,
+          completed: 0,
+          total: imagePaths.length,
+          label: 'Loading gallery metadata...'
+        }
+      }
+    );
 
-    const initialRefreshGeneration = instance.refreshGeneration;
-    const initialTotal = imageFiles.length;
+    const initialRefreshGeneration = this.refreshGeneration;
+    const initialTotal = imagePaths.length;
     let initialCompleted = 0;
     const postInitialProgress = (force = false): void => {
-      if (instance.isDisposed || initialRefreshGeneration !== instance.refreshGeneration) {
+      if (this.isDisposed || initialRefreshGeneration !== this.refreshGeneration) {
         return;
       }
 
@@ -514,7 +573,7 @@ class ImageFolderGalleryPanel {
         return;
       }
 
-      void instance.panel.webview.postMessage({
+      void this.panel.webview.postMessage({
         type: 'gallery-load-progress',
         active: initialCompleted < initialTotal,
         completed: initialCompleted,
@@ -525,19 +584,19 @@ class ImageFolderGalleryPanel {
 
     postInitialProgress(true);
     if (initialTotal === 0) {
-      void instance.panel.webview.postMessage({
+      void this.panel.webview.postMessage({
         type: 'gallery-load-progress',
         active: false,
         completed: 0,
         total: 0,
         label: 'Loading gallery metadata...'
       });
+      return;
     }
 
-    // Progressive metadata generation and update with bounded concurrency.
-    void processWithConcurrencyLimit(imageFiles, 4, async (filePath, index) => {
+    void processWithConcurrencyLimit(imagePaths, 4, async (filePath) => {
       try {
-        if (instance.isDisposed || initialRefreshGeneration !== instance.refreshGeneration) {
+        if (this.isDisposed || initialRefreshGeneration !== this.refreshGeneration) {
           return;
         }
 
@@ -547,12 +606,12 @@ class ImageFolderGalleryPanel {
           getGalleryThumbnailSource(filePath, fileVersionInfo)
         ]);
 
-        if (instance.isDisposed || initialRefreshGeneration !== instance.refreshGeneration) {
+        if (this.isDisposed || initialRefreshGeneration !== this.refreshGeneration) {
           return;
         }
 
         const updatedMeta = {
-          src: getWebviewImageSrc(instance.panel.webview, filePath),
+          src: getWebviewImageSrc(this.panel.webview, filePath),
           thumbUrl,
           filePath,
           name: details.fileName,
@@ -561,13 +620,13 @@ class ImageFolderGalleryPanel {
           width: details.width,
           height: details.height
         };
-        const currentIndex = instance.imageFiles.findIndex((img) => img.filePath === filePath);
+        const currentIndex = this.imageFiles.findIndex((img) => img.filePath === filePath);
         if (currentIndex === -1) {
           return;
         }
 
-        instance.imageFiles[currentIndex] = updatedMeta;
-        void instance.panel.webview.postMessage({
+        this.imageFiles[currentIndex] = updatedMeta;
+        void this.panel.webview.postMessage({
           type: 'update-image-meta',
           index: currentIndex,
           filePath,
@@ -586,26 +645,23 @@ class ImageFolderGalleryPanel {
    * Creates and wires up the gallery WebviewPanel.
    *
    * @param folderUri URI of the folder being displayed.
-   * @param imageFiles Absolute paths of images found in the folder.
    * @param context Extension context.
    * @param provider Shared image details provider used to open comparisons.
    */
   private constructor(
     folderUri: vscode.Uri,
-    galleryImageMeta: Array<{ filePath: string; name: string; type: string; size: number; width: number; height: number; thumbUrl?: string }>,
     context: vscode.ExtensionContext,
     provider: ImageDetailsCustomEditorProvider
   ) {
-    this.imageFiles = galleryImageMeta.map(img => ({
-      ...img,
-      src: '', // will be updated after
-      thumbUrl: img.thumbUrl ?? ''
-    }));
+    this.folderUri = folderUri;
+    this.extensionUri = context.extensionUri;
+    this.imageFiles = [];
     const folderName = path.basename(folderUri.fsPath);
-    // Panel initialization
+    const settings = getImageInspectorSettings();
+
     this.panel = vscode.window.createWebviewPanel(
       'imageInspector.folderGallery',
-      `Gallery: ${folderName}`,
+      `Gallery: ${folderName} — loading...`,
       vscode.ViewColumn.One,
       {
         enableScripts: true,
@@ -615,19 +671,15 @@ class ImageFolderGalleryPanel {
         ]
       }
     );
-    // Update src after panel creation
-    this.imageFiles.forEach(img => {
-      img.src = getWebviewImageSrc(this.panel.webview, img.filePath);
-    });
-    const settings = getImageInspectorSettings();
 
-    this.panel.webview.html = buildFolderGalleryWebview(
+    this.panel.webview.html = buildFolderGalleryLoadingWebview(
       this.panel.webview,
       folderUri.fsPath,
-      galleryImageMeta,
       context.extensionUri,
       {
-        themeAccentRgb: settings.themeAccentRgb
+        themeAccentRgb: settings.themeAccentRgb,
+        title: 'Opening gallery...',
+        message: 'Scanning the folder and preparing previews.'
       }
     );
 
@@ -1101,6 +1153,7 @@ async function getImageDetails(
   }
 
   try {
+    const sharp = await getSharp();
     const metadata = await sharp(filePath).metadata();
 
     const width = metadata.width ?? 0;
@@ -1414,6 +1467,7 @@ async function getWebviewImageSource(
     return cachedPreviewSource;
   }
 
+  const sharp = await getSharp();
   const previewBuffer = await sharp(filePath)
     .png()
     .toBuffer();

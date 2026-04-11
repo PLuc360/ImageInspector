@@ -506,6 +506,56 @@ body {
   visibility: hidden;
 }
 
+.gallery-loading {
+  min-height: calc(100vh - 84px);
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+}
+
+.gallery-loading-card {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  max-width: 420px;
+  padding: 20px 22px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 14px;
+  background: var(--vscode-editorWidget-background);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  text-align: center;
+}
+
+.gallery-loading-spinner {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid rgba(var(--toolbar-green-accent-rgb), 0.2);
+  border-top-color: rgba(var(--toolbar-green-accent-rgb), 0.92);
+  animation: gallery-loading-spin 0.9s linear infinite;
+}
+
+.gallery-loading-title {
+  font-size: 1.08em;
+  font-weight: 700;
+}
+
+.gallery-loading-folder {
+  font-size: 0.95em;
+  font-weight: 600;
+}
+
+.gallery-loading-text {
+  opacity: 0.72;
+  line-height: 1.45;
+}
+
+@keyframes gallery-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .gallery-empty {
   text-align: center;
   padding: 48px 16px;
