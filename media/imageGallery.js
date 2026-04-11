@@ -137,6 +137,23 @@
   }
 
   /**
+   * Returns the compact label displayed on the file type filter dropdown.
+   * @param {string[]} availableTypes
+   * @returns {string}
+   */
+  function getTypeFilterSummaryLabel(availableTypes) {
+    if (!Array.isArray(availableTypes) || availableTypes.length === 0 || !hasActiveTypeFilters()) {
+      return 'All types';
+    }
+
+    if (currentFilterTypes.length === 1) {
+      return currentFilterTypes[0].toUpperCase();
+    }
+
+    return `${currentFilterTypes.length} types`;
+  }
+
+  /**
    * Returns the current gallery items with stable original indexes.
    * @returns {Array<{ img: any, index: number }>}
    */
@@ -662,13 +679,17 @@
     persistGalleryState();
 
     const isShowingAllTypes = !hasActiveTypeFilters();
-    const typeFiltersMarkup = [
-      `<button type="button" class="gallery-type-filter${isShowingAllTypes ? ' is-active' : ''}" data-type="all" aria-pressed="${isShowingAllTypes ? 'true' : 'false'}">All</button>`,
-      ...availableTypes.map((type) => {
+    const filterSummaryLabel = getTypeFilterSummaryLabel(availableTypes);
+    const typeFiltersMarkup = availableTypes.length > 0
+      ? availableTypes.map((type) => {
         const isActive = currentFilterTypes.includes(type);
-        return `<button type="button" class="gallery-type-filter${isActive ? ' is-active' : ''}" data-type="${escapeHtml(type)}" aria-pressed="${isActive ? 'true' : 'false'}">${escapeHtml(type.toUpperCase())}</button>`;
-      })
-    ].join('');
+        return `
+          <label class="gallery-type-filter-option">
+            <input type="checkbox" data-type="${escapeHtml(type)}" ${isActive ? 'checked' : ''} />
+            <span>${escapeHtml(type.toUpperCase())}</span>
+          </label>`;
+      }).join('')
+      : '<div class="gallery-type-filter-empty">No file types available</div>';
 
     const menu = document.createElement('div');
     menu.className = 'gallery-menu';
@@ -692,10 +713,17 @@
           </select>
         </label>
         <div class="gallery-menu-field gallery-menu-field-filter">
-          <span class="gallery-menu-label">Filters</span>
-          <div id="filter-type-group" class="gallery-type-filters" role="group" aria-label="Filter by type">
-            ${typeFiltersMarkup}
-          </div>
+          <span class="gallery-menu-label">Types</span>
+          <details class="gallery-type-filter-dropdown">
+            <summary id="filter-type-summary" class="gallery-type-filter-summary" aria-label="Filter by file type">${escapeHtml(filterSummaryLabel)}</summary>
+            <div id="filter-type-group" class="gallery-type-filter-panel" role="group" aria-label="Filter by type">
+              <label class="gallery-type-filter-option gallery-type-filter-option-all">
+                <input id="filter-type-all" type="checkbox" ${isShowingAllTypes ? 'checked' : ''} />
+                <span>All types</span>
+              </label>
+              ${typeFiltersMarkup}
+            </div>
+          </details>
         </div>
       </div>
     `;
@@ -703,16 +731,29 @@
 
     const sortSelect = menu.querySelector('#sort-select');
     const sortOrderSelect = menu.querySelector('#sort-order-select');
-    const typeFilterButtons = Array.from(menu.querySelectorAll('.gallery-type-filter'));
+    const typeFilterSummary = menu.querySelector('#filter-type-summary');
+    const typeFilterAllInput = menu.querySelector('#filter-type-all');
+    const typeFilterInputs = Array.from(menu.querySelectorAll('.gallery-type-filter-option input[type="checkbox"][data-type]'));
     if (!(sortSelect instanceof HTMLSelectElement)
       || !(sortOrderSelect instanceof HTMLSelectElement)) {
       return;
     }
 
+    const updateTypeFilterSummary = () => {
+      if (!(typeFilterSummary instanceof HTMLElement)) {
+        return;
+      }
+
+      const nextLabel = getTypeFilterSummaryLabel(availableTypes);
+      typeFilterSummary.textContent = nextLabel;
+      typeFilterSummary.title = nextLabel;
+    };
+
     sortSelect.value = currentSort;
     sortOrderSelect.value = currentSortOrder;
+    updateTypeFilterSummary();
 
-    [sortSelect, sortOrderSelect, ...typeFilterButtons].forEach((controlElement) => {
+    [sortSelect, sortOrderSelect, typeFilterSummary, typeFilterAllInput, ...typeFilterInputs].forEach((controlElement) => {
       if (!(controlElement instanceof HTMLElement)) return;
       controlElement.addEventListener('pointerdown', () => {
         showToolbarClickHalo(controlElement);
@@ -736,22 +777,41 @@
       renderGallery();
     }, { passive: true });
 
-    typeFilterButtons.forEach((button) => {
-      if (!(button instanceof HTMLButtonElement)) return;
-      button.addEventListener('click', () => {
-        showToolbarClickHalo(button);
-        const selectedType = String(button.dataset.type ?? '').trim().toLowerCase();
+    if (typeFilterAllInput instanceof HTMLInputElement) {
+      typeFilterAllInput.addEventListener('change', (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLInputElement)) return;
 
-        if (!selectedType || selectedType === 'all') {
-          currentFilterTypes = [];
-        } else if (currentFilterTypes.includes(selectedType)) {
-          currentFilterTypes = currentFilterTypes.filter((type) => type !== selectedType);
-        } else {
-          currentFilterTypes = normalizeTypeFilters([...currentFilterTypes, selectedType]);
+        if (!target.checked && !hasActiveTypeFilters()) {
+          target.checked = true;
+          return;
         }
 
+        if (target.checked) {
+          currentFilterTypes = [];
+          updateTypeFilterSummary();
+          persistGalleryState();
+          renderGallery();
+        }
+      });
+    }
+
+    typeFilterInputs.forEach((input) => {
+      if (!(input instanceof HTMLInputElement)) return;
+      input.addEventListener('change', () => {
+        currentFilterTypes = normalizeTypeFilters(
+          typeFilterInputs
+            .filter((candidate) => candidate instanceof HTMLInputElement && candidate.checked)
+            .map((candidate) => String(candidate.dataset.type ?? ''))
+        );
+
+        if (typeFilterAllInput instanceof HTMLInputElement) {
+          typeFilterAllInput.checked = currentFilterTypes.length === 0;
+        }
+
+        updateTypeFilterSummary();
         persistGalleryState();
-        refreshGalleryView();
+        renderGallery();
       });
     });
   }
