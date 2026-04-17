@@ -11,6 +11,8 @@
   align-items: center;
   justify-content: center;
     min-height: 20px;
+  white-space: nowrap;
+  word-break: normal;
 }
 .badge-ext-png {
   background: linear-gradient(90deg, #3566a8 0%, #23406a 100%) !important;
