@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.10.3] - 2026-04-17
+### Added
+- Added double-click zoom toggle in the image details preview: double-click now switches between `Fit` and `100%`.
+
 ## [1.10.2] - 2026-04-11
 ### Changed
 - Improved gallery opening feedback with an immediate loading screen and visible progress so opening a folder feels responsive right away.

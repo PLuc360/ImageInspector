@@ -2018,6 +2018,63 @@ function setFitMode() {
   updateView();
 }
 
+/**
+ * Toggles the current image view between fit mode and 100% zoom.
+ */
+function toggleFitAndActualSize() {
+  if (fitMode) {
+    resetZoom();
+    return;
+  }
+
+  setFitMode();
+}
+
+/**
+ * Checks whether a client point is inside an element rendered rectangle.
+ * @param {Element | null | undefined} element
+ * @param {number} clientX
+ * @param {number} clientY
+ * @returns {boolean}
+ */
+function isClientPointInsideElementRect(element, clientX, clientY) {
+  if (!element) {
+    return false;
+  }
+
+  const rect = element.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) {
+    return false;
+  }
+
+  return clientX >= rect.left
+    && clientX <= rect.right
+    && clientY >= rect.top
+    && clientY <= rect.bottom;
+}
+
+/**
+ * Returns true when the double click occurred over one of the rendered images.
+ * @param {MouseEvent} event
+ * @returns {boolean}
+ */
+function isDoubleClickOnPreviewImage(event) {
+  if (!image) {
+    return false;
+  }
+
+  const isOnMainImage = isClientPointInsideElementRect(image, event.clientX, event.clientY);
+  if (isOnMainImage) {
+    return true;
+  }
+
+  const isOnCompareImage = compareImage
+    && !compareImage.classList.contains('is-hidden')
+    && isClientPointInsideElementRect(compareImage, event.clientX, event.clientY);
+
+  return Boolean(isOnCompareImage);
+}
+
 function applyInitialViewModeForCurrentImage(token, attempt = 0) {
   if (token !== initialViewModeDecisionToken || !image || !preview) {
     return;
@@ -2644,6 +2701,15 @@ previewBody?.addEventListener('pointercancel', (event) => {
   }
 
   endPreviewDrag(event.pointerId);
+});
+
+previewBody?.addEventListener('dblclick', (event) => {
+  if (!isDoubleClickOnPreviewImage(event)) {
+    return;
+  }
+
+  event.preventDefault();
+  toggleFitAndActualSize();
 });
 
 window.addEventListener('keydown', (event) => {
