@@ -1,5 +1,6 @@
 export {
   buildCustomEditorWebview,
+  buildDuplicateResultsWebview,
   buildErrorWebview,
   buildFolderGalleryLoadingWebview,
   buildFolderGalleryWebview,

@@ -334,17 +334,26 @@ const DEFAULT_THEME_ACCENT_HEX = '#00C86E';
 
 type CompareViewMode = 'split' | 'side-by-side';
 
+interface DuplicateGroupMessage {
+  thumbnailSrc: string;
+  fileNames: string[];
+  filePaths: string[];
+  fileCount: number;
+}
+
 function getWebviewImageSrc(webview: vscode.Webview, filePath: string): string {
   return webview.asWebviewUri(vscode.Uri.file(filePath)).toString();
 }
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { createHash } from 'node:crypto';
 
 // Buffer is global in Node.js, but can be imported explicitly if needed
 import { Buffer } from 'buffer';
 import * as vscode from 'vscode';
 import {
   buildCustomEditorWebview,
+  buildDuplicateResultsWebview,
   buildErrorWebview,
   buildFolderGalleryLoadingWebview,
   buildFolderGalleryWebview,
@@ -484,8 +493,19 @@ class ImageFolderGalleryPanel {
   private readonly extensionUri: vscode.Uri;
   private readonly imageFiles: Array<{ src: string; thumbUrl?: string; filePath: string; name: string; type: string; size: number; width: number; height: number }>;
   private readonly panelDisposables: vscode.Disposable[] = [];
+  private duplicateResultsPanel: vscode.WebviewPanel | undefined;
   private isDisposed = false;
   private refreshGeneration = 0;
+  private duplicateScanGeneration = 0;
+  private duplicateScanRunning = false;
+  private duplicateScanProgress: { active: boolean; completed: number; total: number; label: string } = {
+    active: false,
+    completed: 0,
+    total: 0,
+    label: 'Scanning files...'
+  };
+  private duplicateScanStatus = 'Idle';
+  private duplicateGroups: DuplicateGroupMessage[] = [];
 
   /**
    * Opens or reveals the gallery panel for the given folder.
@@ -503,6 +523,7 @@ class ImageFolderGalleryPanel {
     const existing = ImageFolderGalleryPanel.activePanels.get(folderPath);
     if (existing) {
       existing.panel.reveal();
+      void existing.refreshFromSettings(getImageInspectorSettings());
       return;
     }
 
@@ -517,6 +538,18 @@ class ImageFolderGalleryPanel {
         instance.panel.webview.html = buildErrorWebview(getImageLoadErrorMessage(folderPath, error));
       }
       ImageFolderGalleryPanel.activePanels.delete(folderPath);
+    }
+  }
+
+  /**
+   * Refreshes runtime settings for all opened gallery panels.
+   * @param _event Configuration change event from VS Code.
+   */
+  static refreshActivePanelsFromConfiguration(_event: vscode.ConfigurationChangeEvent): void {
+    const settings = getImageInspectorSettings();
+
+    for (const panel of ImageFolderGalleryPanel.activePanels.values()) {
+      void panel.refreshFromSettings(settings);
     }
   }
 
@@ -642,6 +675,381 @@ class ImageFolderGalleryPanel {
   }
 
   /**
+   * Sends runtime settings updates to the gallery webview.
+   * @param settings Current extension settings.
+   */
+  private async refreshFromSettings(settings: ImageInspectorSettings): Promise<void> {
+    if (this.isDisposed) {
+      return;
+    }
+
+    await this.panel.webview.postMessage({
+      type: 'update-settings',
+      settings: {
+        themeAccentRgb: settings.themeAccentRgb
+      }
+    });
+
+    if (this.duplicateResultsPanel) {
+      await this.duplicateResultsPanel.webview.postMessage({
+        type: 'update-settings',
+        settings: {
+          themeAccentRgb: settings.themeAccentRgb
+        }
+      });
+    }
+  }
+
+  /**
+   * Computes a deterministic SHA-1 hash for one file path.
+   *
+   * @param filePath Absolute path of the file to hash.
+   * @returns Hexadecimal SHA-1 digest.
+   */
+  private async computeFileHash(filePath: string): Promise<string> {
+    const fileBuffer = await fs.readFile(filePath);
+    return createHash('sha1').update(fileBuffer).digest('hex');
+  }
+
+  /**
+   * Posts a duplicate-related message to gallery and duplicate-results webviews.
+   *
+   * @param message Message payload to send.
+   */
+  private async postDuplicateMessage(message: Record<string, unknown>): Promise<void> {
+    if (this.isDisposed) {
+      return;
+    }
+
+    await this.panel.webview.postMessage(message);
+    if (this.duplicateResultsPanel) {
+      await this.duplicateResultsPanel.webview.postMessage(message);
+    }
+  }
+
+  /**
+   * Sends the current duplicate scan state snapshot to the duplicate-results panel.
+   */
+  private async postDuplicatePanelState(): Promise<void> {
+    if (!this.duplicateResultsPanel || this.isDisposed) {
+      return;
+    }
+
+    await this.duplicateResultsPanel.webview.postMessage({
+      type: 'duplicate-panel-state',
+      state: {
+        isRunning: this.duplicateScanRunning,
+        status: this.duplicateScanStatus,
+        progress: this.duplicateScanProgress,
+        groups: this.duplicateGroups
+      }
+    });
+  }
+
+  /**
+   * Opens or reveals the external duplicate-results panel.
+   */
+  private openDuplicateResultsPanel(): void {
+    if (this.duplicateResultsPanel) {
+      this.duplicateResultsPanel.reveal(vscode.ViewColumn.Beside, true);
+      void this.refreshFromSettings(getImageInspectorSettings());
+      void this.postDuplicatePanelState();
+      return;
+    }
+
+    const folderName = path.basename(this.folderUri.fsPath);
+    this.duplicateResultsPanel = vscode.window.createWebviewPanel(
+      'imageInspector.duplicateResults',
+      `Duplicates: ${folderName}`,
+      vscode.ViewColumn.Beside,
+      {
+        enableScripts: true,
+        retainContextWhenHidden: true,
+        localResourceRoots: [
+          vscode.Uri.joinPath(this.extensionUri, 'media'),
+          vscode.Uri.file(this.folderUri.fsPath)
+        ]
+      }
+    );
+
+    const settings = getImageInspectorSettings();
+
+    this.duplicateResultsPanel.webview.html = buildDuplicateResultsWebview(
+      this.duplicateResultsPanel.webview,
+      this.folderUri.fsPath,
+      this.extensionUri,
+      {
+        themeAccentRgb: settings.themeAccentRgb
+      }
+    );
+
+    this.panelDisposables.push(this.duplicateResultsPanel.webview.onDidReceiveMessage((rawMessage: unknown) => {
+      if (!rawMessage || typeof rawMessage !== 'object' || !('type' in rawMessage)) {
+        return;
+      }
+
+      const message = rawMessage as { type: string; filePaths?: string[]; direction?: string };
+      if (message.type === 'duplicate-panel-ready') {
+        void this.postDuplicatePanelState();
+        return;
+      }
+
+      if (message.type === 'start-duplicate-search') {
+        void this.startDuplicateSearch();
+        return;
+      }
+
+      if (message.type === 'select-duplicate-group' && Array.isArray(message.filePaths)) {
+        void this.panel.webview.postMessage({
+          type: 'select-duplicate-group',
+          filePaths: message.filePaths
+        });
+        return;
+      }
+
+      if (message.type === 'navigate-duplicate-group' && Array.isArray(message.filePaths)) {
+        void this.panel.webview.postMessage({
+          type: 'navigate-duplicate-group',
+          filePaths: message.filePaths,
+          direction: message.direction === 'prev' ? 'prev' : 'next'
+        });
+      }
+    }));
+
+    this.panelDisposables.push(this.duplicateResultsPanel.onDidDispose(() => {
+      this.duplicateResultsPanel = undefined;
+    }));
+  }
+
+  /**
+   * Runs duplicate detection and streams progress/results to the webview.
+   *
+   * The scan first groups files by byte size, then hashes only files from size-colliding groups.
+   */
+  private async startDuplicateSearch(): Promise<void> {
+    const scanGeneration = this.duplicateScanGeneration + 1;
+    this.duplicateScanGeneration = scanGeneration;
+
+    const snapshot = this.imageFiles.map((image) => ({
+      filePath: image.filePath,
+      name: image.name,
+      thumbUrl: image.thumbUrl || image.src,
+      size: image.size
+    }));
+
+    if (this.isDisposed) {
+      return;
+    }
+
+    const postScanMessage = async (message: Record<string, unknown>): Promise<void> => {
+      if (this.isDisposed || this.duplicateScanGeneration !== scanGeneration) {
+        return;
+      }
+
+      await this.postDuplicateMessage(message);
+    };
+
+    try {
+      this.duplicateGroups = [];
+      this.duplicateScanRunning = true;
+      this.duplicateScanStatus = 'Scanning...';
+      this.duplicateScanProgress = {
+        active: true,
+        completed: 0,
+        total: snapshot.length,
+        label: 'Preparing duplicate scan...'
+      };
+      await postScanMessage({
+        type: 'duplicate-scan-started',
+        completed: 0,
+        total: snapshot.length,
+        label: 'Preparing duplicate scan...'
+      });
+
+      if (snapshot.length < 2) {
+        this.duplicateScanRunning = false;
+        this.duplicateScanStatus = 'Not enough images to compare.';
+        this.duplicateScanProgress = {
+          active: false,
+          completed: 0,
+          total: 0,
+          label: 'Preparing duplicate scan...'
+        };
+        await postScanMessage({
+          type: 'duplicate-scan-complete',
+          total: 0,
+          status: 'Not enough images to compare.'
+        });
+        return;
+      }
+
+      const imagesWithSize = await Promise.all(snapshot.map(async (image) => {
+        if (typeof image.size === 'number' && image.size > 0) {
+          return image;
+        }
+
+        try {
+          const fileStats = await fs.stat(image.filePath);
+          return {
+            ...image,
+            size: typeof fileStats.size === 'bigint' ? Number(fileStats.size) : fileStats.size
+          };
+        } catch {
+          return {
+            ...image,
+            size: -1
+          };
+        }
+      }));
+
+      const groupsBySize = new Map<number, Array<{ filePath: string; name: string; thumbUrl: string; size: number }>>();
+      for (const image of imagesWithSize) {
+        if (!Number.isFinite(image.size) || image.size <= 0) {
+          continue;
+        }
+
+        const group = groupsBySize.get(image.size) ?? [];
+        group.push(image);
+        groupsBySize.set(image.size, group);
+      }
+
+      const hashCandidates = Array.from(groupsBySize.values())
+        .filter((group) => group.length > 1)
+        .flat();
+
+      const totalToHash = hashCandidates.length;
+      if (totalToHash === 0) {
+        this.duplicateScanRunning = false;
+        this.duplicateScanStatus = 'No duplicates found.';
+        this.duplicateScanProgress = {
+          active: false,
+          completed: 0,
+          total: 0,
+          label: 'Hashing candidate files...'
+        };
+        await postScanMessage({
+          type: 'duplicate-scan-complete',
+          total: 0,
+          status: 'No duplicates found.'
+        });
+        return;
+      }
+
+      let completed = 0;
+      await postScanMessage({
+        type: 'duplicate-scan-progress',
+        completed,
+        total: totalToHash,
+        label: 'Hashing candidate files...'
+      });
+      this.duplicateScanProgress = {
+        active: true,
+        completed,
+        total: totalToHash,
+        label: 'Hashing candidate files...'
+      };
+
+      const groupsByHash = new Map<string, Array<{ filePath: string; name: string; thumbUrl: string }>>();
+      await processWithConcurrencyLimit(hashCandidates, 4, async (candidate) => {
+        if (this.isDisposed || this.duplicateScanGeneration !== scanGeneration) {
+          return;
+        }
+
+        try {
+          const hash = await this.computeFileHash(candidate.filePath);
+          const hashGroup = groupsByHash.get(hash) ?? [];
+          hashGroup.push({
+            filePath: candidate.filePath,
+            name: candidate.name,
+            thumbUrl: candidate.thumbUrl
+          });
+          groupsByHash.set(hash, hashGroup);
+        } catch {
+          // Ignore unreadable files and continue the scan.
+        } finally {
+          completed += 1;
+          if (completed % 4 === 0 || completed >= totalToHash) {
+            this.duplicateScanProgress = {
+              active: true,
+              completed,
+              total: totalToHash,
+              label: 'Hashing candidate files...'
+            };
+            await postScanMessage({
+              type: 'duplicate-scan-progress',
+              completed,
+              total: totalToHash,
+              label: 'Hashing candidate files...'
+            });
+          }
+        }
+      });
+
+      if (this.isDisposed || this.duplicateScanGeneration !== scanGeneration) {
+        return;
+      }
+
+      let duplicateGroupCount = 0;
+      let duplicateFileCount = 0;
+      const duplicateGroups = Array.from(groupsByHash.values())
+        .filter((group) => group.length > 1)
+        .sort((left, right) => left[0].name.localeCompare(right[0].name, undefined, { sensitivity: 'base', numeric: true }));
+
+      for (const group of duplicateGroups) {
+        duplicateGroupCount += 1;
+        duplicateFileCount += group.length;
+        const duplicateGroup: DuplicateGroupMessage = {
+          thumbnailSrc: group[0].thumbUrl || '',
+          fileNames: group.map((item) => item.name),
+          filePaths: group.map((item) => item.filePath),
+          fileCount: group.length
+        };
+        this.duplicateGroups.push(duplicateGroup);
+        await postScanMessage({
+          type: 'duplicate-group-found',
+          group: duplicateGroup
+        });
+      }
+
+      const completionStatus = duplicateGroupCount > 0
+        ? `${String(duplicateGroupCount)} groups found (${String(duplicateFileCount)} files).`
+        : 'No duplicates found.';
+      this.duplicateScanRunning = false;
+      this.duplicateScanStatus = completionStatus;
+      this.duplicateScanProgress = {
+        active: false,
+        completed: totalToHash,
+        total: totalToHash,
+        label: 'Hashing candidate files...'
+      };
+
+      await postScanMessage({
+        type: 'duplicate-scan-complete',
+        total: totalToHash,
+        status: completionStatus
+      });
+    } catch (error) {
+      if (this.isDisposed || this.duplicateScanGeneration !== scanGeneration) {
+        return;
+      }
+
+      const message = error instanceof Error ? error.message : 'Unable to scan for duplicates.';
+      this.duplicateScanRunning = false;
+      this.duplicateScanStatus = 'Scan failed';
+      this.duplicateScanProgress = {
+        active: false,
+        completed: 0,
+        total: 0,
+        label: 'Hashing candidate files...'
+      };
+      await this.postDuplicateMessage({
+        type: 'duplicate-scan-error',
+        message
+      });
+    }
+  }
+
+  /**
    * Creates and wires up the gallery WebviewPanel.
    *
    * @param folderUri URI of the folder being displayed.
@@ -700,6 +1108,16 @@ class ImageFolderGalleryPanel {
             type: 'gallery-data',
             images: this.imageFiles
           });
+          return;
+        }
+        // Handler for duplicate panel opening from the gallery toolbar
+        if (message.type === 'open-duplicate-panel') {
+          this.openDuplicateResultsPanel();
+          return;
+        }
+        // Handler for duplicate search trigger from gallery or duplicate panel
+        if (message.type === 'start-duplicate-search') {
+          void this.startDuplicateSearch();
           return;
         }
         // Handler for image removal
@@ -807,6 +1225,8 @@ class ImageFolderGalleryPanel {
     const disposeDisposable = this.panel.onDidDispose(() => {
       this.isDisposed = true;
       this.refreshGeneration += 1;
+      this.duplicateScanGeneration += 1;
+      this.duplicateResultsPanel?.dispose();
       ImageFolderGalleryPanel.activePanels.delete(folderUri.fsPath);
       while (this.panelDisposables.length > 0) {
         const disposable = this.panelDisposables.pop();
@@ -883,6 +1303,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }
 
     void provider.refreshActivePanelFromConfiguration(event);
+    ImageFolderGalleryPanel.refreshActivePanelsFromConfiguration(event);
   });
 
   const openFolderGalleryDisposable = vscode.commands.registerCommand(

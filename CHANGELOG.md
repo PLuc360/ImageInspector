@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.11.0] - 2026-04-24
+### Added
+- Add a new image duplicate detection feature in the gallery: a new `Find duplicates` button in the gallery toolbar triggers a scan of all images in the current folder to identify visually similar images based on perceptual hashing. Detected duplicates are highlighted with a badge and can be quickly compared using the existing comparison tools.
+### Fixed
+- Gallery visual effects now reliably use the user-defined `imageInspector.themeAccentColor` instead of staying on the default green accent.
+
 ## [1.10.3] - 2026-04-17
 ### Added
 - Added double-click zoom toggle in the image details preview: double-click now switches between `Fit` and `100%`.

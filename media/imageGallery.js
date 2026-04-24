@@ -35,6 +35,36 @@
   const loadedImageSources = new Set();
   let activeContextMenu = null;
   let activeContextMenuCleanup = null;
+  let activeDuplicateGroupKey = '';
+  let activeDuplicateFocusIndex = 0;
+
+  /**
+   * Applies the accent color used by gallery visual effects.
+   * @param {string} accentRgb
+   */
+  function applyThemeAccentRgb(accentRgb) {
+    if (!(document.body instanceof HTMLElement) || typeof accentRgb !== 'string') {
+      return;
+    }
+
+    const normalizedAccent = accentRgb.trim();
+    if (!normalizedAccent) {
+      return;
+    }
+
+    document.body.dataset.toolbarGreenAccentRgb = normalizedAccent;
+    document.body.style.setProperty('--toolbar-green-accent-rgb', normalizedAccent);
+  }
+
+  /**
+   * Reads the initial accent color from DOM attributes.
+   */
+  function initializeThemeFromDom() {
+    const accentRgb = document.body?.dataset?.toolbarGreenAccentRgb;
+    if (typeof accentRgb === 'string' && accentRgb.trim().length > 0) {
+      applyThemeAccentRgb(accentRgb);
+    }
+  }
 
   /**
    * Escapes a string so it can be safely injected into HTML.
@@ -331,6 +361,57 @@
     progressLabel.textContent = `${labelPrefix} ${percent}%`;
     progressTrack.setAttribute('aria-valuenow', String(percent));
     progressBar.style.width = `${String(percent)}%`;
+  }
+
+  /**
+   * Selects all gallery tiles matching a duplicate-group file path list.
+   * @param {string[]} filePaths
+   * @param {'prev' | 'next' | 'cycle'} [direction='cycle']
+   */
+  function selectDuplicateGroupByFilePaths(filePaths, direction = 'cycle') {
+    if (!Array.isArray(filePaths) || filePaths.length < 2) {
+      return;
+    }
+
+    const normalizedPaths = Array.from(new Set(
+      filePaths
+        .map((filePath) => String(filePath ?? '').trim())
+        .filter(Boolean)
+    ));
+
+    if (normalizedPaths.length < 2) {
+      return;
+    }
+
+    const nextSelectedIndexes = normalizedPaths
+      .map((filePath) => galleryImages.findIndex((image) => image?.filePath === String(filePath)))
+      .filter((index) => Number.isInteger(index) && index >= 0);
+
+    if (nextSelectedIndexes.length < 2) {
+      return;
+    }
+
+    const duplicateGroupKey = normalizedPaths.join('||');
+    const isSameGroup = duplicateGroupKey === activeDuplicateGroupKey;
+    if (!isSameGroup) {
+      activeDuplicateGroupKey = duplicateGroupKey;
+      activeDuplicateFocusIndex = direction === 'prev' ? nextSelectedIndexes.length - 1 : 0;
+    } else if (direction === 'prev') {
+      activeDuplicateFocusIndex = (activeDuplicateFocusIndex - 1 + nextSelectedIndexes.length) % nextSelectedIndexes.length;
+    } else {
+      activeDuplicateFocusIndex = (activeDuplicateFocusIndex + 1) % nextSelectedIndexes.length;
+    }
+
+    selectedIndexes = Array.from(new Set(nextSelectedIndexes));
+    syncSelectionClasses();
+    localStorage.setItem(window.selectionKey, JSON.stringify(selectedIndexes));
+
+    const focusedIndex = nextSelectedIndexes[Math.min(Math.max(activeDuplicateFocusIndex, 0), nextSelectedIndexes.length - 1)];
+    const focusedItem = document.querySelector(`.gallery-item[data-index="${focusedIndex}"]`);
+    if (focusedItem instanceof HTMLElement) {
+      showToolbarClickHalo(focusedItem);
+      focusedItem.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+    }
   }
 
   /**
@@ -990,7 +1071,18 @@
   }
 
   window.addEventListener('DOMContentLoaded', () => {
+    initializeThemeFromDom();
     refreshGalleryView();
+
+    const duplicateToggleButton = document.getElementById('duplicate-search-toggle-button');
+    if (duplicateToggleButton instanceof HTMLButtonElement) {
+      duplicateToggleButton.addEventListener('click', () => {
+        showToolbarClickHalo(duplicateToggleButton);
+        if (window.vscodeApi && typeof window.vscodeApi.postMessage === 'function') {
+          window.vscodeApi.postMessage({ type: 'open-duplicate-panel' });
+        }
+      });
+    }
 
     const compareSplitButton = document.getElementById('compare-selected-split-button');
     if (compareSplitButton instanceof HTMLButtonElement) {
@@ -1063,9 +1155,17 @@
   window.addEventListener('message', (event) => {
     const msg = event.data;
     if (!msg || typeof msg !== 'object') return;
+    if (msg.type === 'update-settings' && msg.settings && typeof msg.settings === 'object') {
+      if (typeof msg.settings.themeAccentRgb === 'string') {
+        applyThemeAccentRgb(msg.settings.themeAccentRgb);
+      }
+      return;
+    }
     if (msg.type === 'gallery-data') {
       if (Array.isArray(msg.images)) {
         galleryImages = msg.images;
+        activeDuplicateGroupKey = '';
+        activeDuplicateFocusIndex = 0;
         const totalImages = galleryImages.length;
         const pendingImages = galleryImages.reduce((count, image) => (
           String(image?.type ?? '').trim().toLowerCase() === 'loading...' ? count + 1 : count
@@ -1104,11 +1204,19 @@
     if (msg.type === 'gallery-load-progress') {
       updateGalleryLoadingProgress(msg);
     }
+    if (msg.type === 'select-duplicate-group' && Array.isArray(msg.filePaths)) {
+      selectDuplicateGroupByFilePaths(msg.filePaths, 'cycle');
+    }
+    if (msg.type === 'navigate-duplicate-group' && Array.isArray(msg.filePaths)) {
+      const direction = msg.direction === 'prev' ? 'prev' : 'next';
+      selectDuplicateGroupByFilePaths(msg.filePaths, direction);
+    }
   });
 
   document.addEventListener('click', (event) => {
     const target = event.target;
     if (!target || !(target instanceof Element)) return;
+
     const item = target.closest('.gallery-item');
     if (item instanceof HTMLElement) {
       selectItem(item, event.ctrlKey);

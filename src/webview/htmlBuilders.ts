@@ -331,7 +331,10 @@ export function buildFolderGalleryLoadingWebview(
   <title>Gallery – ${escapeHtml(folderName)}</title>
   <link rel="stylesheet" href="${escapeHtml(styleUri.toString())}" />
 </head>
-<body data-toolbar-green-accent-rgb="${escapeHtml(themeAccentRgb)}">
+<body
+  data-toolbar-green-accent-rgb="${escapeHtml(themeAccentRgb)}"
+  style="--toolbar-green-accent-rgb: ${escapeHtml(themeAccentRgb)};"
+>
   <section class="gallery-loading" aria-live="polite" aria-busy="true">
     <div class="gallery-loading-card">
       <div class="gallery-loading-spinner" aria-hidden="true"></div>
@@ -399,6 +402,23 @@ export function buildFolderGalleryWebview(
       </div>
       <div class="gallery-toolbar-actions">
         <button
+          id="duplicate-search-toggle-button"
+          class="gallery-duplicate-button"
+          type="button"
+          aria-label="Open duplicate search panel"
+          title="Open duplicate search panel"
+          aria-pressed="false"
+        >
+          <span class="gallery-duplicate-button-icon" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle">
+              <rect x="3" y="5" width="9" height="9" rx="1.8" stroke="currentColor" stroke-width="1.3"/>
+              <rect x="8" y="2.5" width="9" height="9" rx="1.8" stroke="currentColor" stroke-width="1.3"/>
+              <path d="M11.2 13.2h5.3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+              <circle cx="9.8" cy="13.2" r="1.1" fill="currentColor"/>
+            </svg>
+          </span>
+        </button>
+        <button
           id="compare-selected-split-button"
           class="gallery-compare-button"
           type="button"
@@ -445,9 +465,10 @@ export function buildFolderGalleryWebview(
     </header>`;
 
   // The initial HTML leaves the grid empty; the webview script loads thumbnails progressively.
-  const contentBody = imageFiles.length > 0
-    ? `${headerMarkup}<div class="gallery-grid"></div>`
-    : `${headerMarkup}<div class="gallery-empty"><p>No images found in this folder.</p></div>`;
+  const galleryMainMarkup = imageFiles.length > 0
+    ? '<div class="gallery-grid"></div>'
+    : '<div class="gallery-empty"><p>No images found in this folder.</p></div>';
+  const contentBody = `${headerMarkup}${galleryMainMarkup}`;
 
   // Generate a secure nonce for inline scripts.
   const nonce = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
@@ -473,8 +494,87 @@ export function buildFolderGalleryWebview(
   data-badge-css-uri="${escapeHtml(badgeCssUri)}"
   data-gallery-id="${escapeHtml(folderPath)}"
   data-toolbar-green-accent-rgb="${escapeHtml(themeAccentRgb)}"
+  style="--toolbar-green-accent-rgb: ${escapeHtml(themeAccentRgb)};"
 >
   ${contentBody}
+  <script src="${escapeHtml(scriptUri.toString())}" nonce="${nonce}"></script>
+</body>
+</html>`;
+}
+
+/**
+ * Builds the external duplicate-results webview panel HTML.
+ *
+ * @param webview Target webview instance.
+ * @param folderPath Absolute path to the scanned folder.
+ * @param extensionUri Extension root URI.
+ * @returns Complete HTML payload for the duplicate-results panel.
+ */
+export function buildDuplicateResultsWebview(
+  webview: vscode.Webview,
+  folderPath: string,
+  extensionUri: vscode.Uri,
+  options?: {
+    themeAccentRgb?: string;
+  }
+): string {
+  const mediaRootUri = vscode.Uri.joinPath(extensionUri, 'media');
+  const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(mediaRootUri, 'duplicateResults.css'));
+  const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(mediaRootUri, 'duplicateResults.js'));
+  const folderName = path.basename(folderPath);
+  const themeAccentRgb = options?.themeAccentRgb ?? '0,200,110';
+  const nonce = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+  const contentSecurityPolicy = [
+    "default-src 'none'",
+    `img-src ${webview.cspSource} data:`,
+    `style-src ${webview.cspSource}`,
+    `script-src ${webview.cspSource} 'nonce-${nonce}'`
+  ].join('; ');
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="${contentSecurityPolicy}" />
+  <title>Duplicate Search – ${escapeHtml(folderName)}</title>
+  <link rel="stylesheet" href="${escapeHtml(styleUri.toString())}" />
+</head>
+<body
+  data-toolbar-green-accent-rgb="${escapeHtml(themeAccentRgb)}"
+  style="--toolbar-green-accent-rgb: ${escapeHtml(themeAccentRgb)};"
+>
+  <header class="duplicate-header" aria-label="Duplicate search toolbar">
+    <div class="duplicate-header-title-wrap">
+      <h1 class="duplicate-header-title">Duplicate Search</h1>
+      <p id="duplicate-search-status" class="duplicate-search-status">Idle</p>
+    </div>
+    <div class="duplicate-header-actions">
+      <button id="duplicate-nav-prev-button" class="duplicate-nav-button" type="button" aria-label="Focus previous duplicate image" title="Focus previous duplicate image" disabled>
+        <span aria-hidden="true">◀</span>
+      </button>
+      <span id="duplicate-nav-position" class="duplicate-nav-position" aria-live="polite">-- / --</span>
+      <button id="duplicate-nav-next-button" class="duplicate-nav-button" type="button" aria-label="Focus next duplicate image" title="Focus next duplicate image" disabled>
+        <span aria-hidden="true">▶</span>
+      </button>
+      <button id="duplicate-search-run-button" class="duplicate-run-button" type="button" aria-label="Search duplicates" title="Search duplicates">
+        <span class="duplicate-run-button-icon" aria-hidden="true">⟳</span>
+        <span class="duplicate-run-button-label">Scan</span>
+      </button>
+    </div>
+  </header>
+
+  <section id="duplicate-search-progress" class="duplicate-search-progress" hidden aria-live="polite">
+    <span id="duplicate-search-progress-label" class="duplicate-search-progress-label">Scanning files... 0%</span>
+    <div class="duplicate-search-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Duplicate search progress">
+      <div id="duplicate-search-progress-bar" class="duplicate-search-progress-bar" style="width:0%"></div>
+    </div>
+  </section>
+
+  <main id="duplicate-groups-list" class="duplicate-groups-list" role="list" aria-label="Duplicate groups">
+    <p class="duplicate-groups-empty">No duplicate scan started.</p>
+  </main>
+
   <script src="${escapeHtml(scriptUri.toString())}" nonce="${nonce}"></script>
 </body>
 </html>`;
