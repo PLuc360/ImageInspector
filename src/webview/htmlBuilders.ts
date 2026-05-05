@@ -232,6 +232,16 @@ export function buildCustomEditorWebview(
             </svg>
           </span>
         </button>
+        <button id="compare-diff-all" type="button" class="compare-diff-nav compare-diff-all" aria-label="Show all differences" title="Show all differences" aria-pressed="false">
+          <span class="icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle">
+              <rect x="3" y="3" width="5.8" height="5.8" rx="1.1" stroke="currentColor" stroke-width="1.2"/>
+              <rect x="11.2" y="3" width="5.8" height="5.8" rx="1.1" stroke="currentColor" stroke-width="1.2"/>
+              <rect x="3" y="11.2" width="5.8" height="5.8" rx="1.1" stroke="currentColor" stroke-width="1.2"/>
+              <rect x="11.2" y="11.2" width="5.8" height="5.8" rx="1.1" stroke="currentColor" stroke-width="1.2"/>
+            </svg>
+          </span>
+        </button>
         <button id="compare-diff-autocenter" type="button" class="compare-diff-nav compare-diff-autocenter" aria-label="Auto-center selected difference" title="Auto-center selected difference" aria-pressed="false">
           <span class="icon" aria-hidden="true">
             <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle">

@@ -462,6 +462,7 @@ body {
 .compare-diff-prev,
 .compare-diff-next,
 .compare-diff-target,
+.compare-diff-all,
 .compare-diff-autocenter {
   border: 1px solid var(--vscode-button-border, transparent);
   background: var(--vscode-button-secondaryBackground);
@@ -478,6 +479,7 @@ body {
 .compare-diff-prev:hover,
 .compare-diff-next:hover,
 .compare-diff-target:hover,
+.compare-diff-all:hover,
 .compare-diff-autocenter:hover {
   background: var(--vscode-button-secondaryHoverBackground);
 }
@@ -485,9 +487,20 @@ body {
 .compare-diff-prev:disabled,
 .compare-diff-next:disabled,
 .compare-diff-target:disabled,
+.compare-diff-all:disabled,
 .compare-diff-autocenter:disabled {
   opacity: 0.55;
   cursor: default;
+}
+
+.compare-diff-all.is-active {
+  background: var(--toolbar-green-accent-bg);
+  border-color: var(--toolbar-green-accent-border);
+  color: var(--vscode-foreground);
+}
+
+.compare-diff-all.is-active:hover {
+  background: var(--toolbar-green-accent-bg-hover);
 }
 
 .compare-diff-autocenter.is-active {

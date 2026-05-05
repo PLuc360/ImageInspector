@@ -58,6 +58,7 @@ const compareDiffPrevButton = document.getElementById('compare-diff-prev');
 const compareDiffNextButton = document.getElementById('compare-diff-next');
 const compareDiffIndexLabel = document.getElementById('compare-diff-index');
 const compareDiffTargetButton = document.getElementById('compare-diff-target');
+const compareDiffAllButton = document.getElementById('compare-diff-all');
 const compareDiffAutoCenterButton = document.getElementById('compare-diff-autocenter');
 const compareImageLabel = document.getElementById('compare-image-label');
 const compareImage = document.getElementById('compare-image');
@@ -144,6 +145,7 @@ let compareDiffOverlaySecondaryCtx = null;
 let compareDiffRegions = [];
 let compareDiffCurrentIndex = -1;
 let compareDiffOverlayTarget = 'left';
+let compareDiffShowAllEnabled = false;
 let compareDiffAutoCenterEnabled = false;
 let initialViewModeDecisionToken = 0;
 const COMPARE_ORIENTATION_VERTICAL_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle"><rect x="3" y="3" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.4"/><path d="M10 4v12" stroke="currentColor" stroke-width="1.4"/></svg>';
@@ -341,19 +343,26 @@ function updateCompareDiffNavigationUi() {
   const regionCount = compareDiffRegions.length;
   const hasRegions = regionCount > 0;
   const sideBySideActive = isSideBySideCompareActive();
+  const isShowingAllDifferences = compareDiffShowAllEnabled && hasRegions;
 
   if (compareDiffIndexLabel) {
-    compareDiffIndexLabel.textContent = hasRegions && compareDiffCurrentIndex >= 0
-      ? `${String(compareDiffCurrentIndex + 1)}/${String(regionCount)}`
-      : '0/0';
+    if (!hasRegions) {
+      compareDiffIndexLabel.textContent = '0/0';
+    } else if (isShowingAllDifferences) {
+      compareDiffIndexLabel.textContent = `All (${String(regionCount)})`;
+    } else {
+      compareDiffIndexLabel.textContent = compareDiffCurrentIndex >= 0
+        ? `${String(compareDiffCurrentIndex + 1)}/${String(regionCount)}`
+        : '0/0';
+    }
   }
 
   if (compareDiffPrevButton) {
-    compareDiffPrevButton.disabled = !sideBySideActive || !hasRegions || compareDiffCurrentIndex <= 0;
+    compareDiffPrevButton.disabled = !sideBySideActive || !hasRegions || isShowingAllDifferences || compareDiffCurrentIndex <= 0;
   }
 
   if (compareDiffNextButton) {
-    compareDiffNextButton.disabled = !sideBySideActive || !hasRegions || compareDiffCurrentIndex >= regionCount - 1;
+    compareDiffNextButton.disabled = !sideBySideActive || !hasRegions || isShowingAllDifferences || compareDiffCurrentIndex >= regionCount - 1;
   }
 
   if (compareDiffTargetButton) {
@@ -367,6 +376,14 @@ function updateCompareDiffNavigationUi() {
     if (iconElement) {
       iconElement.innerHTML = targetPresentation.iconSvg;
     }
+  }
+
+  if (compareDiffAllButton) {
+    compareDiffAllButton.disabled = !sideBySideActive || !hasRegions;
+    compareDiffAllButton?.classList.toggle('is-active', isShowingAllDifferences);
+    compareDiffAllButton.setAttribute('aria-pressed', isShowingAllDifferences ? 'true' : 'false');
+    compareDiffAllButton.setAttribute('title', isShowingAllDifferences ? 'Show selected difference only' : 'Show all differences');
+    compareDiffAllButton.setAttribute('aria-label', isShowingAllDifferences ? 'Show selected difference only' : 'Show all differences');
   }
 
   if (compareDiffAutoCenterButton) {
@@ -413,11 +430,14 @@ function centerPreviewOnActiveDifferenceIfEnabled() {
   });
 }
 
-function drawCompareDifferenceRegionOnOverlay(overlayElement, overlayContext, targetImage, region, regionIndex) {
+function drawCompareDifferenceRegionOnOverlay(overlayElement, overlayContext, targetImage, region, regionIndex, options = {}) {
   const targetRect = targetImage.getBoundingClientRect();
   const previewRect = previewContainer?.getBoundingClientRect();
   const renderedWidth = Math.round(targetRect.width);
   const renderedHeight = Math.round(targetRect.height);
+  const clearCanvas = options.clearCanvas ?? true;
+  const isActiveRegion = options.isActiveRegion ?? false;
+
   if (renderedWidth <= 0 || renderedHeight <= 0) {
     overlayContext.clearRect(0, 0, overlayElement.width, overlayElement.height);
     overlayElement?.classList.add('is-hidden');
@@ -430,15 +450,25 @@ function drawCompareDifferenceRegionOnOverlay(overlayElement, overlayContext, ta
     return;
   }
 
-  overlayElement.width = renderedWidth;
-  overlayElement.height = renderedHeight;
-  overlayElement.style.width = `${String(renderedWidth)}px`;
-  overlayElement.style.height = `${String(renderedHeight)}px`;
   overlayElement.style.left = `${String(Math.round(targetRect.left - previewRect.left))}px`;
   overlayElement.style.top = `${String(Math.round(targetRect.top - previewRect.top))}px`;
   overlayElement?.classList.remove('is-hidden');
 
-  overlayContext.clearRect(0, 0, renderedWidth, renderedHeight);
+  const shouldResetCanvasDimensions = clearCanvas
+    || overlayElement.width !== renderedWidth
+    || overlayElement.height !== renderedHeight;
+
+  if (shouldResetCanvasDimensions) {
+    overlayElement.width = renderedWidth;
+    overlayElement.height = renderedHeight;
+    overlayElement.style.width = `${String(renderedWidth)}px`;
+    overlayElement.style.height = `${String(renderedHeight)}px`;
+  }
+
+  if (clearCanvas || shouldResetCanvasDimensions) {
+    overlayContext.clearRect(0, 0, renderedWidth, renderedHeight);
+  }
+
   overlayContext.lineJoin = 'round';
   overlayContext.font = '600 11px var(--vscode-font-family)';
   overlayContext.textBaseline = 'top';
@@ -448,8 +478,8 @@ function drawCompareDifferenceRegionOnOverlay(overlayElement, overlayContext, ta
   const width = Math.max(2, Math.round((region.maxXRatio - region.minXRatio) * renderedWidth));
   const height = Math.max(2, Math.round((region.maxYRatio - region.minYRatio) * renderedHeight));
 
-  overlayContext.strokeStyle = 'rgba(255, 74, 87, 0.95)';
-  overlayContext.lineWidth = 2;
+  overlayContext.strokeStyle = isActiveRegion ? 'rgba(255, 74, 87, 0.98)' : 'rgba(255, 130, 142, 0.9)';
+  overlayContext.lineWidth = isActiveRegion ? 2 : 1.5;
   overlayContext.strokeRect(x, y, width, height);
 
   const label = `D${String(regionIndex + 1)}`;
@@ -458,7 +488,7 @@ function drawCompareDifferenceRegionOnOverlay(overlayElement, overlayContext, ta
   const labelX = x;
   const labelY = Math.max(0, y - labelHeight);
 
-  overlayContext.fillStyle = 'rgba(255, 74, 87, 0.95)';
+  overlayContext.fillStyle = isActiveRegion ? 'rgba(255, 74, 87, 0.95)' : 'rgba(255, 130, 142, 0.9)';
   overlayContext.fillRect(labelX, labelY, labelWidth, labelHeight);
   overlayContext.fillStyle = '#ffffff';
   overlayContext.fillText(label, labelX + 4, labelY + 2);
@@ -468,6 +498,7 @@ function clearCompareDifferenceOverlay(clearRegions = false) {
   if (clearRegions) {
     compareDiffRegions = [];
     compareDiffCurrentIndex = -1;
+    compareDiffShowAllEnabled = false;
   }
 
   const primaryOverlayContext = ensureCompareDiffOverlayContext();
@@ -491,25 +522,41 @@ function renderCompareDifferenceOverlay() {
     return;
   }
 
+  const hasRegions = compareDiffRegions.length > 0;
+  const showAllRegions = compareDiffShowAllEnabled && hasRegions;
   const activeRegion = compareDiffCurrentIndex >= 0
     ? compareDiffRegions[compareDiffCurrentIndex]
     : undefined;
 
-  if (!activeRegion) {
+  if (!showAllRegions && !activeRegion) {
     clearCompareDifferenceOverlay(false);
     return;
   }
 
+  const regionsToRender = showAllRegions ? compareDiffRegions : [activeRegion];
+
   const primaryOverlayContext = ensureCompareDiffOverlayContext();
   if (compareDiffOverlay && primaryOverlayContext) {
     if (compareDiffOverlayTarget === 'left' || compareDiffOverlayTarget === 'both') {
-      drawCompareDifferenceRegionOnOverlay(
-        compareDiffOverlay,
-        primaryOverlayContext,
-        image,
-        activeRegion,
-        compareDiffCurrentIndex
-      );
+      for (let regionIndex = 0; regionIndex < regionsToRender.length; regionIndex += 1) {
+        const region = regionsToRender[regionIndex];
+        if (!region) {
+          continue;
+        }
+
+        const absoluteRegionIndex = showAllRegions ? regionIndex : compareDiffCurrentIndex;
+        drawCompareDifferenceRegionOnOverlay(
+          compareDiffOverlay,
+          primaryOverlayContext,
+          image,
+          region,
+          absoluteRegionIndex,
+          {
+            clearCanvas: regionIndex === 0,
+            isActiveRegion: absoluteRegionIndex === compareDiffCurrentIndex
+          }
+        );
+      }
     } else {
       primaryOverlayContext.clearRect(0, 0, compareDiffOverlay.width, compareDiffOverlay.height);
       compareDiffOverlay?.classList.add('is-hidden');
@@ -519,13 +566,25 @@ function renderCompareDifferenceOverlay() {
   const secondaryOverlayContext = ensureCompareDiffOverlaySecondaryContext();
   if (compareDiffOverlaySecondary && secondaryOverlayContext) {
     if (compareDiffOverlayTarget === 'right' || compareDiffOverlayTarget === 'both') {
-      drawCompareDifferenceRegionOnOverlay(
-        compareDiffOverlaySecondary,
-        secondaryOverlayContext,
-        compareImage,
-        activeRegion,
-        compareDiffCurrentIndex
-      );
+      for (let regionIndex = 0; regionIndex < regionsToRender.length; regionIndex += 1) {
+        const region = regionsToRender[regionIndex];
+        if (!region) {
+          continue;
+        }
+
+        const absoluteRegionIndex = showAllRegions ? regionIndex : compareDiffCurrentIndex;
+        drawCompareDifferenceRegionOnOverlay(
+          compareDiffOverlaySecondary,
+          secondaryOverlayContext,
+          compareImage,
+          region,
+          absoluteRegionIndex,
+          {
+            clearCanvas: regionIndex === 0,
+            isActiveRegion: absoluteRegionIndex === compareDiffCurrentIndex
+          }
+        );
+      }
     } else {
       secondaryOverlayContext.clearRect(0, 0, compareDiffOverlaySecondary.width, compareDiffOverlaySecondary.height);
       compareDiffOverlaySecondary?.classList.add('is-hidden');
@@ -2370,6 +2429,19 @@ bindClickAction(compareDiffTargetButton, () => {
 
   renderCompareDifferenceOverlay();
   centerPreviewOnActiveDifferenceIfEnabled();
+});
+
+bindClickAction(compareDiffAllButton, () => {
+  if (!isSideBySideCompareActive() || compareDiffRegions.length === 0) {
+    return;
+  }
+
+  compareDiffShowAllEnabled = !compareDiffShowAllEnabled;
+  renderCompareDifferenceOverlay();
+
+  if (compareDiffAutoCenterEnabled) {
+    centerPreviewOnActiveDifferenceIfEnabled();
+  }
 });
 
 bindClickAction(compareDiffAutoCenterButton, () => {

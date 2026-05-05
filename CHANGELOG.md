@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.11.1] - 2026-05-05
+### Added
+- Added a new side-by-side comparison control to show all detected difference regions at once.
+
 ## [1.11.0] - 2026-04-24
 ### Added
 - Add a new image duplicate detection feature in the gallery: a new `Find duplicates` button in the gallery toolbar triggers a scan of all images in the current folder to identify visually similar images based on perceptual hashing. Detected duplicates are highlighted with a badge and can be quickly compared using the existing comparison tools.
