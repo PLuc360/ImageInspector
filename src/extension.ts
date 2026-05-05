@@ -1319,6 +1319,13 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   );
 
+  const pickThemeAccentColorDisposable = vscode.commands.registerCommand(
+    'imageInspector.pickThemeAccentColor',
+    () => {
+      openThemeAccentColorPicker(context);
+    }
+  );
+
   context.subscriptions.push(
     providerDisposable,
     showImageDetailsDisposable,
@@ -1328,7 +1335,8 @@ export function activate(context: vscode.ExtensionContext): void {
     zoomFitDisposable,
     selectComparisonImageDisposable,
     configurationChangeDisposable,
-    openFolderGalleryDisposable
+    openFolderGalleryDisposable,
+    pickThemeAccentColorDisposable
   );
 }
 
@@ -1638,6 +1646,155 @@ async function getImageDetails(
  */
 function buildImageDetailsCacheKey(fileVersionKey: string): string {
   return `${fileVersionKey}::details::meta`;
+}
+
+/**
+ * Opens a small webview panel containing an HTML color picker to let the user
+ * visually choose the theme accent color and save it to the extension settings.
+ * @param context Extension context used to create the webview panel.
+ */
+function openThemeAccentColorPicker(context: vscode.ExtensionContext): void {
+  const currentColor = vscode.workspace
+    .getConfiguration('imageInspector')
+    .get<string>('themeAccentColor', DEFAULT_THEME_ACCENT_HEX);
+
+  const panel = vscode.window.createWebviewPanel(
+    'imageInspector.accentColorPicker',
+    'Accent Color',
+    vscode.ViewColumn.Active,
+    { enableScripts: true, retainContextWhenHidden: false }
+  );
+
+  panel.webview.html = buildAccentColorPickerHtml(currentColor);
+
+  panel.webview.onDidReceiveMessage(
+    async (message: { command: string; color: string }) => {
+      if (message.command === 'applyColor') {
+        const hex = message.color?.trim();
+        if (/^#[0-9a-fA-F]{6}$/.test(hex)) {
+          await vscode.workspace
+            .getConfiguration('imageInspector')
+            .update('themeAccentColor', hex, vscode.ConfigurationTarget.Global);
+          panel.dispose();
+        }
+      }
+    },
+    undefined,
+    context.subscriptions
+  );
+}
+
+/**
+ * Builds the HTML content for the accent color picker webview.
+ * @param currentColor Current accent color in #RRGGBB format.
+ * @returns Full HTML string for the webview.
+ */
+function buildAccentColorPickerHtml(currentColor: string): string {
+  const safeColor = /^#[0-9a-fA-F]{6}$/.test(currentColor) ? currentColor : DEFAULT_THEME_ACCENT_HEX;
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+  <style>
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+      font-family: var(--vscode-font-family, sans-serif);
+      color: var(--vscode-foreground);
+      background: var(--vscode-editor-background);
+      gap: 20px;
+    }
+    h2 {
+      font-size: 14px;
+      font-weight: 600;
+      margin: 0;
+      opacity: 0.85;
+    }
+    .picker-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    input[type="color"] {
+      width: 64px;
+      height: 64px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      padding: 2px;
+      background: transparent;
+    }
+    input[type="text"] {
+      font-family: var(--vscode-editor-font-family, monospace);
+      font-size: 14px;
+      width: 90px;
+      padding: 6px 8px;
+      border: 1px solid var(--vscode-input-border, #555);
+      border-radius: 4px;
+      background: var(--vscode-input-background);
+      color: var(--vscode-input-foreground);
+      text-align: center;
+    }
+    button {
+      padding: 7px 20px;
+      border: none;
+      border-radius: 4px;
+      background: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
+      font-size: 13px;
+      cursor: pointer;
+    }
+    button:hover { background: var(--vscode-button-hoverBackground); }
+    .preview {
+      width: 180px;
+      height: 10px;
+      border-radius: 5px;
+      background: ${safeColor};
+    }
+  </style>
+</head>
+<body>
+  <h2>Theme Accent Color</h2>
+  <div class="preview" id="preview"></div>
+  <div class="picker-row">
+    <input type="color" id="colorPicker" value="${safeColor}">
+    <input type="text" id="hexInput" maxlength="7" value="${safeColor}" spellcheck="false">
+  </div>
+  <button id="applyBtn">Apply</button>
+  <script>
+    const vscode = acquireVsCodeApi();
+    const picker = document.getElementById('colorPicker');
+    const hexInput = document.getElementById('hexInput');
+    const preview = document.getElementById('preview');
+    const applyBtn = document.getElementById('applyBtn');
+
+    function syncFromPicker() {
+      hexInput.value = picker.value;
+      preview.style.background = picker.value;
+    }
+
+    function syncFromHex() {
+      const val = hexInput.value.trim();
+      if (/^#[0-9a-fA-F]{6}$/.test(val)) {
+        picker.value = val;
+        preview.style.background = val;
+      }
+    }
+
+    picker.addEventListener('input', syncFromPicker);
+    hexInput.addEventListener('input', syncFromHex);
+
+    applyBtn.addEventListener('click', () => {
+      vscode.postMessage({ command: 'applyColor', color: picker.value });
+    });
+  </script>
+</body>
+</html>`;
 }
 
 /**

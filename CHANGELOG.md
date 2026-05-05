@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [1.11.1] - 2026-05-05
 ### Added
 - Added a new side-by-side comparison control to show all detected difference regions at once.
+- Added a new `Image Inspector: Pick Accent Color` command that opens a dedicated color picker panel to visually choose the theme accent color, replacing the plain text field in settings.
 
 ## [1.11.0] - 2026-04-24
 ### Added
