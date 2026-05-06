@@ -385,6 +385,7 @@ async function getSharp(): Promise<SharpModule> {
 type FileVersionInfo = {
   key: string;
   sizeBytes: number;
+  mtimeMs: number;
 };
 
 function buildFileVersionKey(filePath: string, size: number, mtimeMs: number): string {
@@ -399,9 +400,13 @@ async function getFileVersionKey(filePath: string): Promise<string> {
 async function getFileVersionInfo(filePath: string): Promise<FileVersionInfo> {
   const stats = await fs.stat(filePath);
   const sizeBytes = typeof stats.size === 'bigint' ? Number(stats.size) : stats.size;
+  const mtimeMs = typeof stats.mtimeMs === 'number' && Number.isFinite(stats.mtimeMs)
+    ? stats.mtimeMs
+    : 0;
   return {
     key: buildFileVersionKey(filePath, sizeBytes, stats.mtimeMs),
-    sizeBytes
+    sizeBytes,
+    mtimeMs
   };
 }
 
@@ -491,7 +496,7 @@ class ImageFolderGalleryPanel {
   private readonly panel: vscode.WebviewPanel;
   private readonly folderUri: vscode.Uri;
   private readonly extensionUri: vscode.Uri;
-  private readonly imageFiles: Array<{ src: string; thumbUrl?: string; filePath: string; name: string; type: string; size: number; width: number; height: number }>;
+  private readonly imageFiles: Array<{ src: string; thumbUrl?: string; filePath: string; name: string; type: string; size: number; width: number; height: number; mtimeMs: number }>;
   private readonly panelDisposables: vscode.Disposable[] = [];
   private duplicateResultsPanel: vscode.WebviewPanel | undefined;
   private isDisposed = false;
@@ -573,7 +578,8 @@ class ImageFolderGalleryPanel {
       type: 'Loading...',
       size: 0,
       width: 0,
-      height: 0
+      height: 0,
+      mtimeMs: 0
     })));
 
     const settings = getImageInspectorSettings();
@@ -651,7 +657,8 @@ class ImageFolderGalleryPanel {
           type: details.format,
           size: details.sizeBytes,
           width: details.width,
-          height: details.height
+          height: details.height,
+          mtimeMs: fileVersionInfo.mtimeMs
         };
         const currentIndex = this.imageFiles.findIndex((img) => img.filePath === filePath);
         if (currentIndex === -1) {

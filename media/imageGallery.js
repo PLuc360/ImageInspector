@@ -138,7 +138,7 @@
 
       const savedState = JSON.parse(rawState);
       const filterTypes = normalizeTypeFilters(Array.isArray(savedState?.filterTypes) ? savedState.filterTypes : []);
-      const sort = ['name', 'type', 'size'].includes(savedState?.sort) ? savedState.sort : 'name';
+      const sort = ['name', 'type', 'size', 'date'].includes(savedState?.sort) ? savedState.sort : 'name';
       const sortOrder = savedState?.sortOrder === 'desc' ? 'desc' : 'asc';
 
       return { filterTypes, sort, sortOrder };
@@ -199,6 +199,8 @@
       const rightType = getImageTypeLabel(right.img);
       const leftSize = typeof left.img?.size === 'number' ? left.img.size : 0;
       const rightSize = typeof right.img?.size === 'number' ? right.img.size : 0;
+      const leftDate = typeof left.img?.mtimeMs === 'number' && Number.isFinite(left.img.mtimeMs) ? left.img.mtimeMs : 0;
+      const rightDate = typeof right.img?.mtimeMs === 'number' && Number.isFinite(right.img.mtimeMs) ? right.img.mtimeMs : 0;
       let cmp = 0;
 
       if (currentSort === 'name') {
@@ -208,6 +210,9 @@
           || leftName.localeCompare(rightName, undefined, { sensitivity: 'base', numeric: true });
       } else if (currentSort === 'size') {
         cmp = (leftSize - rightSize)
+          || leftName.localeCompare(rightName, undefined, { sensitivity: 'base', numeric: true });
+      } else if (currentSort === 'date') {
+        cmp = (leftDate - rightDate)
           || leftName.localeCompare(rightName, undefined, { sensitivity: 'base', numeric: true });
       }
 
@@ -443,6 +448,7 @@
       'png','jpg','jpeg','gif','bmp','webp','svg','tiff','tif','avif','heic','heif','ico'
     ].includes(ext) ? `badge badge-ext-${ext}` : 'badge';
     const sizeVal = formatFileSize(img.size);
+    const dateVal = formatModifiedDate(img.mtimeMs);
     const dimVal = (typeof img.width === 'number' && typeof img.height === 'number' && img.width > 0 && img.height > 0 && !isNaN(img.width) && !isNaN(img.height)) ? `${img.width}×${img.height}` : 'N/A';
     const rawThumbSrc = img.thumbUrl || img.src || '';
     const thumbSrc = escapeHtml(rawThumbSrc);
@@ -452,7 +458,7 @@
     const loadedState = isLoaded ? 'true' : 'false';
 
     return `
-      <div class="gallery-item" data-index="${index}" data-name="${escapeHtml(img.name)}" data-type="${escapeHtml(img.type)}" data-size="${img.size}" data-width="${img.width}" data-height="${img.height}">
+      <div class="gallery-item" data-index="${index}" data-name="${escapeHtml(img.name)}" data-type="${escapeHtml(img.type)}" data-size="${img.size}" data-mtime-ms="${String(img.mtimeMs ?? 0)}" data-width="${img.width}" data-height="${img.height}">
         <div class="gallery-thumb">
           <img class="${imageClassName}" src="${initialSrc}" data-src="${thumbSrc}" data-loaded="${loadedState}" alt="${escapeHtml(img.name)}" decoding="async" />
         </div>
@@ -460,6 +466,7 @@
         <div class="gallery-meta">
           <span class="meta-type ${badgeClass}">${escapeHtml(typeLabel)}</span>
           <span class="meta-size badge">${sizeVal}</span>
+          <span class="meta-date badge">${escapeHtml(dateVal)}</span>
           <span class="meta-dim badge">${dimVal}</span>
         </div>
       </div>
@@ -603,6 +610,31 @@
     if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
     if (size < 1024 * 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(2)} MB`;
     return `${(size / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  }
+
+  /**
+   * Formats a file modified timestamp to a compact French date-time string.
+   * @param {number} mtimeMs - Last modified timestamp in milliseconds.
+   * @returns {string}
+   */
+  function formatModifiedDate(mtimeMs) {
+    if (typeof mtimeMs !== 'number' || !Number.isFinite(mtimeMs) || mtimeMs <= 0) {
+      return 'N/A';
+    }
+
+    const modifiedDate = new Date(mtimeMs);
+    if (Number.isNaN(modifiedDate.getTime())) {
+      return 'N/A';
+    }
+
+    return modifiedDate.toLocaleString('fr-FR', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    });
   }
 
   /**
@@ -784,6 +816,7 @@
             <option value="name">Name</option>
             <option value="type">Type</option>
             <option value="size">Size</option>
+            <option value="date">Date</option>
           </select>
         </label>
         <label class="gallery-menu-field">
@@ -971,6 +1004,7 @@
     item.dataset.name = meta.name;
     item.dataset.type = meta.type;
     item.dataset.size = String(meta.size);
+    item.dataset.mtimeMs = String(meta.mtimeMs ?? 0);
     item.dataset.width = String(meta.width);
     item.dataset.height = String(meta.height);
 
@@ -1001,6 +1035,11 @@
     const metaSize = item.querySelector('.meta-size');
     if (metaSize) {
       metaSize.textContent = formatFileSize(meta.size);
+    }
+
+    const metaDate = item.querySelector('.meta-date');
+    if (metaDate) {
+      metaDate.textContent = formatModifiedDate(meta.mtimeMs);
     }
 
     const metaDim = item.querySelector('.meta-dim');
