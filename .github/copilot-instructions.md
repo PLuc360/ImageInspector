@@ -3,6 +3,8 @@
 ## Objectif
 Appliquer des modifications utiles, minimales et sûres, sans changer le comportement hors périmètre demandé.
 
+**Priorité des règles**: Contraintes importantes (critiques en premier) > Portée des changements > Validation > Style de code, Lint et format, Format de réponse.
+
 ## Langue et communication
 - Répondre en français.
 - Ton concis, direct et amical.
@@ -18,7 +20,7 @@ Appliquer des modifications utiles, minimales et sûres, sans changer le comport
 - Corriger la cause racine quand possible.
 - Faire des modifications minimales et ciblées.
 - Ne pas refactorer de grandes zones non liées.
-- Ne pas modifier les APIs publiques sans nécessité explicite.
+- Ne pas modifier les APIs publiques sans demande documentée ou bogue critique impactant le fonctionnement.
 
 ## Validation
 - Après modification, vérifier les erreurs pertinentes.
@@ -30,10 +32,12 @@ Appliquer des modifications utiles, minimales et sûres, sans changer le comport
 - Si un outil est déjà présent dans le projet, l’utiliser avant de conclure.
 - À défaut d’outil, vérifier manuellement la conformité PEP 8 stricte sur le code modifié.
 
-## Contraintes importantes
+### Critiques (toujours respecter)
 - Ne jamais committer ni créer de branche sans demande explicite.
-- Ne pas installer de dépendances non demandées, sauf nécessité technique justifiée.
 - Ne pas toucher aux fichiers sensibles sans demande explicite.
+
+### Secondaires (sauf nécessité justifiée)
+- Ne pas installer de dépendances non demandées.
 
 ## Format de réponse attendu
 - Résumé court des changements.
@@ -45,4 +49,4 @@ Appliquer des modifications utiles, minimales et sûres, sans changer le comport
 ## Préférences par défaut (à ajuster)
 - Priorité: fiabilité > simplicité > performance.
 - MVP d’abord: éviter les fonctionnalités annexes.
-- En cas d’ambiguïté: prendre l’option la plus simple et expliciter l’hypothèse.
+- En cas d'ambiguïté: choisir l'option avec le moins d'impact sur le comportement existant et expliciter l'hypothèse.

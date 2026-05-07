@@ -14,6 +14,15 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 
 /**
+ * Generates a CSP nonce for webview scripts.
+ *
+ * @returns Random nonce string suitable for inline script authorization.
+ */
+function createWebviewNonce(): string {
+  return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+}
+
+/**
  * Represents the metadata displayed in the custom image editor.
  */
 export interface ImageDetailsViewModel {
@@ -101,7 +110,7 @@ export function buildCustomEditorWebview(
     .join('');
 
   // Generate a secure nonce for inline scripts.
-  const nonce = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+  const nonce = createWebviewNonce();
   const contentSecurityPolicy = [
     "default-src 'none'",
     `img-src ${webview.cspSource} data:`,
@@ -260,6 +269,11 @@ export function buildCustomEditorWebview(
             </svg>
           </span>
         </button>
+        <label class="compare-diff-nav compare-diff-sensitivity" for="compare-diff-sensitivity" title="Differences sensitivity">
+          <span class="compare-diff-sensitivity-label">Sensitivity</span>
+          <input id="compare-diff-sensitivity" type="range" min="1" max="100" value="10" step="1" aria-label="Differences sensitivity" />
+          <span id="compare-diff-sensitivity-value" class="compare-diff-sensitivity-value" aria-live="polite">10</span>
+        </label>
         <span id="compare-image-label" class="compare-image-label">${hasComparisonImage ? escapeHtml(comparisonImageLabel) : 'No comparison image'}</span>
       </div>
       <canvas id="compare-diff-overlay" class="compare-diff-overlay is-hidden" aria-hidden="true"></canvas>
@@ -490,7 +504,7 @@ export function buildFolderGalleryWebview(
   const contentBody = `${headerMarkup}${galleryMainMarkup}`;
 
   // Generate a secure nonce for inline scripts.
-  const nonce = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+  const nonce = createWebviewNonce();
   const contentSecurityPolicy = [
     "default-src 'none'",
     `img-src ${webview.cspSource} data:`,
@@ -542,7 +556,7 @@ export function buildDuplicateResultsWebview(
   const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(mediaRootUri, 'duplicateResults.js'));
   const folderName = path.basename(folderPath);
   const themeAccentRgb = options?.themeAccentRgb ?? '0,200,110';
-  const nonce = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+  const nonce = createWebviewNonce();
   const contentSecurityPolicy = [
     "default-src 'none'",
     `img-src ${webview.cspSource} data:`,

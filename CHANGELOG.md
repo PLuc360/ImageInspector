@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.13.0] - 2026-05-07
+### Added
+- Added a side-by-side comparison sensitivity slider directly in the comparison toolbar.
+### Fixed
+- Fixed side-by-side comparison missing tiny differences on large images by improving downscaled analysis behavior and allowing substantially more detected regions than the previous 24-item cap.
 ## [1.12.0] - 2026-05-07
 ### Added
 - Added clockwise and counterclockwise rotation buttons (90-degree steps) to the Image Details toolbar.

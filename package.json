@@ -2,7 +2,7 @@
   "name": "image-inspector",
   "displayName": "Image Inspector",
   "description": "Displays image information (dimensions, size, format, metadata).",
-  "version": "1.12.0",
+  "version": "1.13.0",
   "publisher": "pierre-luc-guegan",
   "icon": "assets/icon.png",
   "repository": {
@@ -98,6 +98,10 @@
       {
         "command": "imageInspector.showImageDetails",
         "title": "Image Inspector: Open with Details"
+      },
+      {
+        "command": "imageInspector.pickThemeAccentColor",
+        "title": "Image Inspector: Pick Accent Color"
       },
       {
         "command": "imageInspector.zoomIn",

@@ -10,10 +10,14 @@ const icoGalleryCache = new Map<string, IcoVariantViewModel[]>();
 const convertedPreviewCache = new Map<string, string>();
 const galleryThumbnailCache = new Map<string, string>();
 
-function getCachedValue<T>(cache: Map<string, T>, key: string): T | undefined {
-  return cache.get(key);
-}
-
+/**
+ * Inserts a value into a cache, evicting the oldest entry when the size limit is reached.
+ *
+ * @param cache Target cache map.
+ * @param key Cache key for the new entry.
+ * @param value Value to store.
+ * @param maxEntries Maximum allowed number of entries before eviction.
+ */
 function setBoundedCachedValue<T>(cache: Map<string, T>, key: string, value: T, maxEntries: number): void {
   if (cache.size >= maxEntries) {
     // Remove oldest entry
@@ -23,6 +27,16 @@ function setBoundedCachedValue<T>(cache: Map<string, T>, key: string, value: T, 
     }
   }
   cache.set(key, value);
+}
+
+/**
+ * Resolves the lowercase file extension for a path.
+ *
+ * @param filePath Absolute or relative file path.
+ * @returns Lowercase extension including the leading dot, or an empty string.
+ */
+function getLowercaseExtension(filePath: string): string {
+  return path.extname(filePath).toLowerCase();
 }
 
 interface ImageInspectorSettings {
@@ -149,7 +163,7 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
   private async renderPanelContent(panel: vscode.WebviewPanel, imageUri: vscode.Uri): Promise<void> {
     const filePath = imageUri.fsPath;
     const settings = getImageInspectorSettings();
-    const icoVariants = path.extname(filePath).toLowerCase() === '.ico'
+    const icoVariants = getLowercaseExtension(filePath) === '.ico'
       ? await getIcoGalleryItems(filePath)
       : [];
     const fileVersionInfo = await getFileVersionInfo(filePath);
@@ -222,7 +236,7 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
    * @returns Rotated image payload ready to be written back to disk.
    */
   private async getRotatedImageBuffer(targetPath: string, direction: 'left' | 'right'): Promise<Buffer> {
-    if (path.extname(targetPath).toLowerCase() === '.svg') {
+    if (getLowercaseExtension(targetPath) === '.svg') {
       return rotateSvgFile(targetPath, direction);
     }
 
@@ -602,6 +616,14 @@ type FileVersionInfo = {
   mtimeMs: number;
 };
 
+/**
+ * Builds a stable cache key that encodes the file path, size and modification timestamp.
+ *
+ * @param filePath Absolute file path.
+ * @param size File size in bytes.
+ * @param mtimeMs Last-modified timestamp in milliseconds.
+ * @returns Unique string key for caching purposes.
+ */
 function buildFileVersionKey(filePath: string, size: number, mtimeMs: number): string {
   return `${filePath}::${String(size)}::${String(Math.trunc(mtimeMs))}`;
 }
@@ -632,11 +654,23 @@ function deleteCachedEntriesByPrefix<T>(cache: Map<string, T>, cacheKeyPrefix: s
   }
 }
 
+/**
+ * Reads file stats and returns a stable version key for caching.
+ *
+ * @param filePath Absolute file path.
+ * @returns Version key string encoding path, size and mtime.
+ */
 async function getFileVersionKey(filePath: string): Promise<string> {
   const stats = await fs.stat(filePath);
   return buildFileVersionKey(filePath, stats.size, stats.mtimeMs);
 }
 
+/**
+ * Reads file stats and returns a structured version info object.
+ *
+ * @param filePath Absolute file path.
+ * @returns Object containing the version key, size in bytes and mtime.
+ */
 async function getFileVersionInfo(filePath: string): Promise<FileVersionInfo> {
   const stats = await fs.stat(filePath);
   const sizeBytes = typeof stats.size === 'bigint' ? Number(stats.size) : stats.size;
@@ -660,9 +694,9 @@ async function getFileVersionInfo(filePath: string): Promise<FileVersionInfo> {
 async function scanFolderImages(folderPath: string): Promise<string[]> {
   const entries = await fs.readdir(folderPath, { withFileTypes: true });
   return entries
-    .filter((entry: any) => entry.isFile() && isSupportedImage(entry.name))
-    .map((entry: any) => path.join(folderPath, entry.name))
-    .sort((a: string, b: string) => path.basename(a).localeCompare(path.basename(b), undefined, { sensitivity: 'base', numeric: true }));
+    .filter((entry) => entry.isFile() && isSupportedImage(entry.name))
+    .map((entry) => path.join(folderPath, entry.name))
+    .sort((left, right) => path.basename(left).localeCompare(path.basename(right), undefined, { sensitivity: 'base', numeric: true }));
 }
 
 /**
@@ -677,12 +711,12 @@ async function getGalleryThumbnailSource(
   fileVersionInfo?: FileVersionInfo
 ): Promise<string> {
   const resolvedFileVersion = fileVersionInfo ?? await getFileVersionInfo(filePath);
-  const cachedThumbnail = getCachedValue(galleryThumbnailCache, resolvedFileVersion.key);
+  const cachedThumbnail = galleryThumbnailCache.get(resolvedFileVersion.key);
   if (cachedThumbnail) {
     return cachedThumbnail;
   }
 
-  const sourceExtension = path.extname(filePath).toLowerCase();
+  const sourceExtension = getLowercaseExtension(filePath);
 
   // ICO payloads are not always decodable by sharp on every platform/build.
   // Prefer an extracted ICO variant first to keep thumbnails available.
@@ -1864,7 +1898,7 @@ async function isDirectoryUri(uri: vscode.Uri): Promise<boolean> {
  * @returns True when the file extension is supported.
  */
 function isSupportedImage(filePath: string): boolean {
-  const extension = path.extname(filePath).toLowerCase();
+  const extension = getLowercaseExtension(filePath);
   return SUPPORTED_IMAGE_EXTENSIONS.includes(extension);
 }
 
@@ -1876,7 +1910,7 @@ function isSupportedImage(filePath: string): boolean {
  */
 function getImageLoadErrorMessage(filePath: string, error: unknown): string {
   const rawMessage = error instanceof Error ? error.message : String(error);
-  const extension = path.extname(filePath).toLowerCase();
+  const extension = getLowercaseExtension(filePath);
   const isHeifFamily = extension === '.heic' || extension === '.heif';
 
   if (!isHeifFamily) {
@@ -1901,14 +1935,14 @@ async function getImageDetails(
 ): Promise<ImageDetailsViewModel> {
   const resolvedFileVersion = fileVersionInfo ?? await getFileVersionInfo(filePath);
   const detailsCacheKey = buildImageDetailsCacheKey(resolvedFileVersion.key);
-  const cachedDetails = getCachedValue(imageDetailsCache, detailsCacheKey);
+  const cachedDetails = imageDetailsCache.get(detailsCacheKey);
   if (cachedDetails) {
     return cachedDetails;
   }
 
   try {
     const sharp = await getSharp();
-    const sourceExtension = path.extname(filePath).toLowerCase();
+    const sourceExtension = getLowercaseExtension(filePath);
     const sharpInput = sourceExtension === '.svg'
       ? await fs.readFile(filePath)
       : filePath;
@@ -1935,7 +1969,7 @@ async function getImageDetails(
     setBoundedCachedValue(imageDetailsCache, detailsCacheKey, details, MAX_IMAGE_DETAILS_CACHE_ENTRIES);
     return details;
   } catch (error) {
-    const extension = path.extname(filePath).toLowerCase();
+    const extension = getLowercaseExtension(filePath);
     if (extension !== '.ico') {
       throw error;
     }
@@ -2364,7 +2398,7 @@ async function getIcoPrimaryEntry(filePath: string): Promise<IcoImageEntry | und
 async function parseIcoEntries(source: IcoSource): Promise<IcoImageEntry[]> {
   if (typeof source === 'string') {
     const cacheKey = await getFileVersionKey(source);
-    const cachedEntries = getCachedValue(icoEntriesCache, cacheKey);
+    const cachedEntries = icoEntriesCache.get(cacheKey);
     if (cachedEntries) {
       return cachedEntries;
     }
@@ -2430,7 +2464,7 @@ async function parseIcoEntries(source: IcoSource): Promise<IcoImageEntry[]> {
  */
 async function getIcoGalleryItems(filePath: string): Promise<IcoVariantViewModel[]> {
   const cacheKey = await getFileVersionKey(filePath);
-  const cachedGalleryItems = getCachedValue(icoGalleryCache, cacheKey);
+  const cachedGalleryItems = icoGalleryCache.get(cacheKey);
   if (cachedGalleryItems) {
     return cachedGalleryItems;
   }
@@ -2514,10 +2548,10 @@ async function getWebviewImageSource(
   filePath: string,
   fileVersionKey: string
 ): Promise<string> {
-  const extension = path.extname(filePath).toLowerCase();
+  const extension = getLowercaseExtension(filePath);
   const needsConversion = extension === '.tif' || extension === '.tiff' || extension === '.heic' || extension === '.heif';
 
-  const cachedPreviewSource = getCachedValue(convertedPreviewCache, fileVersionKey);
+  const cachedPreviewSource = convertedPreviewCache.get(fileVersionKey);
   if (cachedPreviewSource) {
     return cachedPreviewSource;
   }

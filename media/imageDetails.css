@@ -447,7 +447,7 @@ body {
 }
 
 .compare-controls.is-side-by-side .compare-orientation-button,
-.compare-controls.is-side-by-side input[type='range'] {
+.compare-controls.is-side-by-side #compare-slider {
   display: none;
 }
 
@@ -457,6 +457,7 @@ body {
 
 .compare-controls.is-side-by-side .compare-diff-nav {
   display: inline-flex;
+  align-items: center;
 }
 
 .compare-diff-prev,
@@ -518,6 +519,42 @@ body {
   justify-content: center;
   color: var(--vscode-descriptionForeground);
   font-size: 0.74rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.compare-diff-sensitivity {
+  gap: 6px;
+  padding: 0 8px;
+  box-sizing: border-box;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 999px;
+  height: 26px;
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+}
+
+.compare-diff-sensitivity:hover {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.compare-diff-sensitivity-label {
+  font-size: 0.7rem;
+  color: var(--vscode-descriptionForeground);
+  white-space: nowrap;
+}
+
+.compare-diff-sensitivity #compare-diff-sensitivity {
+  width: min(140px, 18vw);
+  min-width: 86px;
+  height: 14px;
+  margin: 0;
+}
+
+.compare-diff-sensitivity-value {
+  min-width: 22px;
+  text-align: right;
+  font-size: 0.7rem;
+  color: var(--vscode-descriptionForeground);
   font-variant-numeric: tabular-nums;
 }
 

@@ -1,4 +1,8 @@
-// Dynamically add shared badge CSS
+/**
+ * Dynamically injects the shared badge stylesheet into the document head.
+ *
+ * @param {string} uri URI of the badge CSS file to inject.
+ */
 function setBadgeCssUri(uri) {
   window.badgeCssUri = uri;
   const badgeStyle = document.createElement('link');
@@ -62,6 +66,8 @@ const compareDiffIndexLabel = document.getElementById('compare-diff-index');
 const compareDiffTargetButton = document.getElementById('compare-diff-target');
 const compareDiffAllButton = document.getElementById('compare-diff-all');
 const compareDiffAutoCenterButton = document.getElementById('compare-diff-autocenter');
+const compareDiffSensitivitySlider = document.getElementById('compare-diff-sensitivity');
+const compareDiffSensitivityValue = document.getElementById('compare-diff-sensitivity-value');
 const compareImageLabel = document.getElementById('compare-image-label');
 const compareImage = document.getElementById('compare-image');
 const compareDivider = document.getElementById('compare-divider');
@@ -82,6 +88,9 @@ const PIPETTE_RESULT_FADE_DURATION_MS = 260;
 const selectedIcoSizeBadge = document.getElementById('selected-ico-size');
 let icoGalleryItems = [];
 
+/**
+ * Attaches click listeners to all ICO gallery items to update the preview image on selection.
+ */
 function attachIcoGalleryListeners() {
   for (const galleryItem of icoGalleryItems) {
     galleryItem.addEventListener('click', (event) => {
@@ -108,11 +117,17 @@ let pipetteResultFadeTimeoutId = null;
 let pipetteResultHideTimeoutId = null;
 const INFO_OVERLAY_STORAGE_KEY = 'imageDetails.infoOverlayVisible';
 const INFO_OVERLAY_POSITION_STORAGE_KEY = 'imageDetails.infoOverlayPosition';
-const DIFF_ANALYSIS_MAX_DIMENSION = 1024;
-const DIFF_PIXEL_THRESHOLD = 14;
-const DIFF_REGION_MIN_PIXELS = 10;
-const DIFF_REGION_MAX_ITEMS = 24;
-const DIFF_REGION_MERGE_GAP_PX = 8;
+const COMPARE_DIFF_SENSITIVITY_STORAGE_KEY = 'imageDetails.compareDiffSensitivity';
+const DIFF_ANALYSIS_MAX_DIMENSION_MIN = 2048;
+const DIFF_ANALYSIS_MAX_DIMENSION_MAX = 8192;
+const DIFF_PIXEL_THRESHOLD_MIN = 0.08;
+const DIFF_PIXEL_THRESHOLD_MAX = 20;
+const DIFF_REGION_MIN_PIXELS = 2;
+const DIFF_REGION_MAX_ITEMS_MIN = 48;
+const DIFF_REGION_MAX_ITEMS_MAX = 2000;
+const DIFF_REGION_MERGE_GAP_PX_MIN = 0;
+const DIFF_REGION_MERGE_GAP_PX_MAX = 6;
+const DEFAULT_COMPARE_DIFF_SENSITIVITY = 10;
 
 let zoom = 1;
 let fitMode = false;
@@ -149,6 +164,7 @@ let compareDiffCurrentIndex = -1;
 let compareDiffOverlayTarget = 'left';
 let compareDiffShowAllEnabled = false;
 let compareDiffAutoCenterEnabled = false;
+let compareDiffSensitivity = DEFAULT_COMPARE_DIFF_SENSITIVITY;
 let originalImageSource = image?.getAttribute('src') || '';
 let originalCompareImageSource = compareImage?.getAttribute('src') || '';
 let imageRotationQuarterTurns = 0;
@@ -161,6 +177,15 @@ const COMPARE_DIFF_TARGET_LEFT_ICON_SVG = '<svg width="16" height="16" viewBox="
 const COMPARE_DIFF_TARGET_RIGHT_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle"><rect x="2.5" y="3.5" width="7.5" height="13" rx="1.6" stroke="currentColor" stroke-width="1.2"/><rect x="10" y="3.5" width="7.5" height="13" rx="1.6" fill="currentColor" fill-opacity="0.18" stroke="currentColor" stroke-width="1.2"/></svg>';
 const COMPARE_DIFF_TARGET_BOTH_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle"><rect x="2.5" y="3.5" width="7.5" height="13" rx="1.6" fill="currentColor" fill-opacity="0.14" stroke="currentColor" stroke-width="1.2"/><rect x="10" y="3.5" width="7.5" height="13" rx="1.6" fill="currentColor" fill-opacity="0.14" stroke="currentColor" stroke-width="1.2"/></svg>';
 
+/**
+ * Parses a value to a floating-point number clamped within [min, max].
+ *
+ * @param {*} value Candidate value to parse.
+ * @param {number} min Minimum allowed value.
+ * @param {number} max Maximum allowed value.
+ * @param {number} fallbackValue Value returned when parsing fails.
+ * @returns {number} Clamped numeric value.
+ */
 function toClampedNumber(value, min, max, fallbackValue) {
   const numericValue = Number.parseFloat(String(value));
   if (!Number.isFinite(numericValue)) {
@@ -170,6 +195,15 @@ function toClampedNumber(value, min, max, fallbackValue) {
   return clamp(numericValue, min, max);
 }
 
+/**
+ * Parses a value to an integer clamped within [min, max].
+ *
+ * @param {*} value Candidate value to parse.
+ * @param {number} min Minimum allowed value.
+ * @param {number} max Maximum allowed value.
+ * @param {number} fallbackValue Value returned when parsing fails.
+ * @returns {number} Clamped integer value.
+ */
 function toClampedInteger(value, min, max, fallbackValue) {
   return Math.round(toClampedNumber(value, min, max, fallbackValue));
 }
@@ -313,6 +347,12 @@ function rotatePreviewImage(quarterTurnDelta) {
   void applyImageRotationToPreview();
 }
 
+/**
+ * Applies loupe (magnifier) configuration settings and reinitializes the virtual canvas if needed.
+ *
+ * @param {object} nextSettings Settings object with optional diameter, virtualResolution,
+ *   zoomAtMinImageZoom and zoomAtMaxImageZoom properties.
+ */
 function applyLoupeSettings(nextSettings) {
   const nextDiameter = toClampedInteger(nextSettings?.diameter, 48, 256, DEFAULT_LOUPE_DIAMETER);
   const nextVirtualResolutionCandidate = toClampedInteger(nextSettings?.virtualResolution, 5, 101, DEFAULT_LOUPE_VIRTUAL_RESOLUTION);
@@ -338,6 +378,9 @@ function applyLoupeSettings(nextSettings) {
   }
 }
 
+/**
+ * Reads loupe settings from layout element data attributes and applies them.
+ */
 function initializeLoupeSettingsFromDom() {
   applyLoupeSettings({
     diameter: layoutElement?.dataset.loupeDiameter,
@@ -347,6 +390,9 @@ function initializeLoupeSettingsFromDom() {
   });
 }
 
+/**
+ * Reads the toolbar accent color from the layout element data attributes and applies it.
+ */
 function initializeThemeFromDom() {
   if (!layoutElement) {
     return;
@@ -372,6 +418,52 @@ function initializeEditPersistenceSettingsFromDom() {
   );
 }
 
+/**
+ * Applies a new diff sensitivity value and updates the slider and label UI.
+ *
+ * @param {*} nextSensitivity Candidate sensitivity value (1–100).
+ */
+function applyCompareDiffSensitivity(nextSensitivity) {
+  compareDiffSensitivity = toClampedInteger(
+    nextSensitivity,
+    1,
+    100,
+    DEFAULT_COMPARE_DIFF_SENSITIVITY
+  );
+
+  if (compareDiffSensitivitySlider instanceof HTMLInputElement) {
+    compareDiffSensitivitySlider.value = String(compareDiffSensitivity);
+    compareDiffSensitivitySlider.setAttribute('aria-valuenow', String(compareDiffSensitivity));
+  }
+
+  if (compareDiffSensitivityValue) {
+    compareDiffSensitivityValue.textContent = String(compareDiffSensitivity);
+  }
+}
+
+/**
+ * Reads the stored diff sensitivity from localStorage and applies it.
+ */
+function initializeCompareDiffSettingsFromDom() {
+  let nextSensitivity = DEFAULT_COMPARE_DIFF_SENSITIVITY;
+
+  try {
+    const storedValue = localStorage.getItem(COMPARE_DIFF_SENSITIVITY_STORAGE_KEY);
+    if (storedValue !== null) {
+      nextSensitivity = toClampedInteger(storedValue, 1, 100, nextSensitivity);
+    }
+  } catch {
+    // Ignore storage errors and keep default value.
+  }
+
+  applyCompareDiffSensitivity(nextSensitivity);
+}
+
+/**
+ * Returns the 2D canvas context for the pipette buffer canvas, creating it if necessary.
+ *
+ * @returns {CanvasRenderingContext2D | null} The buffer context, or null when unavailable.
+ */
 function ensurePipetteBufferContext() {
   if (!pipetteCanvas) {
     return null;
@@ -384,6 +476,9 @@ function ensurePipetteBufferContext() {
   return pipetteImageCtx;
 }
 
+/**
+ * Redraws the current preview image into the off-screen pipette buffer canvas.
+ */
 function refreshPipetteImageBuffer() {
   if (!image || !pipetteCanvas) {
     return;
@@ -401,6 +496,11 @@ function refreshPipetteImageBuffer() {
   bufferContext.drawImage(image, 0, 0);
 }
 
+/**
+ * Applies a toolbar position class to the zoom toolbar element.
+ *
+ * @param {string} toolbarPosition Position identifier: 'top', 'bottom', 'left' or 'right'.
+ */
 function applyToolbarPosition(toolbarPosition) {
   if (!zoomToolbar) {
     return;
@@ -415,6 +515,11 @@ function applyToolbarPosition(toolbarPosition) {
   }
 }
 
+/**
+ * Sets the toolbar green accent color via a CSS custom property on the layout element.
+ *
+ * @param {string} accentRgb RGB value string, e.g. '120,200,80'.
+ */
 function applyThemeAccentRgb(accentRgb) {
   if (!layoutElement || typeof accentRgb !== 'string' || accentRgb.trim().length === 0) {
     return;
@@ -423,6 +528,9 @@ function applyThemeAccentRgb(accentRgb) {
   layoutElement.style.setProperty('--toolbar-green-accent-rgb', accentRgb.trim());
 }
 
+/**
+ * Syncs the selection-mode CSS classes and aria attributes to match the current state.
+ */
 function updateSelectionModeUi() {
   if (!preview || !zoomSelectButton) {
     return;
@@ -433,6 +541,11 @@ function updateSelectionModeUi() {
   zoomSelectButton.setAttribute('aria-pressed', selectionMode ? 'true' : 'false');
 }
 
+/**
+ * Enables or disables the area-zoom selection mode.
+ *
+ * @param {boolean} isEnabled Whether selection mode should be active.
+ */
 function setSelectionMode(isEnabled) {
   selectionMode = isEnabled;
 
@@ -443,14 +556,29 @@ function setSelectionMode(isEnabled) {
   updateSelectionModeUi();
 }
 
+/**
+ * Returns true when a comparison image is currently loaded.
+ *
+ * @returns {boolean}
+ */
 function hasComparisonImage() {
   return Boolean(compareImage?.getAttribute('src'));
 }
 
+/**
+ * Returns true when side-by-side compare mode is active and a comparison image is loaded.
+ *
+ * @returns {boolean}
+ */
 function isSideBySideCompareActive() {
   return compareViewMode === 'side-by-side' && hasComparisonImage();
 }
 
+/**
+ * Returns the 2D canvas context for the primary diff overlay, creating it if necessary.
+ *
+ * @returns {CanvasRenderingContext2D | null}
+ */
 function ensureCompareDiffOverlayContext() {
   if (!compareDiffOverlay) {
     return null;
@@ -463,6 +591,11 @@ function ensureCompareDiffOverlayContext() {
   return compareDiffOverlayCtx;
 }
 
+/**
+ * Returns the 2D canvas context for the secondary diff overlay, creating it if necessary.
+ *
+ * @returns {CanvasRenderingContext2D | null}
+ */
 function ensureCompareDiffOverlaySecondaryContext() {
   if (!compareDiffOverlaySecondary) {
     return null;
@@ -475,6 +608,12 @@ function ensureCompareDiffOverlaySecondaryContext() {
   return compareDiffOverlaySecondaryCtx;
 }
 
+/**
+ * Returns the icon, title and label for a given diff overlay target side.
+ *
+ * @param {'left'|'right'|'both'} target Which image(s) to highlight differences on.
+ * @returns {{ iconSvg: string, title: string, label: string }}
+ */
 function getCompareDiffTargetPresentation(target) {
   if (target === 'right') {
     return {
@@ -499,6 +638,10 @@ function getCompareDiffTargetPresentation(target) {
   };
 }
 
+/**
+ * Updates the diff navigation buttons (prev, next, all, auto-center, target) to reflect the
+ * current diff regions and active index.
+ */
 function updateCompareDiffNavigationUi() {
   const regionCount = compareDiffRegions.length;
   const hasRegions = regionCount > 0;
@@ -553,6 +696,9 @@ function updateCompareDiffNavigationUi() {
   }
 }
 
+/**
+ * Scrolls the preview so that the currently active diff region is centered in the viewport.
+ */
 function centerPreviewOnActiveDifference() {
   if (!preview || compareDiffCurrentIndex < 0 || compareDiffCurrentIndex >= compareDiffRegions.length) {
     return;
@@ -579,6 +725,9 @@ function centerPreviewOnActiveDifference() {
   preview.scrollTop += targetCenterY - viewportCenterY;
 }
 
+/**
+ * Scrolls the preview to the active diff region when auto-center is enabled.
+ */
 function centerPreviewOnActiveDifferenceIfEnabled() {
   if (!compareDiffAutoCenterEnabled || !isSideBySideCompareActive()) {
     return;
@@ -590,6 +739,17 @@ function centerPreviewOnActiveDifferenceIfEnabled() {
   });
 }
 
+/**
+ * Draws a single diff region rectangle with a numbered label on a canvas overlay.
+ *
+ * @param {HTMLCanvasElement} overlayElement The target overlay canvas.
+ * @param {CanvasRenderingContext2D} overlayContext The 2D context of the overlay.
+ * @param {HTMLImageElement} targetImage The image element the overlay is positioned over.
+ * @param {{ minXRatio: number, minYRatio: number, maxXRatio: number, maxYRatio: number }} region
+ *   Normalized region bounds (0–1).
+ * @param {number} regionIndex Zero-based index used for the 'D#' label.
+ * @param {{ clearCanvas?: boolean, isActiveRegion?: boolean }} [options] Drawing options.
+ */
 function drawCompareDifferenceRegionOnOverlay(overlayElement, overlayContext, targetImage, region, regionIndex, options = {}) {
   const targetRect = targetImage.getBoundingClientRect();
   const previewRect = previewContainer?.getBoundingClientRect();
@@ -654,6 +814,11 @@ function drawCompareDifferenceRegionOnOverlay(overlayElement, overlayContext, ta
   overlayContext.fillText(label, labelX + 4, labelY + 2);
 }
 
+/**
+ * Clears the diff overlay canvases. Optionally resets the stored regions and current index.
+ *
+ * @param {boolean} [clearRegions=false] When true, resets regions and index.
+ */
 function clearCompareDifferenceOverlay(clearRegions = false) {
   if (clearRegions) {
     compareDiffRegions = [];
@@ -676,6 +841,9 @@ function clearCompareDifferenceOverlay(clearRegions = false) {
   updateCompareDiffNavigationUi();
 }
 
+/**
+ * Redraws the diff overlay canvases to reflect the current regions and active index.
+ */
 function renderCompareDifferenceOverlay() {
   if (!image || !compareImage || !isSideBySideCompareActive()) {
     clearCompareDifferenceOverlay(false);
@@ -754,6 +922,11 @@ function renderCompareDifferenceOverlay() {
   updateCompareDiffNavigationUi();
 }
 
+/**
+ * Performs a pixel-level diff analysis between the two loaded images and populates compareDiffRegions.
+ *
+ * @param {number} token Analysis token used to discard stale results when a newer analysis starts.
+ */
 function runCompareDifferenceAnalysis(token) {
   if (!image || !compareImage) {
     return;
@@ -774,8 +947,13 @@ function runCompareDifferenceAnalysis(token) {
     return;
   }
 
+  const sensitivityRatio = clamp(compareDiffSensitivity, 1, 100) / 100;
+  const analysisMaxDimension = Math.round(
+    DIFF_ANALYSIS_MAX_DIMENSION_MIN
+    + (sensitivityRatio ** 2) * (DIFF_ANALYSIS_MAX_DIMENSION_MAX - DIFF_ANALYSIS_MAX_DIMENSION_MIN)
+  );
   const maxDimension = Math.max(baseWidth, baseHeight);
-  const scale = Math.min(1, DIFF_ANALYSIS_MAX_DIMENSION / maxDimension);
+  const scale = Math.min(1, analysisMaxDimension / maxDimension);
   const analysisWidth = Math.max(1, Math.round(baseWidth * scale));
   const analysisHeight = Math.max(1, Math.round(baseHeight * scale));
 
@@ -793,6 +971,10 @@ function runCompareDifferenceAnalysis(token) {
     return;
   }
 
+  // Keep nearest-neighbor sampling to preserve tiny per-pixel differences when downscaling.
+  baseContext.imageSmoothingEnabled = false;
+  compareContext.imageSmoothingEnabled = false;
+
   baseContext.drawImage(image, 0, 0, analysisWidth, analysisHeight);
   compareContext.drawImage(compareImage, 0, 0, analysisWidth, analysisHeight);
 
@@ -802,24 +984,41 @@ function runCompareDifferenceAnalysis(token) {
   const diffMask = new Uint8Array(pixelCount);
   const diffStrength = new Float32Array(pixelCount);
 
+  const sensitivityCurve = (1 - sensitivityRatio) ** 2;
+  const defaultPixelThreshold = DIFF_PIXEL_THRESHOLD_MIN
+    + sensitivityCurve * (DIFF_PIXEL_THRESHOLD_MAX - DIFF_PIXEL_THRESHOLD_MIN);
+
   let changedPixels = 0;
-  let strengthTotal = 0;
+  let activePixelThreshold = defaultPixelThreshold;
 
-  for (let index = 0; index < pixelCount; index += 1) {
-    const pixelOffset = index * 4;
-    const deltaRed = Math.abs(basePixels[pixelOffset] - comparePixels[pixelOffset]);
-    const deltaGreen = Math.abs(basePixels[pixelOffset + 1] - comparePixels[pixelOffset + 1]);
-    const deltaBlue = Math.abs(basePixels[pixelOffset + 2] - comparePixels[pixelOffset + 2]);
-    const deltaAlpha = Math.abs(basePixels[pixelOffset + 3] - comparePixels[pixelOffset + 3]);
-    const colorDelta = (deltaRed + deltaGreen + deltaBlue) / 3;
-    const weightedDelta = colorDelta * 0.85 + deltaAlpha * 0.15;
+  const fillDiffMask = (pixelThreshold) => {
+    changedPixels = 0;
 
-    if (weightedDelta >= DIFF_PIXEL_THRESHOLD) {
-      diffMask[index] = 1;
-      diffStrength[index] = weightedDelta;
-      changedPixels += 1;
-      strengthTotal += weightedDelta;
+    for (let index = 0; index < pixelCount; index += 1) {
+      const pixelOffset = index * 4;
+      const deltaRed = Math.abs(basePixels[pixelOffset] - comparePixels[pixelOffset]);
+      const deltaGreen = Math.abs(basePixels[pixelOffset + 1] - comparePixels[pixelOffset + 1]);
+      const deltaBlue = Math.abs(basePixels[pixelOffset + 2] - comparePixels[pixelOffset + 2]);
+      const deltaAlpha = Math.abs(basePixels[pixelOffset + 3] - comparePixels[pixelOffset + 3]);
+      const colorDelta = (deltaRed + deltaGreen + deltaBlue) / 3;
+      const weightedDelta = colorDelta * 0.85 + deltaAlpha * 0.15;
+
+      if (weightedDelta >= pixelThreshold) {
+        diffMask[index] = 1;
+        diffStrength[index] = weightedDelta;
+        changedPixels += 1;
+      } else {
+        diffMask[index] = 0;
+        diffStrength[index] = 0;
+      }
     }
+  };
+
+  fillDiffMask(activePixelThreshold);
+
+  if (changedPixels === 0) {
+    activePixelThreshold = Math.max(DIFF_PIXEL_THRESHOLD_MIN, defaultPixelThreshold * 0.7);
+    fillDiffMask(activePixelThreshold);
   }
 
   if (token !== compareDiffAnalysisToken) {
@@ -832,6 +1031,12 @@ function runCompareDifferenceAnalysis(token) {
     renderCompareDifferenceOverlay();
     return;
   }
+
+  const sensitivityAdjustedMinPixels = Math.max(
+    1,
+    Math.ceil(DIFF_REGION_MIN_PIXELS * (1 - 0.75 * sensitivityRatio))
+  );
+  const minimumRegionPixels = Math.max(1, Math.round(sensitivityAdjustedMinPixels * scale * scale));
 
   const visited = new Uint8Array(pixelCount);
   const queue = new Int32Array(pixelCount);
@@ -901,7 +1106,7 @@ function runCompareDifferenceAnalysis(token) {
       }
     }
 
-    if (regionPixels < DIFF_REGION_MIN_PIXELS) {
+    if (regionPixels < minimumRegionPixels) {
       continue;
     }
 
@@ -944,8 +1149,10 @@ function runCompareDifferenceAnalysis(token) {
     filteredRegions.push(candidateRegion);
   }
 
-  const mergeGapXRatio = DIFF_REGION_MERGE_GAP_PX / analysisWidth;
-  const mergeGapYRatio = DIFF_REGION_MERGE_GAP_PX / analysisHeight;
+  const mergeGapPixels = DIFF_REGION_MERGE_GAP_PX_MAX
+    - sensitivityRatio * (DIFF_REGION_MERGE_GAP_PX_MAX - DIFF_REGION_MERGE_GAP_PX_MIN);
+  const mergeGapXRatio = mergeGapPixels / analysisWidth;
+  const mergeGapYRatio = mergeGapPixels / analysisHeight;
   const mergedRegions = filteredRegions.map((region) => ({ ...region }));
 
   let didMerge = true;
@@ -991,9 +1198,14 @@ function runCompareDifferenceAnalysis(token) {
     }
   }
 
+  const maxRegionItems = Math.round(
+    DIFF_REGION_MAX_ITEMS_MIN
+    + sensitivityRatio * (DIFF_REGION_MAX_ITEMS_MAX - DIFF_REGION_MAX_ITEMS_MIN)
+  );
+
   compareDiffRegions = mergedRegions
     .sort((leftRegion, rightRegion) => rightRegion.pixelCount - leftRegion.pixelCount)
-    .slice(0, DIFF_REGION_MAX_ITEMS);
+    .slice(0, maxRegionItems);
 
   if (compareDiffRegions.length === 0) {
     compareDiffCurrentIndex = -1;
@@ -1006,6 +1218,9 @@ function runCompareDifferenceAnalysis(token) {
   renderCompareDifferenceOverlay();
 }
 
+/**
+ * Schedules a fresh diff analysis asynchronously and clears any previous results.
+ */
 function scheduleCompareDifferenceAnalysis() {
   compareDiffAnalysisToken += 1;
   const token = compareDiffAnalysisToken;
@@ -1020,6 +1235,11 @@ function scheduleCompareDifferenceAnalysis() {
   }, 0);
 }
 
+/**
+ * Returns the icon SVG and tooltip title for the compare orientation toggle button.
+ *
+ * @returns {{ iconSvg: string, title: string }}
+ */
 function getCompareOrientationButtonState() {
   if (compareOrientation === 'vertical') {
     return {
@@ -1034,6 +1254,10 @@ function getCompareOrientationButtonState() {
   };
 }
 
+/**
+ * Syncs the visibility, active state and disabled state of all compare toolbar controls
+ * to match the current compare mode.
+ */
 function updateCompareControlsUi() {
   const available = hasComparisonImage();
   const shouldShowControls = available || compareEnabled;
@@ -1073,6 +1297,10 @@ function updateCompareControlsUi() {
   updateCompareDiffNavigationUi();
 }
 
+/**
+ * Positions the compare overlay image and divider according to the current split percentage
+ * and orientation, or switches to side-by-side layout when that mode is active.
+ */
 function applyCompareSplit() {
   if (!compareImage || !compareDivider || !previewBody || !image || !hasComparisonImage()) {
     previewBody?.classList.remove('side-by-side-mode');
@@ -1150,6 +1378,9 @@ function applyCompareSplit() {
   }
 }
 
+/**
+ * Writes the current compareSplitPercent value to the slider input element.
+ */
 function syncCompareSliderToSplitPercent() {
   if (!compareSlider) {
     return;
@@ -1158,6 +1389,12 @@ function syncCompareSliderToSplitPercent() {
   compareSlider.value = String(Math.round(clamp(compareSplitPercent, 0, 100)));
 }
 
+/**
+ * Recalculates the split percentage from a pointer client position and redraws the split.
+ *
+ * @param {number} clientX Pointer X position in viewport coordinates.
+ * @param {number} clientY Pointer Y position in viewport coordinates.
+ */
 function updateCompareSplitFromClientPosition(clientX, clientY) {
   if (!image || !compareEnabled || !hasComparisonImage()) {
     return;
@@ -1180,6 +1417,12 @@ function updateCompareSplitFromClientPosition(clientX, clientY) {
   applyCompareSplit();
 }
 
+/**
+ * Schedules a rAF-throttled update of the compare split position during divider drag.
+ *
+ * @param {number} clientX Pointer X position in viewport coordinates.
+ * @param {number} clientY Pointer Y position in viewport coordinates.
+ */
 function scheduleCompareDividerSplitUpdate(clientX, clientY) {
   pendingCompareDragClientX = clientX;
   pendingCompareDragClientY = clientY;
@@ -1201,6 +1444,9 @@ function scheduleCompareDividerSplitUpdate(clientX, clientY) {
   });
 }
 
+/**
+ * Cancels any pending rAF compare-divider drag update.
+ */
 function clearPendingCompareDividerSplitUpdate() {
   if (compareDividerDragFrameId !== null) {
     cancelAnimationFrame(compareDividerDragFrameId);
@@ -1211,6 +1457,11 @@ function clearPendingCompareDividerSplitUpdate() {
   pendingCompareDragClientY = null;
 }
 
+/**
+ * Ends an in-progress compare divider drag, releasing pointer capture.
+ *
+ * @param {number} [pointerId] The pointer ID to release; if omitted, forces end regardless of ID.
+ */
 function endCompareDividerDrag(pointerId) {
   if (!isDraggingCompareDivider) {
     return;
@@ -1229,6 +1480,11 @@ function endCompareDividerDrag(pointerId) {
   clearPendingCompareDividerSplitUpdate();
 }
 
+/**
+ * Enables or disables the split-compare mode.
+ *
+ * @param {boolean} isEnabled Whether split-compare should be active.
+ */
 function setCompareEnabled(isEnabled) {
   if (!hasComparisonImage()) {
     compareEnabled = false;
@@ -1247,6 +1503,11 @@ function setCompareEnabled(isEnabled) {
   applyCompareSplit();
 }
 
+/**
+ * Switches the compare view mode between 'split' and 'side-by-side'.
+ *
+ * @param {'split'|'side-by-side'} nextMode The desired view mode.
+ */
 function setCompareViewMode(nextMode) {
   compareViewMode = nextMode === 'side-by-side' ? 'side-by-side' : 'split';
 
@@ -1270,6 +1531,12 @@ function setCompareViewMode(nextMode) {
   }
 }
 
+/**
+ * Loads a new comparison image source and activates compare mode.
+ *
+ * @param {string} source URI of the comparison image.
+ * @param {string} [label] Human-readable label shown in the UI.
+ */
 function setComparisonImage(source, label) {
   if (!compareImage || !compareImageLabel) {
     return;
@@ -1292,6 +1559,9 @@ function setComparisonImage(source, label) {
   setCompareEnabled(true);
 }
 
+/**
+ * Removes the comparison image and resets all compare state to defaults.
+ */
 function clearComparisonImage() {
   if (!compareImage || !compareImageLabel) {
     return;
@@ -1313,6 +1583,11 @@ function clearComparisonImage() {
   clearCompareDifferenceOverlay(true);
 }
 
+/**
+ * Activates or deactivates the pipette (color-picker) mode.
+ *
+ * @param {boolean} isEnabled Whether pipette mode should be active.
+ */
 function setPipetteMode(isEnabled) {
   pipetteMode = isEnabled;
   if (pipetteButton) {
@@ -1344,10 +1619,23 @@ function setPipetteMode(isEnabled) {
   }
 }
 
+/**
+ * Formats red, green and blue channel values (0–255) to a CSS hex color string.
+ *
+ * @param {number} red Red channel value (0–255).
+ * @param {number} green Green channel value (0–255).
+ * @param {number} blue Blue channel value (0–255).
+ * @returns {string} Hex color string, e.g. '#ff8040'.
+ */
 function formatHexColor(red, green, blue) {
   return '#' + [red, green, blue].map((value) => value.toString(16).padStart(2, '0')).join('');
 }
 
+/**
+ * Shows or hides the pipette hover info panel.
+ *
+ * @param {boolean} isVisible Whether the panel should be visible.
+ */
 function setPipetteHoverInfoVisible(isVisible) {
   if (!pipetteHoverInfo) {
     return;
@@ -1356,6 +1644,9 @@ function setPipetteHoverInfoVisible(isVisible) {
   pipetteHoverInfo.classList.toggle('is-hidden', !isVisible);
 }
 
+/**
+ * Resets the pipette hover position, color text and swatch to their empty state.
+ */
 function resetPipetteHoverInfo() {
   if (pipetteHoverPosition) {
     pipetteHoverPosition.textContent = '—';
@@ -1370,6 +1661,13 @@ function resetPipetteHoverInfo() {
   }
 }
 
+/**
+ * Updates the pipette hover info panel with the pixel position and color under the pointer.
+ *
+ * @param {number} x Pixel X coordinate in image space.
+ * @param {number} y Pixel Y coordinate in image space.
+ * @param {Uint8ClampedArray} pixelData RGBA pixel data array from getImageData.
+ */
 function updatePipetteHoverInfo(x, y, pixelData) {
   if (!pipetteHoverPosition || !pipetteHoverColor || !pipetteHoverSwatch) {
     return;
@@ -1382,6 +1680,9 @@ function updatePipetteHoverInfo(x, y, pixelData) {
   pipetteHoverSwatch.style.background = hexColor;
 }
 
+/**
+ * Cancels any pending fade/hide timeouts for the pipette color result bubble.
+ */
 function clearPipetteColorResultTimers() {
   if (pipetteResultFadeTimeoutId !== null) {
     clearTimeout(pipetteResultFadeTimeoutId);
@@ -1394,6 +1695,11 @@ function clearPipetteColorResultTimers() {
   }
 }
 
+/**
+ * Hides the pipette color result bubble, optionally with an immediate (no-fade) removal.
+ *
+ * @param {boolean} [immediate=false] When true, hides instantly without fade animation.
+ */
 function hidePipetteColorResult(immediate = false) {
   if (!pipetteColorResult) {
     return;
@@ -1416,11 +1722,22 @@ function hidePipetteColorResult(immediate = false) {
   }, PIPETTE_RESULT_FADE_DURATION_MS);
 }
 
+/**
+ * Calls preventDefault and stopPropagation on the given event.
+ *
+ * @param {Event} event The DOM event to stop.
+ */
 function stopEvent(event) {
   event.preventDefault();
   event.stopPropagation();
 }
 
+/**
+ * Attaches a click event listener to a button that stops the event and runs an action.
+ *
+ * @param {Element | null | undefined} button Button element to bind.
+ * @param {() => void} action Callback invoked on click.
+ */
 function bindClickAction(button, action) {
   button?.addEventListener('click', (event) => {
     stopEvent(event);
@@ -1428,6 +1745,11 @@ function bindClickAction(button, action) {
   });
 }
 
+/**
+ * Triggers the click-halo CSS animation on a toolbar button.
+ *
+ * @param {Element | null | undefined} button The button element to animate.
+ */
 function showToolbarClickHalo(button) {
   if (!button || !button.classList) {
     return;
@@ -1439,6 +1761,13 @@ function showToolbarClickHalo(button) {
   button.classList.add('click-halo');
 }
 
+/**
+ * Binds a button so that a single click triggers an action and holding the button
+ * down continues repeating the action after a short delay.
+ *
+ * @param {Element | null | undefined} button Button element to bind.
+ * @param {() => void} action Callback invoked on each press/repeat.
+ */
 function bindPressAndHoldAction(button, action) {
   if (!button) {
     return;
@@ -1521,6 +1850,11 @@ function bindPressAndHoldAction(button, action) {
   });
 }
 
+/**
+ * Marks the given ICO gallery item as active and updates the selected size badge text.
+ *
+ * @param {Element} selectedItem The gallery item element to select.
+ */
 function setActiveIcoGalleryItem(selectedItem) {
   if (!icoGalleryItems.length) {
     return;
@@ -1540,6 +1874,9 @@ function setActiveIcoGalleryItem(selectedItem) {
   }
 }
 
+/**
+ * Finds the ICO gallery item whose source matches the current image source and marks it active.
+ */
 function syncActiveIcoGalleryItemFromImage() {
   if (!image || !icoGalleryItems.length) {
     return;
@@ -1556,6 +1893,10 @@ function syncActiveIcoGalleryItemFromImage() {
   }
 }
 
+/**
+ * Collects ICO gallery items from the DOM and attaches click listeners so users can switch
+ * between embedded ICO frame sizes.
+ */
 function initializeIcoGallery() {
   icoGalleryItems = Array.from(document.querySelectorAll('.ico-gallery-item'));
   if (!image || !icoGalleryItems.length) {
@@ -1585,6 +1926,9 @@ function initializeIcoGallery() {
   syncActiveIcoGalleryItemFromImage();
 }
 
+/**
+ * Copies the current preview image source to the overview map image element.
+ */
 function syncOverviewMapSource() {
   if (!overviewMapImage || !image) {
     return;
@@ -1598,6 +1942,9 @@ function syncOverviewMapSource() {
   overviewMapImage.setAttribute('src', currentSource);
 }
 
+/**
+ * Hides the overview map viewport indicator.
+ */
 function hideOverviewMapViewport() {
   if (!overviewMapViewport) {
     return;
@@ -1607,6 +1954,12 @@ function hideOverviewMapViewport() {
   overviewMapViewport.style.display = 'none';
 }
 
+/**
+ * Computes the content rectangle of the overview map image using object-fit: contain logic.
+ *
+ * @returns {{ left: number, top: number, width: number, height: number } | null}
+ *   Rectangle in element-local coordinates, or null when dimensions are unavailable.
+ */
 function getOverviewMapContentRect() {
   if (!overviewMapImage) {
     return null;
@@ -1644,6 +1997,10 @@ function getOverviewMapContentRect() {
   };
 }
 
+/**
+ * Repositions and resizes the overview map viewport indicator to reflect the current
+ * visible portion of the preview.
+ */
 function updateOverviewMapViewport() {
   if (!overviewMapImage || !overviewMapViewport || !image || !preview) {
     return;
@@ -1686,6 +2043,10 @@ function updateOverviewMapViewport() {
   overviewMapViewport.style.height = `${String(Math.max(1, normalizedHeight * mapContentRect.height))}px`;
 }
 
+/**
+ * Schedules an overview map viewport update on the next animation frame, coalescing
+ * multiple calls within the same frame.
+ */
 function requestOverviewMapViewportUpdate() {
   if (overviewMapViewportFrameId !== null) {
     return;
@@ -1697,6 +2058,12 @@ function requestOverviewMapViewportUpdate() {
   });
 }
 
+/**
+ * Scrolls the preview so that the point clicked on the overview map is centered in the viewport.
+ *
+ * @param {number} clientX Pointer X position in viewport coordinates.
+ * @param {number} clientY Pointer Y position in viewport coordinates.
+ */
 function centerPreviewFromOverviewPointer(clientX, clientY) {
   if (!overviewMapImage || !image || !preview) {
     return;
@@ -1730,6 +2097,11 @@ function centerPreviewFromOverviewPointer(clientX, clientY) {
   requestOverviewMapViewportUpdate();
 }
 
+/**
+ * Ends an overview map drag interaction, releasing pointer capture.
+ *
+ * @param {number} pointerId The pointer ID to release.
+ */
 function endOverviewMapDrag(pointerId) {
   if (!overviewMapImage || overviewMapDragPointerId !== pointerId) {
     return;
@@ -1743,6 +2115,16 @@ function endOverviewMapDrag(pointerId) {
   overviewMapDragPointerId = null;
 }
 
+/**
+ * Interpolates logarithmically between two zoom values based on the current image zoom.
+ *
+ * @param {number} value Current image zoom level.
+ * @param {number} fromValue Input zoom at the lower bound.
+ * @param {number} fromZoom Output zoom at the lower bound.
+ * @param {number} toValue Input zoom at the upper bound.
+ * @param {number} toZoom Output zoom at the upper bound.
+ * @returns {number} Interpolated zoom value.
+ */
 function interpolateLogarithmic(value, fromValue, fromZoom, toValue, toZoom) {
   const safeValue = Math.max(0.0001, value);
   const fromLog = Math.log(fromValue);
@@ -1752,6 +2134,12 @@ function interpolateLogarithmic(value, fromValue, fromZoom, toValue, toZoom) {
   return fromZoom + (toZoom - fromZoom) * progress;
 }
 
+/**
+ * Computes the loupe magnification factor that should be used at the given image display zoom.
+ *
+ * @param {number} displayedZoom Current rendered zoom (rendered px / natural px).
+ * @returns {number} Loupe relative zoom factor.
+ */
 function getDynamicLoupeZoom(displayedZoom) {
   const normalizedImageZoom = clamp(displayedZoom, MIN_ZOOM, MAX_ZOOM);
   return interpolateLogarithmic(
@@ -1763,6 +2151,12 @@ function getDynamicLoupeZoom(displayedZoom) {
   );
 }
 
+/**
+ * Positions the loupe canvas element so that it is centered on the given client coordinates.
+ *
+ * @param {number} clientX Pointer X position in viewport coordinates.
+ * @param {number} clientY Pointer Y position in viewport coordinates.
+ */
 function positionLoupeAtPointer(clientX, clientY) {
   if (!pipetteZoomLoupe) {
     return;
@@ -1997,6 +2391,9 @@ previewBody?.addEventListener('click', (event) => {
   }
 });
 
+/**
+ * Hides the zoom selection box overlay.
+ */
 function hideSelectionBox() {
   if (!zoomSelectionBox) {
     return;
@@ -2005,6 +2402,14 @@ function hideSelectionBox() {
   zoomSelectionBox.style.display = 'none';
 }
 
+/**
+ * Draws and positions the zoom selection rubber-band box based on start and current pointer positions.
+ *
+ * @param {number} startClientX Selection start X in viewport coordinates.
+ * @param {number} startClientY Selection start Y in viewport coordinates.
+ * @param {number} currentClientX Current pointer X in viewport coordinates.
+ * @param {number} currentClientY Current pointer Y in viewport coordinates.
+ */
 function drawSelectionBox(startClientX, startClientY, currentClientX, currentClientY) {
   if (!previewContainer || !zoomSelectionBox) {
     return;
@@ -2023,6 +2428,14 @@ function drawSelectionBox(startClientX, startClientY, currentClientX, currentCli
   zoomSelectionBox.style.height = `${String(Math.round(height))}px`;
 }
 
+/**
+ * Zooms the preview to fit the area defined by the given client-coordinate selection rectangle.
+ *
+ * @param {number} startClientX Selection start X in viewport coordinates.
+ * @param {number} startClientY Selection start Y in viewport coordinates.
+ * @param {number} endClientX Selection end X in viewport coordinates.
+ * @param {number} endClientY Selection end Y in viewport coordinates.
+ */
 function zoomToSelection(startClientX, startClientY, endClientX, endClientY) {
   if (!image || !preview) {
     return;
@@ -2083,6 +2496,9 @@ function zoomToSelection(startClientX, startClientY, endClientX, endClientY) {
   });
 }
 
+/**
+ * Ends the active area-zoom selection, releases pointer capture and hides the selection box.
+ */
 function finishSelection() {
   if (!previewBody) {
     return;
@@ -2096,6 +2512,12 @@ function finishSelection() {
   hideSelectionBox();
 }
 
+/**
+ * Ends a pan-drag interaction on the preview, removing the dragging CSS class and
+ * releasing pointer capture.
+ *
+ * @param {number} pointerId The pointer ID to release.
+ */
 function endPreviewDrag(pointerId) {
   if (!preview || !previewBody) {
     return;
@@ -2108,10 +2530,21 @@ function endPreviewDrag(pointerId) {
   }
 }
 
+/**
+ * Clamps a value within the inclusive [min, max] range.
+ *
+ * @param {number} value Value to clamp.
+ * @param {number} min Lower bound.
+ * @param {number} max Upper bound.
+ * @returns {number} Clamped value.
+ */
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+/**
+ * Calculates and applies the fit-to-viewport size for the preview image(s).
+ */
 function applyFitSizing() {
   if (!image || !preview || !previewBody) {
     return;
@@ -2144,6 +2577,12 @@ function applyFitSizing() {
   }
 }
 
+/**
+ * Updates the pan-enabled CSS class based on whether the image overflows the preview viewport.
+ * Optionally resets scroll position when content fits.
+ *
+ * @param {boolean} resetScrollWhenNotPannable When true, resets scroll to 0 if content fits.
+ */
 function updatePanAvailability(resetScrollWhenNotPannable) {
   if (!preview) {
     return;
@@ -2164,6 +2603,10 @@ function updatePanAvailability(resetScrollWhenNotPannable) {
   }
 }
 
+/**
+ * Refreshes the zoom label, image dimensions, compare split and overview map to reflect
+ * the current zoom/fit state.
+ */
 function updateView() {
   if (!image || !zoomLabel || !preview || !previewBody) {
     return;
@@ -2205,12 +2648,22 @@ function updateView() {
   requestOverviewMapViewportUpdate();
 }
 
+/**
+ * Sets an explicit zoom level, exiting fit mode.
+ *
+ * @param {number} nextZoom Desired zoom level (clamped to [MIN_ZOOM, MAX_ZOOM]).
+ */
 function setZoom(nextZoom) {
   fitMode = false;
   zoom = clamp(nextZoom, MIN_ZOOM, MAX_ZOOM);
   updateView();
 }
 
+/**
+ * Returns the current effective zoom level as rendered-pixels / natural-pixels.
+ *
+ * @returns {number} Current display zoom ratio.
+ */
 function getDisplayedZoom() {
   if (!image || image.naturalWidth <= 0) {
     return 1;
@@ -2224,17 +2677,28 @@ function getDisplayedZoom() {
   return renderedWidth / image.naturalWidth;
 }
 
+/**
+ * Increments or decrements the current zoom by the given delta, exiting fit mode.
+ *
+ * @param {number} delta Zoom delta to apply (positive = zoom in).
+ */
 function applyZoomDelta(delta) {
   const baseZoom = fitMode ? getDisplayedZoom() : zoom;
   setZoom(baseZoom + delta);
 }
 
+/**
+ * Resets zoom to 100% and exits fit mode.
+ */
 function resetZoom() {
   fitMode = false;
   zoom = 1;
   updateView();
 }
 
+/**
+ * Activates fit-to-viewport mode.
+ */
 function setFitMode() {
   fitMode = true;
   updateView();
@@ -2297,6 +2761,13 @@ function isDoubleClickOnPreviewImage(event) {
   return Boolean(isOnCompareImage);
 }
 
+/**
+ * Determines and applies the best initial view mode (fit or 100%) for the currently loaded image.
+ * Retries up to 12 times via rAF when layout dimensions are not yet available.
+ *
+ * @param {number} token Decision token used to discard stale callbacks.
+ * @param {number} [attempt=0] Current retry attempt count.
+ */
 function applyInitialViewModeForCurrentImage(token, attempt = 0) {
   if (token !== initialViewModeDecisionToken || !image || !preview) {
     return;
@@ -2328,12 +2799,20 @@ function applyInitialViewModeForCurrentImage(token, attempt = 0) {
   updateView();
 }
 
+/**
+ * Increments the decision token and starts the initial view mode selection process.
+ */
 function scheduleInitialViewModeDecision() {
   initialViewModeDecisionToken += 1;
   const decisionToken = initialViewModeDecisionToken;
   applyInitialViewModeForCurrentImage(decisionToken, 0);
 }
 
+/**
+ * Shows or hides the info overlay panel and persists the choice in localStorage.
+ *
+ * @param {boolean} isVisible Whether the overlay should be visible.
+ */
 function setInfoOverlayVisible(isVisible) {
   if (!infoOverlay) {
     return;
@@ -2357,6 +2836,9 @@ function setInfoOverlayVisible(isVisible) {
   }
 }
 
+/**
+ * Reads the stored info overlay visibility from localStorage and applies it.
+ */
 function initializeInfoOverlayVisibility() {
   let isVisible = false;
 
@@ -2372,6 +2854,9 @@ function initializeInfoOverlayVisibility() {
   setInfoOverlayVisible(isVisible);
 }
 
+/**
+ * Persists the current info overlay position (left, top) to localStorage.
+ */
 function saveInfoOverlayPosition() {
   if (!infoOverlay) {
     return;
@@ -2394,6 +2879,13 @@ function saveInfoOverlayPosition() {
   }
 }
 
+/**
+ * Clamps overlay left/top values so the overlay remains fully within the preview container.
+ *
+ * @param {number} left Candidate left offset in pixels.
+ * @param {number} top Candidate top offset in pixels.
+ * @returns {{ left: number, top: number }} Clamped position.
+ */
 function clampOverlayPosition(left, top) {
   if (!previewContainer || !infoOverlay) {
     return { left: 0, top: 0 };
@@ -2408,6 +2900,12 @@ function clampOverlayPosition(left, top) {
   };
 }
 
+/**
+ * Sets the info overlay left/top CSS position after clamping to the container bounds.
+ *
+ * @param {number} left Target left offset in pixels.
+ * @param {number} top Target top offset in pixels.
+ */
 function applyInfoOverlayPosition(left, top) {
   if (!infoOverlay) {
     return;
@@ -2419,6 +2917,10 @@ function applyInfoOverlayPosition(left, top) {
   infoOverlay.style.right = 'auto';
 }
 
+/**
+ * Reads the stored overlay position from localStorage and applies it, or places the overlay
+ * near the top-right corner of the preview when no stored position exists.
+ */
 function initializeInfoOverlayPosition() {
   if (!infoOverlay) {
     return;
@@ -2449,6 +2951,12 @@ function initializeInfoOverlayPosition() {
   applyInfoOverlayPosition(left, top);
 }
 
+/**
+ * Moves the info overlay to follow the pointer during a drag interaction.
+ *
+ * @param {number} clientX Pointer X position in viewport coordinates.
+ * @param {number} clientY Pointer Y position in viewport coordinates.
+ */
 function moveOverlayFromPointer(clientX, clientY) {
   if (!previewContainer || !infoOverlay) {
     return;
@@ -2471,6 +2979,9 @@ function moveOverlayFromPointer(clientX, clientY) {
   infoOverlay.style.top = `${String(Math.round(nextTop))}px`;
 }
 
+/**
+ * Ends the info overlay drag interaction, releases pointer capture and saves the position.
+ */
 function endOverlayDrag() {
   if (!infoOverlayHandle) {
     return;
@@ -2648,6 +3159,24 @@ compareSlider?.addEventListener('input', () => {
 
   compareSplitPercent = clamp(nextValue, 0, 100);
   applyCompareSplit();
+});
+
+compareDiffSensitivitySlider?.addEventListener('input', () => {
+  if (!(compareDiffSensitivitySlider instanceof HTMLInputElement)) {
+    return;
+  }
+
+  applyCompareDiffSensitivity(compareDiffSensitivitySlider.value);
+
+  try {
+    localStorage.setItem(COMPARE_DIFF_SENSITIVITY_STORAGE_KEY, String(compareDiffSensitivity));
+  } catch {
+    // Ignore storage errors.
+  }
+
+  if (isSideBySideCompareActive()) {
+    scheduleCompareDifferenceAnalysis();
+  }
 });
 
 compareDivider?.addEventListener('pointerdown', (event) => {
@@ -3083,6 +3612,10 @@ window.addEventListener('message', (event) => {
         if (pipetteMode) {
           refreshPipetteImageBuffer();
         }
+
+        if (isSideBySideCompareActive()) {
+          scheduleCompareDifferenceAnalysis();
+        }
       }
       break;
     default:
@@ -3093,6 +3626,7 @@ window.addEventListener('message', (event) => {
 initializeLoupeSettingsFromDom();
 initializeThemeFromDom();
 initializeEditPersistenceSettingsFromDom();
+initializeCompareDiffSettingsFromDom();
 initializeInfoOverlayVisibility();
 initializeInfoOverlayPosition();
 initializeIcoGallery();
