@@ -46,6 +46,8 @@ const zoomInButton = document.getElementById('zoom-in');
 const zoomOutButton = document.getElementById('zoom-out');
 const zoomResetButton = document.getElementById('zoom-reset');
 const zoomFitButton = document.getElementById('zoom-fit');
+const rotateLeftButton = document.getElementById('rotate-left');
+const rotateRightButton = document.getElementById('rotate-right');
 const zoomSelectButton = document.getElementById('zoom-select');
 const infoToggleButton = document.getElementById('info-toggle');
 const compareToolButton = document.getElementById('compare-tool');
@@ -147,6 +149,10 @@ let compareDiffCurrentIndex = -1;
 let compareDiffOverlayTarget = 'left';
 let compareDiffShowAllEnabled = false;
 let compareDiffAutoCenterEnabled = false;
+let originalImageSource = image?.getAttribute('src') || '';
+let originalCompareImageSource = compareImage?.getAttribute('src') || '';
+let imageRotationQuarterTurns = 0;
+let imageRotationRenderToken = 0;
 let initialViewModeDecisionToken = 0;
 const COMPARE_ORIENTATION_VERTICAL_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle"><rect x="3" y="3" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.4"/><path d="M10 4v12" stroke="currentColor" stroke-width="1.4"/></svg>';
 const COMPARE_ORIENTATION_HORIZONTAL_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle"><rect x="3" y="3" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.4"/><path d="M4 10h12" stroke="currentColor" stroke-width="1.4"/></svg>';
@@ -165,6 +171,119 @@ function toClampedNumber(value, min, max, fallbackValue) {
 
 function toClampedInteger(value, min, max, fallbackValue) {
   return Math.round(toClampedNumber(value, min, max, fallbackValue));
+}
+
+/**
+ * Normalizes quarter-turn values to a value in the [0..3] range.
+ *
+ * @param quarterTurns Requested quarter-turn count.
+ * @returns Normalized quarter-turn count.
+ */
+function normalizeQuarterTurns(quarterTurns) {
+  const normalizedTurns = Number.parseInt(String(quarterTurns), 10);
+  if (!Number.isFinite(normalizedTurns)) {
+    return 0;
+  }
+
+  return ((normalizedTurns % 4) + 4) % 4;
+}
+
+/**
+ * Loads an image source in memory so it can be drawn to a canvas.
+ *
+ * @param source Image source URI.
+ * @returns Promise resolved with the loaded image element.
+ */
+function loadImageForRotation(source) {
+  return new Promise((resolve, reject) => {
+    const sourceImage = new Image();
+    sourceImage.addEventListener('load', () => resolve(sourceImage), { once: true });
+    sourceImage.addEventListener('error', () => reject(new Error('Unable to load image for rotation.')), { once: true });
+    sourceImage.src = source;
+  });
+}
+
+/**
+ * Builds a rotated image source from a base source.
+ *
+ * @param source Base image source URI.
+ * @param quarterTurns Rotation amount in 90-degree turns.
+ * @returns Promise resolved with the rotated source URI.
+ */
+async function buildRotatedImageSource(source, quarterTurns) {
+  if (typeof source !== 'string' || source.length === 0) {
+    return source;
+  }
+
+  const normalizedTurns = normalizeQuarterTurns(quarterTurns);
+  if (normalizedTurns === 0) {
+    return source;
+  }
+
+  try {
+    const sourceImage = await loadImageForRotation(source);
+    const canvas = document.createElement('canvas');
+    const quarterTurnIsOdd = normalizedTurns % 2 === 1;
+    canvas.width = quarterTurnIsOdd ? sourceImage.naturalHeight : sourceImage.naturalWidth;
+    canvas.height = quarterTurnIsOdd ? sourceImage.naturalWidth : sourceImage.naturalHeight;
+
+    const context = canvas.getContext('2d');
+    if (!context) {
+      return source;
+    }
+
+    context.translate(canvas.width / 2, canvas.height / 2);
+    context.rotate(normalizedTurns * (Math.PI / 2));
+    context.drawImage(sourceImage, -sourceImage.naturalWidth / 2, -sourceImage.naturalHeight / 2);
+    return canvas.toDataURL('image/png');
+  } catch {
+    return source;
+  }
+}
+
+/**
+ * Applies current rotation to the main and comparison preview images.
+ *
+ * @returns Promise resolved when sources are updated.
+ */
+async function applyImageRotationToPreview() {
+  if (!image) {
+    return;
+  }
+
+  const nextRenderToken = imageRotationRenderToken + 1;
+  imageRotationRenderToken = nextRenderToken;
+
+  const nextMainSource = await buildRotatedImageSource(originalImageSource, imageRotationQuarterTurns);
+  const nextCompareSource = originalCompareImageSource
+    ? await buildRotatedImageSource(originalCompareImageSource, imageRotationQuarterTurns)
+    : '';
+
+  if (nextRenderToken !== imageRotationRenderToken) {
+    return;
+  }
+
+  if (nextMainSource) {
+    image.setAttribute('src', nextMainSource);
+  }
+
+  if (compareImage) {
+    if (nextCompareSource) {
+      compareImage.setAttribute('src', nextCompareSource);
+    } else {
+      compareImage.removeAttribute('src');
+    }
+  }
+}
+
+/**
+ * Rotates the preview image by 90-degree increments.
+ *
+ * @param quarterTurnDelta Rotation delta in quarter-turns.
+ */
+function rotatePreviewImage(quarterTurnDelta) {
+  imageRotationQuarterTurns = normalizeQuarterTurns(imageRotationQuarterTurns + quarterTurnDelta);
+  void applyImageRotationToPreview();
 }
 
 function applyLoupeSettings(nextSettings) {
@@ -1115,7 +1234,8 @@ function setComparisonImage(source, label) {
     return;
   }
 
-  compareImage.setAttribute('src', source);
+  originalCompareImageSource = source;
+  void applyImageRotationToPreview();
   compareImageLabel.textContent = label || 'Comparison image';
 
   const shouldEnableSideBySide = enableSideBySideOnNextComparePick || compareViewMode === 'side-by-side';
@@ -1134,6 +1254,7 @@ function clearComparisonImage() {
     return;
   }
 
+  originalCompareImageSource = '';
   compareImage.removeAttribute('src');
   compareImage.style.clipPath = '';
   compareImage.classList.add('is-hidden');
@@ -1381,7 +1502,7 @@ function syncActiveIcoGalleryItemFromImage() {
     return;
   }
 
-  const currentSource = image.getAttribute('src');
+  const currentSource = originalImageSource || image.getAttribute('src');
   if (!currentSource) {
     return;
   }
@@ -1413,9 +1534,8 @@ function initializeIcoGallery() {
         setPipetteMode(false);
       }
 
-      image.setAttribute('src', nextSource);
-      syncOverviewMapSource();
-      updateView();
+      originalImageSource = nextSource;
+      void applyImageRotationToPreview();
     });
   }
 
@@ -2338,6 +2458,14 @@ bindClickAction(zoomFitButton, () => {
   setFitMode();
 });
 
+bindClickAction(rotateLeftButton, () => {
+  rotatePreviewImage(-1);
+});
+
+bindClickAction(rotateRightButton, () => {
+  rotatePreviewImage(1);
+});
+
 bindClickAction(zoomSelectButton, () => {
   setSelectionMode(!selectionMode);
 });
@@ -2913,6 +3041,9 @@ initializeInfoOverlayVisibility();
 initializeInfoOverlayPosition();
 initializeIcoGallery();
 syncOverviewMapSource();
+if (imageRotationQuarterTurns !== 0) {
+  void applyImageRotationToPreview();
+}
 if (hasComparisonImage()) {
   setCompareEnabled(true);
 } else {

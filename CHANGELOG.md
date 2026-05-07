@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.11.3] - 2026-05-07
+### Added
+- Added clockwise and counterclockwise rotation buttons (90-degree steps) to the Image Details toolbar.
+
 ## [1.11.2] - 2026-06-10
 ### Added
 - Added a gallery metadata badge showing each image file's last modified date and time directly on its tile.

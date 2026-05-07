@@ -171,6 +171,12 @@ export function buildCustomEditorWebview(
         <button id="zoom-fit" type="button" title="Fit to view" aria-label="Fit to view">
           <span class="icon" aria-hidden="true">⤢</span>
         </button>
+        <button id="rotate-left" type="button" title="Rotate left 90°" aria-label="Rotate left 90 degrees">
+          <span class="icon" aria-hidden="true">↺</span>
+        </button>
+        <button id="rotate-right" type="button" title="Rotate right 90°" aria-label="Rotate right 90 degrees">
+          <span class="icon" aria-hidden="true">↻</span>
+        </button>
         <button id="zoom-select" type="button" title="Zoom to selection" aria-label="Zoom to selection">
           <span class="icon" aria-hidden="true">▭</span>
         </button>
