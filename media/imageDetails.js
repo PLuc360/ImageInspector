@@ -153,6 +153,7 @@ let originalImageSource = image?.getAttribute('src') || '';
 let originalCompareImageSource = compareImage?.getAttribute('src') || '';
 let imageRotationQuarterTurns = 0;
 let imageRotationRenderToken = 0;
+let saveEditsToOriginalFile = false;
 let initialViewModeDecisionToken = 0;
 const COMPARE_ORIENTATION_VERTICAL_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle"><rect x="3" y="3" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.4"/><path d="M10 4v12" stroke="currentColor" stroke-width="1.4"/></svg>';
 const COMPARE_ORIENTATION_HORIZONTAL_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle"><rect x="3" y="3" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.4"/><path d="M4 10h12" stroke="currentColor" stroke-width="1.4"/></svg>';
@@ -171,6 +172,32 @@ function toClampedNumber(value, min, max, fallbackValue) {
 
 function toClampedInteger(value, min, max, fallbackValue) {
   return Math.round(toClampedNumber(value, min, max, fallbackValue));
+}
+
+/**
+ * Converts a generic runtime value to a boolean flag.
+ *
+ * @param value Candidate value.
+ * @param fallbackValue Fallback value when parsing fails.
+ * @returns Parsed boolean flag.
+ */
+function toBooleanFlag(value, fallbackValue = false) {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const normalizedValue = value.trim().toLowerCase();
+    if (normalizedValue === 'true') {
+      return true;
+    }
+
+    if (normalizedValue === 'false') {
+      return false;
+    }
+  }
+
+  return fallbackValue;
 }
 
 /**
@@ -329,6 +356,20 @@ function initializeThemeFromDom() {
   if (typeof accentRgb === 'string' && accentRgb.trim().length > 0) {
     applyThemeAccentRgb(accentRgb);
   }
+}
+
+/**
+ * Initializes edit persistence behavior from webview data attributes.
+ */
+function initializeEditPersistenceSettingsFromDom() {
+  if (!layoutElement) {
+    return;
+  }
+
+  saveEditsToOriginalFile = toBooleanFlag(
+    layoutElement.dataset.saveEditsToOriginalFile,
+    saveEditsToOriginalFile
+  );
 }
 
 function ensurePipetteBufferContext() {
@@ -1235,6 +1276,8 @@ function setComparisonImage(source, label) {
   }
 
   originalCompareImageSource = source;
+  // Set a synchronous source first so comparison UI can become visible immediately.
+  compareImage.setAttribute('src', source);
   void applyImageRotationToPreview();
   compareImageLabel.textContent = label || 'Comparison image';
 
@@ -2460,10 +2503,18 @@ bindClickAction(zoomFitButton, () => {
 
 bindClickAction(rotateLeftButton, () => {
   rotatePreviewImage(-1);
+
+  if (saveEditsToOriginalFile) {
+    vscode?.postMessage({ type: 'rotate-image', direction: 'left' });
+  }
 });
 
 bindClickAction(rotateRightButton, () => {
   rotatePreviewImage(1);
+
+  if (saveEditsToOriginalFile) {
+    vscode?.postMessage({ type: 'rotate-image', direction: 'right' });
+  }
 });
 
 bindClickAction(zoomSelectButton, () => {
@@ -3018,6 +3069,10 @@ window.addEventListener('message', (event) => {
       if (message.settings && typeof message.settings === 'object') {
         applyToolbarPosition(typeof message.settings.toolbarPosition === 'string' ? message.settings.toolbarPosition : 'top');
         applyThemeAccentRgb(typeof message.settings.themeAccentRgb === 'string' ? message.settings.themeAccentRgb : '');
+        saveEditsToOriginalFile = toBooleanFlag(
+          message.settings.saveEditsToOriginalFile,
+          saveEditsToOriginalFile
+        );
         applyLoupeSettings({
           diameter: message.settings.pipetteLoupeDiameter,
           virtualResolution: message.settings.pipetteLoupeVirtualResolution,
@@ -3037,6 +3092,7 @@ window.addEventListener('message', (event) => {
 
 initializeLoupeSettingsFromDom();
 initializeThemeFromDom();
+initializeEditPersistenceSettingsFromDom();
 initializeInfoOverlayVisibility();
 initializeInfoOverlayPosition();
 initializeIcoGallery();

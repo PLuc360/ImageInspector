@@ -31,6 +31,7 @@
   let scheduledScrollSave = 0;
   let scheduledGalleryRefresh = 0;
   let scheduledMetaUpdateFlush = 0;
+  let scheduledProgressUpdate = 0;
   const pendingMetaUpdates = new Map();
   const loadedImageSources = new Set();
   let activeContextMenu = null;
@@ -369,6 +370,51 @@
   }
 
   /**
+   * Schedules a single progress update in the next animation frame, coalescing rapid calls.
+   */
+  function scheduleProgressUpdate() {
+    if (scheduledProgressUpdate) {
+      return;
+    }
+
+    scheduledProgressUpdate = window.requestAnimationFrame(() => {
+      scheduledProgressUpdate = 0;
+      syncGalleryLoadingProgressFromImages();
+    });
+  }
+
+  /**
+   * Indicates whether one gallery item still has placeholder metadata.
+   * @param {any} image
+   * @returns {boolean}
+   */
+  function isMetadataPending(image) {
+    return String(image?.type ?? '').trim().toLowerCase() === 'loading...';
+  }
+
+  /**
+   * Recomputes and applies loading progress from the current gallery state.
+   */
+  function syncGalleryLoadingProgressFromImages() {
+    const totalImages = galleryImages.length;
+    const pendingImages = galleryImages.reduce((count, image) => (
+      isMetadataPending(image) ? count + 1 : count
+    ), 0);
+
+    if (pendingImages > 0) {
+      updateGalleryLoadingProgress({
+        active: true,
+        completed: totalImages - pendingImages,
+        total: totalImages,
+        label: 'Loading gallery metadata...'
+      });
+      return;
+    }
+
+    updateGalleryLoadingProgress({ active: false, completed: totalImages, total: totalImages });
+  }
+
+  /**
    * Selects all gallery tiles matching a duplicate-group file path list.
    * @param {string[]} filePaths
    * @param {'prev' | 'next' | 'cycle'} [direction='cycle']
@@ -450,7 +496,7 @@
     const sizeVal = formatFileSize(img.size);
     const dateVal = formatModifiedDate(img.mtimeMs);
     const dimVal = (typeof img.width === 'number' && typeof img.height === 'number' && img.width > 0 && img.height > 0 && !isNaN(img.width) && !isNaN(img.height)) ? `${img.width}×${img.height}` : 'N/A';
-    const rawThumbSrc = img.thumbUrl || img.src || '';
+    const rawThumbSrc = img.thumbUrl || '';
     const thumbSrc = escapeHtml(rawThumbSrc);
     const isLoaded = loadedImageSources.has(rawThumbSrc);
     const initialSrc = isLoaded ? thumbSrc : EMPTY_IMAGE_SRC;
@@ -1015,7 +1061,16 @@
 
     const image = item.querySelector('.gallery-thumb img');
     if (image instanceof HTMLImageElement) {
-      image.dataset.src = meta.thumbUrl || meta.src || currentImage.thumbUrl || currentImage.src || '';
+      const nextImageSource = meta.thumbUrl || currentImage.thumbUrl || '';
+      const previousImageSource = image.dataset.src || image.currentSrc || image.src || '';
+      image.dataset.src = nextImageSource;
+
+      if (nextImageSource && nextImageSource !== previousImageSource) {
+        image.dataset.loaded = 'false';
+        image.classList.remove('is-loaded');
+        image.src = EMPTY_IMAGE_SRC;
+      }
+
       loadGalleryImageIfNearViewport(image);
     }
 
@@ -1059,18 +1114,19 @@
     }
 
     let requiresFullRerender = false;
-    for (const { index, meta } of pendingMetaUpdates.values()) {
+    for (const { index, meta, previousName } of pendingMetaUpdates.values()) {
       const resolvedIndex = resolveMetaUpdateIndex(index, meta);
       if (resolvedIndex < 0) {
         continue;
       }
 
-      const previousImage = galleryImages[resolvedIndex] || {};
-      galleryImages[resolvedIndex] = { ...previousImage, ...meta };
+      // galleryImages[resolvedIndex] already has meta merged via the eager merge in enqueueMetaUpdate.
+      // Re-applying is idempotent.
+      galleryImages[resolvedIndex] = { ...galleryImages[resolvedIndex], ...meta };
 
       const itemRequiresFullRerender = currentSort !== 'name'
         || hasActiveTypeFilters()
-        || (typeof meta.name === 'string' && meta.name !== previousImage.name);
+        || (typeof meta.name === 'string' && meta.name !== (previousName ?? ''));
 
       if (itemRequiresFullRerender) {
         requiresFullRerender = true;
@@ -1079,6 +1135,7 @@
 
     if (requiresFullRerender) {
       renderGallery();
+      syncGalleryLoadingProgressFromImages();
       pendingMetaUpdates.clear();
       return;
     }
@@ -1086,6 +1143,7 @@
     for (const { index, meta } of pendingMetaUpdates.values()) {
       patchRenderedItemMeta(index, meta);
     }
+    syncGalleryLoadingProgressFromImages();
     pendingMetaUpdates.clear();
   }
 
@@ -1099,7 +1157,24 @@
       ? meta.filePath
       : (galleryImages[index]?.filePath || String(index));
 
-    pendingMetaUpdates.set(updateKey, { index, meta });
+    // Capture the previous name before the eager merge for name-change detection in flush.
+    const resolvedEagerIndex = resolveMetaUpdateIndex(index, meta);
+    const previousName = resolvedEagerIndex >= 0
+      ? String(galleryImages[resolvedEagerIndex]?.name ?? '')
+      : '';
+
+    pendingMetaUpdates.set(updateKey, { index, meta, previousName });
+
+    // Eagerly merge metadata into galleryImages so that syncGalleryLoadingProgressFromImages()
+    // can read the up-to-date type immediately, before the RAF flush fires.
+    if (resolvedEagerIndex >= 0) {
+      galleryImages[resolvedEagerIndex] = { ...galleryImages[resolvedEagerIndex], ...meta };
+    }
+
+    // Schedule progress update separately from the DOM flush, so progress updates fluidly
+    // without being blocked by render work.
+    scheduleProgressUpdate();
+
     if (scheduledMetaUpdateFlush) {
       return;
     }
@@ -1175,6 +1250,10 @@
         window.cancelAnimationFrame(scheduledMetaUpdateFlush);
         scheduledMetaUpdateFlush = 0;
       }
+      if (scheduledProgressUpdate) {
+        window.cancelAnimationFrame(scheduledProgressUpdate);
+        scheduledProgressUpdate = 0;
+      }
       if (scheduledScrollSave) {
         window.cancelAnimationFrame(scheduledScrollSave);
         scheduledScrollSave = 0;
@@ -1205,20 +1284,7 @@
         galleryImages = msg.images;
         activeDuplicateGroupKey = '';
         activeDuplicateFocusIndex = 0;
-        const totalImages = galleryImages.length;
-        const pendingImages = galleryImages.reduce((count, image) => (
-          String(image?.type ?? '').trim().toLowerCase() === 'loading...' ? count + 1 : count
-        ), 0);
-        if (pendingImages > 0) {
-          updateGalleryLoadingProgress({
-            active: true,
-            completed: totalImages - pendingImages,
-            total: totalImages,
-            label: 'Loading gallery metadata...'
-          });
-        } else {
-          updateGalleryLoadingProgress({ active: false, completed: totalImages, total: totalImages });
-        }
+        syncGalleryLoadingProgressFromImages();
         selectedIndexes = sanitizeSelectedIndexes(selectedIndexes);
         localStorage.setItem(window.selectionKey, JSON.stringify(selectedIndexes));
         if (document.readyState === 'complete' || document.readyState === 'interactive') {
@@ -1241,7 +1307,11 @@
       }
     }
     if (msg.type === 'gallery-load-progress') {
-      updateGalleryLoadingProgress(msg);
+      // Only use host progress when no images are known yet; once galleryImages is populated,
+      // syncGalleryLoadingProgressFromImages() provides a more accurate real-time value.
+      if (galleryImages.length === 0) {
+        updateGalleryLoadingProgress(msg);
+      }
     }
     if (msg.type === 'select-duplicate-group' && Array.isArray(msg.filePaths)) {
       selectDuplicateGroupByFilePaths(msg.filePaths, 'cycle');

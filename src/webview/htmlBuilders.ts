@@ -60,6 +60,7 @@ export function buildCustomEditorWebview(
   options?: {
     toolbarPosition?: string;
     themeAccentRgb?: string;
+    saveEditsToOriginalFile?: boolean;
     icoVariants?: IcoVariantViewModel[];
     comparisonImageSource?: string;
     comparisonImageLabel?: string;
@@ -71,6 +72,7 @@ export function buildCustomEditorWebview(
 ): string {
   const toolbarPosition = options?.toolbarPosition || 'top';
   const themeAccentRgb = options?.themeAccentRgb ?? '0,200,110';
+  const saveEditsToOriginalFile = options?.saveEditsToOriginalFile ?? false;
   const loupeDiameter = options?.pipetteLoupeDiameter ?? 96;
   const loupeVirtualResolution = options?.pipetteLoupeVirtualResolution ?? 25;
   const loupeZoomAtMinImageZoom = options?.pipetteLoupeZoomAtMinImageZoom ?? 6;
@@ -152,6 +154,7 @@ export function buildCustomEditorWebview(
   <div
     class="layout"
     data-toolbar-green-accent-rgb="${escapeHtml(themeAccentRgb)}"
+    data-save-edits-to-original-file="${saveEditsToOriginalFile ? 'true' : 'false'}"
     data-loupe-diameter="${String(loupeDiameter)}"
     data-loupe-virtual-resolution="${String(loupeVirtualResolution)}"
     data-loupe-zoom-at-min-image-zoom="${String(loupeZoomAtMinImageZoom)}"

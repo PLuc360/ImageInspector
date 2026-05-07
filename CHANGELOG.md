@@ -4,9 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [1.11.3] - 2026-05-07
+## [1.12.0] - 2026-05-07
 ### Added
 - Added clockwise and counterclockwise rotation buttons (90-degree steps) to the Image Details toolbar.
+- Added a new `imageInspector.saveEditsToOriginalFile` setting to optionally save toolbar rotations directly into the original image file. (webp file does not save edits).
+### Fixed
+- Fixed gallery loading progress bar stuck at ~10% when sorting by date: progress now syncs from the actual image metadata state in real-time, independently from host progress messages and DOM batch updates, ensuring fluid and accurate visual feedback throughout the loading process.
 
 ## [1.11.2] - 2026-06-10
 ### Added

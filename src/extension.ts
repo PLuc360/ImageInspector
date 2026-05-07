@@ -28,6 +28,7 @@ function setBoundedCachedValue<T>(cache: Map<string, T>, key: string, value: T, 
 interface ImageInspectorSettings {
   toolbarPosition: string;
   themeAccentRgb: string;
+  saveEditsToOriginalFile: boolean;
   pipetteLoupeDiameter: number;
   pipetteLoupeVirtualResolution: number;
   pipetteLoupeZoomAtMinImageZoom: number;
@@ -84,44 +85,16 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
     token: vscode.CancellationToken
   ): Promise<void> {
     try {
-      const filePath = document.uri.fsPath;
-      const settings = getImageInspectorSettings();
-      const icoVariants = path.extname(filePath).toLowerCase() === '.ico'
-        ? await getIcoGalleryItems(filePath)
-        : [];
-
       webviewPanel.webview.options = {
         enableScripts: true,
         localResourceRoots: [
           vscode.Uri.joinPath(this.context.extensionUri, 'media'),
-          vscode.Uri.file(path.dirname(filePath)),
+          vscode.Uri.file(path.dirname(document.uri.fsPath)),
           ...(vscode.workspace.workspaceFolders?.map((folder) => folder.uri) ?? [])
         ]
       };
 
-      const fileVersionInfo = await getFileVersionInfo(filePath);
-      const details = await getImageDetails(filePath, fileVersionInfo);
-      const imageSrc = await getWebviewImageSource(
-        filePath,
-        document.uri,
-        webviewPanel.webview,
-        fileVersionInfo.key
-      );
-      webviewPanel.webview.html = buildCustomEditorWebview(
-        webviewPanel.webview,
-        imageSrc,
-        details,
-        this.context.extensionUri,
-        {
-          toolbarPosition: settings.toolbarPosition,
-          themeAccentRgb: settings.themeAccentRgb,
-          icoVariants,
-          pipetteLoupeDiameter: settings.pipetteLoupeDiameter,
-          pipetteLoupeVirtualResolution: settings.pipetteLoupeVirtualResolution,
-          pipetteLoupeZoomAtMinImageZoom: settings.pipetteLoupeZoomAtMinImageZoom,
-          pipetteLoupeZoomAtMaxImageZoom: settings.pipetteLoupeZoomAtMaxImageZoom
-        }
-      );
+      await this.renderPanelContent(webviewPanel, document.uri);
 
       const isNewPanel = !this.openPanels.has(webviewPanel);
       this.openPanels.set(webviewPanel, document.uri);
@@ -133,9 +106,19 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
             return;
           }
 
-          const webviewMessage = message as { type: string };
+          const webviewMessage = message as { type: string; direction?: string };
+          const currentImageUri = this.openPanels.get(webviewPanel) ?? document.uri;
           if (webviewMessage.type === 'pick-compare-image') {
-            void this.promptComparisonImageForPanel(webviewPanel, document.uri);
+            void this.promptComparisonImageForPanel(webviewPanel, currentImageUri);
+            return;
+          }
+
+          if (webviewMessage.type === 'rotate-image') {
+            void this.rotateImageAndRefreshPanel(
+              webviewPanel,
+              currentImageUri,
+              webviewMessage.direction === 'left' ? 'left' : 'right'
+            );
           }
         });
 
@@ -155,6 +138,242 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
     } catch (err) {
       webviewPanel.webview.html = buildErrorWebview(getImageLoadErrorMessage(document.uri.fsPath, err));
     }
+  }
+
+  /**
+   * Renders the image details webview HTML for a specific panel and image.
+   *
+   * @param panel Target webview panel.
+   * @param imageUri Image URI to render.
+   */
+  private async renderPanelContent(panel: vscode.WebviewPanel, imageUri: vscode.Uri): Promise<void> {
+    const filePath = imageUri.fsPath;
+    const settings = getImageInspectorSettings();
+    const icoVariants = path.extname(filePath).toLowerCase() === '.ico'
+      ? await getIcoGalleryItems(filePath)
+      : [];
+    const fileVersionInfo = await getFileVersionInfo(filePath);
+    const details = await getImageDetails(filePath, fileVersionInfo);
+    const imageSrc = await getWebviewImageSource(
+      filePath,
+      fileVersionInfo.key
+    );
+
+    panel.webview.html = buildCustomEditorWebview(
+      panel.webview,
+      imageSrc,
+      details,
+      this.context.extensionUri,
+      {
+        toolbarPosition: settings.toolbarPosition,
+        themeAccentRgb: settings.themeAccentRgb,
+        saveEditsToOriginalFile: settings.saveEditsToOriginalFile,
+        icoVariants,
+        pipetteLoupeDiameter: settings.pipetteLoupeDiameter,
+        pipetteLoupeVirtualResolution: settings.pipetteLoupeVirtualResolution,
+        pipetteLoupeZoomAtMinImageZoom: settings.pipetteLoupeZoomAtMinImageZoom,
+        pipetteLoupeZoomAtMaxImageZoom: settings.pipetteLoupeZoomAtMaxImageZoom
+      }
+    );
+  }
+
+  /**
+   * Rotates the current image file in place, then refreshes the corresponding panel.
+   *
+   * @param panel Source webview panel that triggered the rotation.
+   * @param imageUri Image URI to rotate.
+   * @param direction Rotation direction (`left` or `right`).
+   */
+  private async rotateImageAndRefreshPanel(
+    panel: vscode.WebviewPanel,
+    imageUri: vscode.Uri,
+    direction: 'left' | 'right'
+  ): Promise<void> {
+    const settings = getImageInspectorSettings();
+    if (!settings.saveEditsToOriginalFile) {
+      return;
+    }
+
+    try {
+      const rotatedBuffer = await this.getRotatedImageBuffer(imageUri.fsPath, direction);
+      await this.writeRotatedBufferToFile(imageUri.fsPath, rotatedBuffer);
+      invalidateFileCaches(imageUri.fsPath);
+
+      // Notify any open gallery panels that this image has been modified
+      void ImageFolderGalleryPanel.notifyImageFileChanged(imageUri.fsPath);
+
+      await this.renderPanelContent(panel, imageUri);
+    } catch (error) {
+      const errorMessage = getImageLoadErrorMessage(imageUri.fsPath, error);
+      void vscode.window.showErrorMessage(
+        `Unable to save the rotated image. ${errorMessage} Ensure the file is writable and not locked by another application.`
+      );
+    }
+  }
+
+  /**
+   * Builds rotated image bytes while preserving the original file format semantics.
+   *
+   * Raster formats keep using Sharp, whereas SVG files are rewritten as SVG markup
+   * so the saved file still matches its `.svg` extension.
+   *
+   * @param targetPath Absolute file path of the image to rotate.
+   * @param direction Rotation direction (`left` or `right`).
+   * @returns Rotated image payload ready to be written back to disk.
+   */
+  private async getRotatedImageBuffer(targetPath: string, direction: 'left' | 'right'): Promise<Buffer> {
+    if (path.extname(targetPath).toLowerCase() === '.svg') {
+      return rotateSvgFile(targetPath, direction);
+    }
+
+    const sharp = await getSharp();
+    const sourceBuffer = await fs.readFile(targetPath);
+    return sharp(sourceBuffer, { animated: true })
+      .rotate(direction === 'left' ? -90 : 90)
+      .toBuffer();
+  }
+
+  /**
+   * Writes a rotated image buffer to disk using a temporary file replacement strategy.
+   *
+   * This avoids partial writes and reduces file locking issues on Windows when
+   * the original file is being read by another process.
+   *
+   * @param targetPath Absolute path of the image file to overwrite.
+   * @param buffer Rotated image bytes.
+   */
+  private async writeRotatedBufferToFile(targetPath: string, buffer: Buffer): Promise<void> {
+    const fileExtension = path.extname(targetPath);
+    const tempFilePath = path.join(
+      path.dirname(targetPath),
+      `.imageinspector-rotate-${Date.now()}-${Math.random().toString(16).slice(2)}${fileExtension || '.tmp'}`
+    );
+
+    // First try direct overwrite, which can succeed even when replace/delete is blocked.
+    try {
+      await this.writeFileWithRetries(targetPath, buffer);
+      return;
+    } catch {
+      // Fallback to temp-file replacement strategy.
+    }
+
+    try {
+      await fs.writeFile(tempFilePath, buffer);
+      await this.replaceFileWithRetries(tempFilePath, targetPath);
+    } catch (error) {
+      try {
+        await fs.unlink(tempFilePath);
+      } catch {
+        // Ignore cleanup failures.
+      }
+
+      throw error;
+    }
+  }
+
+  /**
+   * Writes a file with retries to tolerate transient lock/contention errors.
+   *
+   * @param targetPath Destination file path.
+   * @param buffer File bytes to write.
+   */
+  private async writeFileWithRetries(targetPath: string, buffer: Buffer): Promise<void> {
+    const retryDelaysMs = [80, 160, 320, 640, 1000];
+    let lastError: unknown;
+
+    for (let attemptIndex = 0; attemptIndex <= retryDelaysMs.length; attemptIndex += 1) {
+      try {
+        await fs.writeFile(targetPath, buffer);
+        return;
+      } catch (error) {
+        lastError = error;
+        if (!this.isRetryableFileReplaceError(error) || attemptIndex === retryDelaysMs.length) {
+          break;
+        }
+
+        await this.waitForMilliseconds(retryDelaysMs[attemptIndex]);
+      }
+    }
+
+    throw lastError;
+  }
+
+  /**
+   * Replaces a target file from a temporary file with retries for transient Windows locks.
+   *
+   * @param tempFilePath Path to the temporary file.
+   * @param targetPath Path to the destination file.
+   */
+  private async replaceFileWithRetries(tempFilePath: string, targetPath: string): Promise<void> {
+    const retryDelaysMs = [80, 160, 320, 640, 1000];
+    let lastError: unknown;
+
+    for (let attemptIndex = 0; attemptIndex <= retryDelaysMs.length; attemptIndex += 1) {
+      try {
+        await this.replaceFileOnce(tempFilePath, targetPath);
+        return;
+      } catch (error) {
+        lastError = error;
+        if (!this.isRetryableFileReplaceError(error) || attemptIndex === retryDelaysMs.length) {
+          break;
+        }
+
+        await this.waitForMilliseconds(retryDelaysMs[attemptIndex]);
+      }
+    }
+
+    throw lastError;
+  }
+
+  /**
+   * Performs one file replacement attempt using unlink + rename.
+   *
+   * @param tempFilePath Path to the temporary file.
+   * @param targetPath Path to the destination file.
+   */
+  private async replaceFileOnce(tempFilePath: string, targetPath: string): Promise<void> {
+    try {
+      await fs.unlink(targetPath);
+    } catch (error) {
+      const code = typeof error === 'object' && error && 'code' in error
+        ? String((error as { code?: unknown }).code || '')
+        : '';
+
+      if (code !== 'ENOENT') {
+        throw error;
+      }
+    }
+
+    await fs.rename(tempFilePath, targetPath);
+  }
+
+  /**
+   * Detects whether a file-replacement error is likely transient and worth retrying.
+   *
+   * @param error Caught error.
+   * @returns True when retrying is relevant.
+   */
+  private isRetryableFileReplaceError(error: unknown): boolean {
+    const code = typeof error === 'object' && error && 'code' in error
+      ? String((error as { code?: unknown }).code || '')
+      : '';
+
+    return code === 'UNKNOWN'
+      || code === 'EPERM'
+      || code === 'EBUSY'
+      || code === 'EACCES'
+      || code === 'ENOTEMPTY';
+  }
+
+  /**
+   * Waits for a short amount of time.
+   *
+   * @param milliseconds Delay duration.
+   */
+  private async waitForMilliseconds(milliseconds: number): Promise<void> {
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, milliseconds);
+    });
   }
 
   /**
@@ -290,8 +509,6 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
       type: 'set-compare-image',
       source: await getWebviewImageSource(
         comparisonImageUri.fsPath,
-        comparisonImageUri,
-        panel.webview,
         comparisonFileVersion.key
       ),
       label: path.basename(comparisonImageUri.fsPath),
@@ -341,9 +558,6 @@ interface DuplicateGroupMessage {
   fileCount: number;
 }
 
-function getWebviewImageSrc(webview: vscode.Webview, filePath: string): string {
-  return webview.asWebviewUri(vscode.Uri.file(filePath)).toString();
-}
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { createHash } from 'node:crypto';
@@ -390,6 +604,32 @@ type FileVersionInfo = {
 
 function buildFileVersionKey(filePath: string, size: number, mtimeMs: number): string {
   return `${filePath}::${String(size)}::${String(Math.trunc(mtimeMs))}`;
+}
+
+/**
+ * Invalidates all in-memory caches associated with one file path.
+ * @param filePath Absolute file path whose cached entries should be removed.
+ */
+function invalidateFileCaches(filePath: string): void {
+  const cacheKeyPrefix = `${filePath}::`;
+  deleteCachedEntriesByPrefix(imageDetailsCache, cacheKeyPrefix);
+  deleteCachedEntriesByPrefix(icoEntriesCache, cacheKeyPrefix);
+  deleteCachedEntriesByPrefix(icoGalleryCache, cacheKeyPrefix);
+  deleteCachedEntriesByPrefix(convertedPreviewCache, cacheKeyPrefix);
+  deleteCachedEntriesByPrefix(galleryThumbnailCache, cacheKeyPrefix);
+}
+
+/**
+ * Deletes all cache entries whose key starts with the provided prefix.
+ * @param cache Target cache map.
+ * @param cacheKeyPrefix Prefix used to identify entries to remove.
+ */
+function deleteCachedEntriesByPrefix<T>(cache: Map<string, T>, cacheKeyPrefix: string): void {
+  for (const key of cache.keys()) {
+    if (key.startsWith(cacheKeyPrefix)) {
+      cache.delete(key);
+    }
+  }
 }
 
 async function getFileVersionKey(filePath: string): Promise<string> {
@@ -442,9 +682,29 @@ async function getGalleryThumbnailSource(
     return cachedThumbnail;
   }
 
+  const sourceExtension = path.extname(filePath).toLowerCase();
+
+  // ICO payloads are not always decodable by sharp on every platform/build.
+  // Prefer an extracted ICO variant first to keep thumbnails available.
+  if (sourceExtension === '.ico') {
+    try {
+      const icoVariants = await getIcoGalleryItems(filePath);
+      if (icoVariants.length > 0) {
+        const icoPreviewSource = getDefaultIcoVariantSource(icoVariants);
+        setBoundedCachedValue(galleryThumbnailCache, resolvedFileVersion.key, icoPreviewSource, MAX_GALLERY_THUMBNAIL_CACHE_ENTRIES);
+        return icoPreviewSource;
+      }
+    } catch {
+      // Fall back to standard thumbnail generation below.
+    }
+  }
+
   try {
     const sharp = await getSharp();
-    const thumbnailBuffer = await sharp(filePath)
+    const sharpInput = sourceExtension === '.svg'
+      ? await fs.readFile(filePath)
+      : filePath;
+    const thumbnailBuffer = await sharp(sharpInput)
       .rotate()
       .resize({
         width: 320,
@@ -459,6 +719,17 @@ async function getGalleryThumbnailSource(
     setBoundedCachedValue(galleryThumbnailCache, resolvedFileVersion.key, thumbnailSource, MAX_GALLERY_THUMBNAIL_CACHE_ENTRIES);
     return thumbnailSource;
   } catch {
+    if (sourceExtension === '.ico') {
+      try {
+        const icoBuffer = await fs.readFile(filePath);
+        const icoSource = `data:image/x-icon;base64,${icoBuffer.toString('base64')}`;
+        setBoundedCachedValue(galleryThumbnailCache, resolvedFileVersion.key, icoSource, MAX_GALLERY_THUMBNAIL_CACHE_ENTRIES);
+        return icoSource;
+      } catch {
+        // Ignore fallback errors.
+      }
+    }
+
     return '';
   }
 }
@@ -559,6 +830,53 @@ class ImageFolderGalleryPanel {
   }
 
   /**
+   * Notifies gallery panels that an image file has been modified.
+   * Updates the thumbnail and metadata in any gallery panel showing the file's folder.
+   *
+   * @param changedFilePath Absolute path to the image file that was modified.
+   */
+  static async notifyImageFileChanged(changedFilePath: string): Promise<void> {
+    const parentFolder = path.dirname(changedFilePath);
+    const galleryPanel = ImageFolderGalleryPanel.activePanels.get(parentFolder);
+    if (!galleryPanel || galleryPanel.isDisposed) {
+      return;
+    }
+
+    try {
+      const fileVersionInfo = await getFileVersionInfo(changedFilePath);
+      const details = await getImageDetails(changedFilePath, fileVersionInfo);
+      const thumbUrl = await getGalleryThumbnailSource(changedFilePath, fileVersionInfo);
+
+      const currentIndex = galleryPanel.imageFiles.findIndex((img) => img.filePath === changedFilePath);
+      if (currentIndex === -1) {
+        return;
+      }
+
+      const updatedMeta = {
+        src: '',
+        thumbUrl,
+        filePath: changedFilePath,
+        name: details.fileName,
+        type: details.format,
+        size: details.sizeBytes,
+        width: details.width,
+        height: details.height,
+        mtimeMs: fileVersionInfo.mtimeMs
+      };
+
+      galleryPanel.imageFiles[currentIndex] = updatedMeta;
+      await galleryPanel.panel.webview.postMessage({
+        type: 'update-image-meta',
+        index: currentIndex,
+        filePath: changedFilePath,
+        meta: updatedMeta
+      });
+    } catch {
+      // Silently ignore errors notifying the gallery
+    }
+  }
+
+  /**
    * Loads the folder images and progressively enriches the gallery metadata.
    */
   private async initializeGalleryContent(): Promise<void> {
@@ -571,7 +889,7 @@ class ImageFolderGalleryPanel {
 
     this.imageFiles.length = 0;
     this.imageFiles.push(...imagePaths.map((filePath) => ({
-      src: getWebviewImageSrc(this.panel.webview, filePath),
+      src: '',
       thumbUrl: '',
       filePath,
       name: path.basename(filePath),
@@ -650,7 +968,7 @@ class ImageFolderGalleryPanel {
         }
 
         const updatedMeta = {
-          src: getWebviewImageSrc(this.panel.webview, filePath),
+          src: '',
           thumbUrl,
           filePath,
           name: details.fileName,
@@ -1590,7 +1908,11 @@ async function getImageDetails(
 
   try {
     const sharp = await getSharp();
-    const metadata = await sharp(filePath).metadata();
+    const sourceExtension = path.extname(filePath).toLowerCase();
+    const sharpInput = sourceExtension === '.svg'
+      ? await fs.readFile(filePath)
+      : filePath;
+    const metadata = await sharp(sharpInput).metadata();
 
     const width = metadata.width ?? 0;
     const height = metadata.height ?? 0;
@@ -1815,6 +2137,7 @@ function getImageInspectorSettings(): ImageInspectorSettings {
   return {
     toolbarPosition: imageInspectorConfig.get<string>('toolbarPosition', 'top'),
     themeAccentRgb: resolveThemeAccentRgb(themeAccentColor),
+    saveEditsToOriginalFile: imageInspectorConfig.get<boolean>('saveEditsToOriginalFile', true),
     pipetteLoupeDiameter: clampInteger(imageInspectorConfig.get<number>('pipetteLoupeDiameter', 96), 48, 256),
     pipetteLoupeVirtualResolution: clampInteger(
       imageInspectorConfig.get<number>('pipetteLoupeVirtualResolution', 25),
@@ -1854,6 +2177,161 @@ function clampNumber(value: number, min: number, max: number): number {
  */
 function clampInteger(value: number, min: number, max: number): number {
   return Math.round(clampNumber(value, min, max));
+}
+
+interface SvgLengthValue {
+  rawValue: string;
+  numericValue: number;
+}
+
+/**
+ * Rotates an SVG file by rewriting its markup instead of rasterizing it.
+ * @param filePath Absolute SVG file path.
+ * @param direction Rotation direction (`left` or `right`).
+ * @returns Rotated SVG bytes.
+ */
+async function rotateSvgFile(filePath: string, direction: 'left' | 'right'): Promise<Buffer> {
+  const svgContent = await fs.readFile(filePath, 'utf8');
+  const rotatedSvgContent = rotateSvgMarkup(svgContent, direction);
+  return Buffer.from(rotatedSvgContent, 'utf8');
+}
+
+/**
+ * Rotates raw SVG markup by wrapping the current content in a transformed group.
+ * @param svgContent Original SVG markup.
+ * @param direction Rotation direction (`left` or `right`).
+ * @returns Updated SVG markup.
+ */
+function rotateSvgMarkup(svgContent: string, direction: 'left' | 'right'): string {
+  const openingTagMatch = svgContent.match(/<svg\b[^>]*>/i);
+  const closingTagIndex = svgContent.toLowerCase().lastIndexOf('</svg>');
+
+  if (!openingTagMatch || closingTagIndex < 0) {
+    throw new Error('Unsupported SVG markup.');
+  }
+
+  const openingTag = openingTagMatch[0];
+  const openingTagStart = openingTagMatch.index ?? 0;
+  const openingTagEnd = openingTagStart + openingTag.length;
+  const prefix = svgContent.slice(0, openingTagStart);
+  const innerMarkup = svgContent.slice(openingTagEnd, closingTagIndex);
+  const suffix = svgContent.slice(closingTagIndex);
+
+  const viewBoxMatch = openingTag.match(/\bviewBox\s*=\s*(["'])([^"']+)\1/i);
+  const widthMatch = readSvgLengthAttribute(openingTag, 'width');
+  const heightMatch = readSvgLengthAttribute(openingTag, 'height');
+
+  const parsedViewBox = parseSvgViewBox(viewBoxMatch?.[2]);
+  const sourceWidth = parsedViewBox?.width ?? widthMatch?.numericValue;
+  const sourceHeight = parsedViewBox?.height ?? heightMatch?.numericValue;
+
+  if (!sourceWidth || !sourceHeight) {
+    throw new Error('Unable to determine SVG dimensions for rotation.');
+  }
+
+  const sourceMinX = parsedViewBox?.minX ?? 0;
+  const sourceMinY = parsedViewBox?.minY ?? 0;
+  const rotatedWidth = sourceHeight;
+  const rotatedHeight = sourceWidth;
+  const transform = direction === 'left'
+    ? `translate(0 ${formatSvgNumber(sourceWidth)}) rotate(-90) translate(${formatSvgNumber(-sourceMinX)} ${formatSvgNumber(-sourceMinY)})`
+    : `translate(${formatSvgNumber(sourceHeight)} 0) rotate(90) translate(${formatSvgNumber(-sourceMinX)} ${formatSvgNumber(-sourceMinY)})`;
+
+  let updatedOpeningTag = setSvgAttribute(openingTag, 'viewBox', `0 0 ${formatSvgNumber(rotatedWidth)} ${formatSvgNumber(rotatedHeight)}`);
+
+  if (widthMatch && heightMatch) {
+    updatedOpeningTag = setSvgAttribute(updatedOpeningTag, 'width', heightMatch.rawValue);
+    updatedOpeningTag = setSvgAttribute(updatedOpeningTag, 'height', widthMatch.rawValue);
+  }
+
+  const rotatedInnerMarkup = `<g transform="${transform}">${innerMarkup}</g>`;
+  return `${prefix}${updatedOpeningTag}${rotatedInnerMarkup}${suffix}`;
+}
+
+/**
+ * Reads a numeric SVG length attribute when available.
+ * @param openingTag Raw `<svg ...>` opening tag.
+ * @param attributeName Attribute name to read.
+ * @returns Parsed attribute data when numeric.
+ */
+function readSvgLengthAttribute(openingTag: string, attributeName: string): SvgLengthValue | undefined {
+  const attributePattern = new RegExp(`\\b${attributeName}\\s*=\\s*(["'])([^"']+)\\1`, 'i');
+  const attributeMatch = openingTag.match(attributePattern);
+  if (!attributeMatch) {
+    return undefined;
+  }
+
+  const rawValue = attributeMatch[2].trim();
+  const numericMatch = rawValue.match(/^[-+]?\d*\.?\d+(?:e[-+]?\d+)?(?:px)?$/i);
+  if (!numericMatch) {
+    return undefined;
+  }
+
+  const numericValue = Number.parseFloat(rawValue);
+  if (!Number.isFinite(numericValue)) {
+    return undefined;
+  }
+
+  return {
+    rawValue,
+    numericValue
+  };
+}
+
+/**
+ * Parses an SVG viewBox attribute into numeric coordinates.
+ * @param value Raw viewBox value.
+ * @returns Parsed viewBox numbers when valid.
+ */
+function parseSvgViewBox(value: string | undefined): { minX: number; minY: number; width: number; height: number } | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const parts = value
+    .trim()
+    .split(/[\s,]+/)
+    .map((part) => Number.parseFloat(part));
+
+  if (parts.length !== 4 || parts.some((part) => !Number.isFinite(part))) {
+    return undefined;
+  }
+
+  return {
+    minX: parts[0],
+    minY: parts[1],
+    width: parts[2],
+    height: parts[3]
+  };
+}
+
+/**
+ * Replaces or inserts a single SVG attribute on the root `<svg>` tag.
+ * @param openingTag Raw `<svg ...>` opening tag.
+ * @param attributeName Attribute name to update.
+ * @param attributeValue Attribute value to set.
+ * @returns Updated opening tag.
+ */
+function setSvgAttribute(openingTag: string, attributeName: string, attributeValue: string): string {
+  const attributePattern = new RegExp(`(\\b${attributeName}\\s*=\\s*)(["'])[^"']*\\2`, 'i');
+  if (attributePattern.test(openingTag)) {
+    return openingTag.replace(attributePattern, `$1"${attributeValue}"`);
+  }
+
+  return openingTag.replace(/>$/, ` ${attributeName}="${attributeValue}">`);
+}
+
+/**
+ * Formats numeric SVG values without trailing decimal noise.
+ * @param value Number to format.
+ * @returns Compact SVG-friendly number string.
+ */
+function formatSvgNumber(value: number): string {
+  if (Number.isInteger(value)) {
+    return String(value);
+  }
+
+  return Number.parseFloat(value.toFixed(6)).toString();
 }
 
 /**
@@ -2030,35 +2508,67 @@ function getDefaultIcoVariantSource(variants: IcoVariantViewModel[]): string {
 /**
  * Resolves a webview image source compatible with browser rendering.
  * @param filePath Absolute file path.
- * @param originalUri Original file URI.
- * @param webview Target webview.
- * @returns Image source URL or data URI.
+ * @returns Image source data URI.
  */
 async function getWebviewImageSource(
   filePath: string,
-  originalUri: vscode.Uri,
-  webview: vscode.Webview,
   fileVersionKey: string
 ): Promise<string> {
   const extension = path.extname(filePath).toLowerCase();
   const needsConversion = extension === '.tif' || extension === '.tiff' || extension === '.heic' || extension === '.heif';
-
-  if (!needsConversion) {
-    return `${webview.asWebviewUri(originalUri).toString()}?v=${encodeURIComponent(fileVersionKey)}`;
-  }
 
   const cachedPreviewSource = getCachedValue(convertedPreviewCache, fileVersionKey);
   if (cachedPreviewSource) {
     return cachedPreviewSource;
   }
 
-  const sharp = await getSharp();
-  const previewBuffer = await sharp(filePath)
-    .png()
-    .toBuffer();
-  const previewSource = `data:image/png;base64,${previewBuffer.toString('base64')}`;
+  let previewSource = '';
+  if (needsConversion) {
+    const sharp = await getSharp();
+    const previewBuffer = await sharp(filePath)
+      .png()
+      .toBuffer();
+    previewSource = toPngDataUri(previewBuffer);
+  } else {
+    const imageBuffer = await fs.readFile(filePath);
+    const mimeType = resolveImageMimeTypeFromExtension(extension);
+    previewSource = `data:${mimeType};base64,${imageBuffer.toString('base64')}`;
+  }
+
   setBoundedCachedValue(convertedPreviewCache, fileVersionKey, previewSource, MAX_CONVERTED_PREVIEW_CACHE_ENTRIES);
   return previewSource;
+}
+
+/**
+ * Resolves the MIME type from an image file extension.
+ * @param extension Lowercase extension including leading dot.
+ * @returns MIME type used for data URI rendering.
+ */
+function resolveImageMimeTypeFromExtension(extension: string): string {
+  switch (extension) {
+    case '.jpg':
+    case '.jpeg':
+      return 'image/jpeg';
+    case '.png':
+      return 'image/png';
+    case '.gif':
+      return 'image/gif';
+    case '.webp':
+      return 'image/webp';
+    case '.bmp':
+      return 'image/bmp';
+    case '.avif':
+      return 'image/avif';
+    case '.svg':
+      return 'image/svg+xml';
+    case '.ico':
+      return 'image/x-icon';
+    case '.tif':
+    case '.tiff':
+      return 'image/tiff';
+    default:
+      return 'application/octet-stream';
+  }
 }
 
 /**
