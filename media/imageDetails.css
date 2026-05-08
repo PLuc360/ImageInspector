@@ -302,7 +302,7 @@ body {
   border: 1px solid var(--vscode-panel-border);
   border-radius: 999px;
   background: var(--vscode-editorWidget-background);
-  z-index: 4;
+  z-index: 30;
 }
 
 .info-overlay {

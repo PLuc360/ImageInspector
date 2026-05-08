@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [1.14.0] - 2026-05-08
 ### Added
 - Added horizontal and vertical mirror actions in the Image Details toolbar.
+### Fixed
+- Fixed the color picker loupe (magnifier) overlapping the zoom toolbar in Image Details: the toolbar now always renders above the loupe.
 
 ## [1.13.0] - 2026-05-07
 ### Added
