@@ -17,6 +17,8 @@ body {
   --toolbar-green-accent-bg-hover: rgba(var(--toolbar-green-accent-rgb), 0.28);
   --toolbar-green-halo-strong: rgba(var(--toolbar-green-accent-rgb), 0.5);
   --toolbar-green-halo-mid: rgba(var(--toolbar-green-accent-rgb), 0.22);
+  --toolbar-control-height: 28px;
+  --toolbar-chevron-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23808080' stroke-width='1.35' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background: var(--vscode-editor-background);
   color: var(--vscode-editor-foreground);
   font-family: var(--vscode-font-family);
@@ -34,7 +36,7 @@ body {
   max-width: min(100%, calc(100vw - 32px));
   align-items: center;
   justify-content: center;
-  gap: 8px 12px;
+  gap: 8px 6px;
   flex-wrap: wrap;
   margin: 0 auto 14px;
   padding: 5px 8px;
@@ -49,7 +51,7 @@ body {
   align-items: center;
   gap: 8px;
   min-width: 0;
-  padding-inline: 2px;
+  padding-inline: 0;
 }
 
 .gallery-load-progress {
@@ -100,7 +102,7 @@ body {
 .gallery-delete-button,
 .gallery-compare-button,
 .gallery-duplicate-button {
-  min-height: 28px;
+  min-height: var(--toolbar-control-height);
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -144,13 +146,13 @@ body {
 }
 
 .gallery-compare-button {
-  min-width: 30px;
+  min-width: var(--toolbar-control-height);
   padding: 4px 8px;
   justify-content: center;
 }
 
 .gallery-duplicate-button {
-  min-width: 30px;
+  min-width: var(--toolbar-control-height);
   padding: 4px 8px;
   justify-content: center;
 }
@@ -166,10 +168,20 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  width: 18px;
+  height: 18px;
+  line-height: 1;
 }
 
-.gallery-compare-button-icon {
-  line-height: 1;
+.gallery-compare-button-icon > svg,
+.gallery-duplicate-button-icon > svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.gallery-duplicate-button-icon > svg {
+  transform: translateY(1px);
 }
 
 
@@ -205,6 +217,31 @@ body {
   color: var(--vscode-foreground);
 }
 
+.gallery-menu-field-select {
+  position: relative;
+}
+
+.gallery-menu-field-select::after {
+  content: '';
+  position: absolute;
+  right: 10px;
+  bottom: 50%;
+  width: 10px;
+  height: 6px;
+  transform: translateY(50%);
+  pointer-events: none;
+  background-color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground));
+  -webkit-mask-image: var(--toolbar-chevron-icon);
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
+  mask-image: var(--toolbar-chevron-icon);
+  mask-repeat: no-repeat;
+  mask-position: center;
+  mask-size: contain;
+  opacity: 0.9;
+}
+
 .gallery-menu-field-filter {
   max-width: min(100%, 260px);
 }
@@ -217,19 +254,23 @@ body {
 }
 
 .gallery-menu select {
-  min-height: 26px;
-  padding: 2px 8px;
-  border-radius: 6px;
+  min-height: var(--toolbar-control-height);
+  padding: 2px 28px 2px 10px;
+  border-radius: 16px;
   border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border));
   background: var(--vscode-dropdown-background, var(--vscode-input-background));
   color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground));
   font-size: 0.95em;
   font-weight: 500;
   cursor: pointer;
-  appearance: auto;
-  -webkit-appearance: menulist;
+  appearance: none;
+  -webkit-appearance: none;
   box-shadow: none;
   transition: box-shadow 0.2s ease, border-color 0.15s ease, background-color 0.15s ease;
+}
+
+#sort-select {
+  padding-right: 22px;
 }
 
 .gallery-menu select:hover {
@@ -262,19 +303,20 @@ body {
 
 .gallery-type-filter-summary {
   position: relative;
-  min-height: 26px;
-  min-width: 120px;
+  min-height: var(--toolbar-control-height);
+  min-width: 80px;
   max-width: min(42vw, 180px);
   display: inline-flex;
   align-items: center;
-  padding: 2px 28px 2px 10px;
-  border-radius: 6px;
+  padding: 0 28px 0 10px;
+  border-radius: 16px;
   border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border));
   background: var(--vscode-dropdown-background, var(--vscode-input-background));
   color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground));
   font: inherit;
   font-size: 0.95em;
   font-weight: 500;
+  line-height: 1;
   cursor: pointer;
   user-select: none;
   list-style: none;
@@ -289,11 +331,22 @@ body {
 }
 
 .gallery-type-filter-summary::after {
-  content: '▾';
+  content: '';
   position: absolute;
   right: 10px;
+  width: 10px;
+  height: 6px;
   top: 50%;
   transform: translateY(-50%);
+  background-color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground));
+  -webkit-mask-image: var(--toolbar-chevron-icon);
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
+  mask-image: var(--toolbar-chevron-icon);
+  mask-repeat: no-repeat;
+  mask-position: center;
+  mask-size: contain;
   opacity: 0.85;
   transition: transform 0.15s ease;
 }
@@ -369,7 +422,12 @@ body {
   font-weight: 600;
   opacity: 0.95;
   white-space: nowrap;
-  padding: 3px 10px;
+  min-height: var(--toolbar-control-height);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 10px;
+  line-height: 1;
   border-radius: 999px;
   border: 1px solid var(--vscode-button-border, transparent);
   background: var(--vscode-button-secondaryBackground);

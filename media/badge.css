@@ -2,7 +2,7 @@
  .badge {
   border: 1px solid var(--vscode-panel-border);
   border-radius: 999px;
-    padding: 0px 10px;
+  padding: 0px 10px;
   font-size: 0.74rem;
   color: var(--vscode-descriptionForeground);
   background: var(--vscode-editor-background);
@@ -10,7 +10,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-    min-height: 20px;
+  min-height: 20px;
   white-space: nowrap;
   word-break: normal;
 }

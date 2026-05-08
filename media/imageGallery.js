@@ -856,7 +856,7 @@
     menu.setAttribute('aria-label', 'Gallery filters and sorting');
     menu.innerHTML = `
       <div class="gallery-menu-group">
-        <label class="gallery-menu-field">
+        <label class="gallery-menu-field gallery-menu-field-select">
           <span class="gallery-menu-label">Sort</span>
           <select id="sort-select">
             <option value="name">Name</option>
@@ -865,7 +865,7 @@
             <option value="date">Date</option>
           </select>
         </label>
-        <label class="gallery-menu-field">
+        <label class="gallery-menu-field gallery-menu-field-select">
           <span class="gallery-menu-label">Order</span>
           <select id="sort-order-select">
             <option value="asc">Ascending</option>
