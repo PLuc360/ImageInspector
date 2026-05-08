@@ -9,6 +9,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Added horizontal and vertical mirror actions in the Image Details toolbar.
 ### Fixed
 - Fixed the color picker loupe (magnifier) overlapping the zoom toolbar in Image Details: the toolbar now always renders above the loupe.
+- Fixed WebP edit persistence for rotation/mirror actions when `imageInspector.saveEditsToOriginalFile` is enabled.
+- Fixed repeated WebP edit failures on Windows by serializing image save operations per file and reducing file-handle locking during metadata/thumbnail/preview reads.
+- Fixed stale preview/thumbnail cache reuse after in-place image edits by preserving full `mtimeMs` precision in file-version cache keys.
+- Fixed leftover temporary edit files by adding best-effort cleanup of `.imageinspector-edit-*` files around save operations.
 
 ## [1.13.0] - 2026-05-07
 ### Added

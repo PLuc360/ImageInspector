@@ -79,6 +79,7 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
   private readonly context: vscode.ExtensionContext;
   private activePanel: vscode.WebviewPanel | undefined;
   private readonly openPanels = new Map<vscode.WebviewPanel, vscode.Uri>();
+  private readonly editQueueByFilePath = new Map<string, Promise<void>>();
 
   constructor(context: vscode.ExtensionContext) {
     this.context = context;
@@ -133,7 +134,7 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
           }
 
           if (webviewMessage.type === 'rotate-image') {
-            void this.applyImageEditAndRefreshPanel(
+            this.enqueueImageEditAndRefreshPanel(
               webviewPanel,
               currentImageUri,
               { kind: 'rotate', direction: webviewMessage.direction === 'left' ? 'left' : 'right' }
@@ -142,7 +143,7 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
           }
 
           if (webviewMessage.type === 'mirror-image') {
-            void this.applyImageEditAndRefreshPanel(
+            this.enqueueImageEditAndRefreshPanel(
               webviewPanel,
               currentImageUri,
               { kind: 'mirror', axis: webviewMessage.axis === 'vertical' ? 'vertical' : 'horizontal' }
@@ -166,6 +167,40 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
     } catch (err) {
       webviewPanel.webview.html = buildErrorWebview(getImageLoadErrorMessage(document.uri.fsPath, err));
     }
+  }
+
+  /**
+   * Queues image edit requests per file to prevent overlapping writes.
+   *
+   * Rapid successive toolbar clicks can trigger concurrent save attempts on the
+   * same file, which may lead to transient file-lock errors on Windows.
+   *
+   * @param panel Source webview panel that triggered the action.
+   * @param imageUri Image URI to edit.
+   * @param operation Requested edit operation.
+   */
+  private enqueueImageEditAndRefreshPanel(
+    panel: vscode.WebviewPanel,
+    imageUri: vscode.Uri,
+    operation: ImageEditOperation
+  ): void {
+    const filePath = imageUri.fsPath;
+    const previousTask = this.editQueueByFilePath.get(filePath) ?? Promise.resolve();
+
+    const nextTask = previousTask
+      .catch(() => {
+        // Keep queue alive even if a previous operation failed.
+      })
+      .then(async () => {
+        await this.applyImageEditAndRefreshPanel(panel, imageUri, operation);
+      })
+      .finally(() => {
+        if (this.editQueueByFilePath.get(filePath) === nextTask) {
+          this.editQueueByFilePath.delete(filePath);
+        }
+      });
+
+    this.editQueueByFilePath.set(filePath, nextTask);
   }
 
   /**
@@ -233,13 +268,14 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
       await this.renderPanelContent(panel, imageUri);
     } catch (error) {
       const errorMessage = getImageLoadErrorMessage(imageUri.fsPath, error);
+      const osErrorCode = getNodeLikeErrorCode(error);
       const actionLabel = operation.kind === 'rotate'
         ? 'rotated'
         : operation.axis === 'horizontal'
           ? 'mirrored horizontally'
           : 'mirrored vertically';
       void vscode.window.showErrorMessage(
-        `Unable to save the ${actionLabel} image. ${errorMessage} Ensure the file is writable and not locked by another application.`
+        `Unable to save the ${actionLabel} image. ${errorMessage}${osErrorCode ? ` (code: ${osErrorCode})` : ''} Ensure the file is writable and not locked by another application.`
       );
     }
   }
@@ -286,10 +322,11 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
   * @param buffer Edited image bytes.
    */
   private async writeEditedBufferToFile(targetPath: string, buffer: Buffer): Promise<void> {
-    const fileExtension = path.extname(targetPath);
+    await cleanupStaleImageInspectorTempFiles(path.dirname(targetPath));
+
     const tempFilePath = path.join(
       path.dirname(targetPath),
-      `.imageinspector-edit-${Date.now()}-${Math.random().toString(16).slice(2)}${fileExtension || '.tmp'}`
+      `.imageinspector-edit-${Date.now()}-${Math.random().toString(16).slice(2)}.tmp`
     );
 
     // First try direct overwrite, which can succeed even when replace/delete is blocked.
@@ -303,6 +340,7 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
     try {
       await fs.writeFile(tempFilePath, buffer);
       await this.replaceFileWithRetries(tempFilePath, targetPath);
+      await cleanupStaleImageInspectorTempFiles(path.dirname(targetPath));
     } catch (error) {
       try {
         await fs.unlink(tempFilePath);
@@ -654,7 +692,7 @@ type FileVersionInfo = {
  * @returns Unique string key for caching purposes.
  */
 function buildFileVersionKey(filePath: string, size: number, mtimeMs: number): string {
-  return `${filePath}::${String(size)}::${String(Math.trunc(mtimeMs))}`;
+  return `${filePath}::${String(size)}::${String(mtimeMs)}`;
 }
 
 /**
@@ -707,7 +745,7 @@ async function getFileVersionInfo(filePath: string): Promise<FileVersionInfo> {
     ? stats.mtimeMs
     : 0;
   return {
-    key: buildFileVersionKey(filePath, sizeBytes, stats.mtimeMs),
+    key: buildFileVersionKey(filePath, sizeBytes, mtimeMs),
     sizeBytes,
     mtimeMs
   };
@@ -764,9 +802,7 @@ async function getGalleryThumbnailSource(
 
   try {
     const sharp = await getSharp();
-    const sharpInput = sourceExtension === '.svg'
-      ? await fs.readFile(filePath)
-      : filePath;
+    const sharpInput = await fs.readFile(filePath);
     const thumbnailBuffer = await sharp(sharpInput)
       .rotate()
       .resize({
@@ -1954,6 +1990,21 @@ function getImageLoadErrorMessage(filePath: string, error: unknown): string {
 }
 
 /**
+ * Extracts a Node-style filesystem error code when available.
+ *
+ * @param error Caught error value.
+ * @returns Error code such as EPERM/EACCES/EBUSY, or undefined.
+ */
+function getNodeLikeErrorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== 'object' || !('code' in error)) {
+    return undefined;
+  }
+
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' && code.length > 0 ? code : undefined;
+}
+
+/**
  * Extracts metadata from an image.
  * @param filePath Absolute file system path.
  * @returns Consolidated image details.
@@ -1971,10 +2022,7 @@ async function getImageDetails(
 
   try {
     const sharp = await getSharp();
-    const sourceExtension = getLowercaseExtension(filePath);
-    const sharpInput = sourceExtension === '.svg'
-      ? await fs.readFile(filePath)
-      : filePath;
+    const sharpInput = await fs.readFile(filePath);
     const metadata = await sharp(sharpInput).metadata();
 
     const width = metadata.width ?? 0;
@@ -2645,7 +2693,8 @@ async function getWebviewImageSource(
   let previewSource = '';
   if (needsConversion) {
     const sharp = await getSharp();
-    const previewBuffer = await sharp(filePath)
+    const sourceBuffer = await fs.readFile(filePath);
+    const previewBuffer = await sharp(sourceBuffer)
       .png()
       .toBuffer();
     previewSource = toPngDataUri(previewBuffer);
@@ -2688,6 +2737,32 @@ function resolveImageMimeTypeFromExtension(extension: string): string {
       return 'image/tiff';
     default:
       return 'application/octet-stream';
+  }
+}
+
+/**
+ * Cleans stale temporary files left by interrupted edit operations.
+ *
+ * @param directoryPath Directory to scan.
+ */
+async function cleanupStaleImageInspectorTempFiles(directoryPath: string): Promise<void> {
+  const prefix = '.imageinspector-edit-';
+
+  try {
+    const entries = await fs.readdir(directoryPath, { withFileTypes: true });
+    const staleTempFiles = entries
+      .filter((entry) => entry.isFile() && entry.name.startsWith(prefix))
+      .map((entry) => path.join(directoryPath, entry.name));
+
+    for (const staleFilePath of staleTempFiles) {
+      try {
+        await fs.unlink(staleFilePath);
+      } catch {
+        // Best-effort cleanup only.
+      }
+    }
+  } catch {
+    // Ignore directory read errors during cleanup.
   }
 }
 
