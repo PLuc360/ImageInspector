@@ -7,6 +7,8 @@ Image Inspector is a VS Code extension that opens images in a dedicated custom e
 - Integrated image preview in a VS Code custom editor
 - Key metadata: dimensions, file size, format, color space, channels, alpha, DPI
 - Advanced zoom workflow: toolbar, keyboard shortcuts, wheel zoom, fit mode, selection zoom
+- Rotation controls (clockwise/counterclockwise, 90-degree steps)
+- Mirror controls (horizontal and vertical)
 - Color picker tool with pixel loupe and live pixel info (position + color)
 - Overview minimap with current viewport rectangle and click/drag recentering
 - Before/after comparison mode with an interactive split divider
@@ -109,6 +111,12 @@ Webview shortcut:
 - Rectangle-based zoom selection
 - Fit / Reset 100%
 
+### Editing tools
+
+- Rotate left/right by 90 degrees from the toolbar
+- Mirror image horizontally or vertically from the toolbar
+- Optional persistence of rotate/mirror edits to the original file (`imageInspector.saveEditsToOriginalFile`)
+
 ### Info panel
 
 - Draggable metadata panel
@@ -149,6 +157,10 @@ Available user settings:
 - imageInspector.themeAccentColor
   - Format: #RRGGBB
   - Default: #00C86E
+- imageInspector.saveEditsToOriginalFile
+  - Type: boolean
+  - Default: true
+  - When enabled, rotate/mirror actions overwrite the original file on disk
 - imageInspector.pipetteLoupeDiameter
   - Default: 96
   - Min/Max: 48 / 256
@@ -213,6 +225,8 @@ Image Inspector est une extension VS Code qui ouvre les images dans un éditeur 
 - Aperçu image intégré dans un custom editor VS Code
 - Métadonnées principales: dimensions, taille, format, espace colorimétrique, canaux, alpha, DPI
 - Zoom avancé: boutons, raccourcis clavier, molette, fit, zoom de sélection
+- Contrôles de rotation (horaire/antihoraire, pas de 90°)
+- Contrôles de miroir (horizontal et vertical)
 - Outil pipette avec loupe pixel et informations en direct (coordonnées + couleur)
 - Mini-carte (overview) avec rectangle de viewport et recentrage par clic/glisser
 - Mode comparaison avant/après avec séparateur interactif
@@ -315,6 +329,12 @@ Raccourcis dans le webview:
 - Zoom de sélection via rectangle
 - Fit / Reset 100%
 
+### Outils d'édition
+
+- Rotation gauche/droite par pas de 90° depuis la toolbar
+- Miroir horizontal ou vertical depuis la toolbar
+- Persistance optionnelle des modifications rotation/miroir dans le fichier d'origine (`imageInspector.saveEditsToOriginalFile`)
+
 ### Panneau d'information
 
 - Panneau draggable affichant les métadonnées
@@ -355,6 +375,10 @@ Paramètres utilisateur disponibles:
 - imageInspector.themeAccentColor
   - Format: #RRGGBB
   - Défaut: #00C86E
+- imageInspector.saveEditsToOriginalFile
+  - Type: booléen
+  - Défaut: true
+  - Quand activé, les actions rotation/miroir écrasent le fichier original sur disque
 - imageInspector.pipetteLoupeDiameter
   - Défaut: 96
   - Min/Max: 48 / 256

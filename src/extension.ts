@@ -59,6 +59,11 @@ interface IcoImageEntry {
 }
 
 type IcoSource = string | Buffer;
+type RotationDirection = 'left' | 'right';
+type MirrorAxis = 'horizontal' | 'vertical';
+type ImageEditOperation =
+  | { kind: 'rotate'; direction: RotationDirection }
+  | { kind: 'mirror'; axis: MirrorAxis };
 
 // Minimal provider for custom editor
 class ImageCustomDocument implements vscode.CustomDocument {
@@ -120,7 +125,7 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
             return;
           }
 
-          const webviewMessage = message as { type: string; direction?: string };
+          const webviewMessage = message as { type: string; direction?: string; axis?: string };
           const currentImageUri = this.openPanels.get(webviewPanel) ?? document.uri;
           if (webviewMessage.type === 'pick-compare-image') {
             void this.promptComparisonImageForPanel(webviewPanel, currentImageUri);
@@ -128,10 +133,19 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
           }
 
           if (webviewMessage.type === 'rotate-image') {
-            void this.rotateImageAndRefreshPanel(
+            void this.applyImageEditAndRefreshPanel(
               webviewPanel,
               currentImageUri,
-              webviewMessage.direction === 'left' ? 'left' : 'right'
+              { kind: 'rotate', direction: webviewMessage.direction === 'left' ? 'left' : 'right' }
+            );
+            return;
+          }
+
+          if (webviewMessage.type === 'mirror-image') {
+            void this.applyImageEditAndRefreshPanel(
+              webviewPanel,
+              currentImageUri,
+              { kind: 'mirror', axis: webviewMessage.axis === 'vertical' ? 'vertical' : 'horizontal' }
             );
           }
         });
@@ -192,16 +206,16 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
   }
 
   /**
-   * Rotates the current image file in place, then refreshes the corresponding panel.
+   * Applies one image edit operation to the current file, then refreshes the panel.
    *
-   * @param panel Source webview panel that triggered the rotation.
-   * @param imageUri Image URI to rotate.
-   * @param direction Rotation direction (`left` or `right`).
+   * @param panel Source webview panel that triggered the action.
+   * @param imageUri Image URI to edit.
+   * @param operation Requested edit operation.
    */
-  private async rotateImageAndRefreshPanel(
+  private async applyImageEditAndRefreshPanel(
     panel: vscode.WebviewPanel,
     imageUri: vscode.Uri,
-    direction: 'left' | 'right'
+    operation: ImageEditOperation
   ): Promise<void> {
     const settings = getImageInspectorSettings();
     if (!settings.saveEditsToOriginalFile) {
@@ -209,8 +223,8 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
     }
 
     try {
-      const rotatedBuffer = await this.getRotatedImageBuffer(imageUri.fsPath, direction);
-      await this.writeRotatedBufferToFile(imageUri.fsPath, rotatedBuffer);
+      const editedBuffer = await this.getEditedImageBuffer(imageUri.fsPath, operation);
+      await this.writeEditedBufferToFile(imageUri.fsPath, editedBuffer);
       invalidateFileCaches(imageUri.fsPath);
 
       // Notify any open gallery panels that this image has been modified
@@ -219,48 +233,63 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
       await this.renderPanelContent(panel, imageUri);
     } catch (error) {
       const errorMessage = getImageLoadErrorMessage(imageUri.fsPath, error);
+      const actionLabel = operation.kind === 'rotate'
+        ? 'rotated'
+        : operation.axis === 'horizontal'
+          ? 'mirrored horizontally'
+          : 'mirrored vertically';
       void vscode.window.showErrorMessage(
-        `Unable to save the rotated image. ${errorMessage} Ensure the file is writable and not locked by another application.`
+        `Unable to save the ${actionLabel} image. ${errorMessage} Ensure the file is writable and not locked by another application.`
       );
     }
   }
 
   /**
-   * Builds rotated image bytes while preserving the original file format semantics.
+   * Builds edited image bytes while preserving the original file format semantics.
    *
-   * Raster formats keep using Sharp, whereas SVG files are rewritten as SVG markup
-   * so the saved file still matches its `.svg` extension.
+   * Raster formats keep using Sharp, whereas SVG files are rewritten as SVG markup so
+   * the saved file still matches its `.svg` extension.
    *
-   * @param targetPath Absolute file path of the image to rotate.
-   * @param direction Rotation direction (`left` or `right`).
-   * @returns Rotated image payload ready to be written back to disk.
+   * @param targetPath Absolute file path of the image to edit.
+   * @param operation Requested edit operation.
+   * @returns Edited image payload ready to be written back to disk.
    */
-  private async getRotatedImageBuffer(targetPath: string, direction: 'left' | 'right'): Promise<Buffer> {
+  private async getEditedImageBuffer(targetPath: string, operation: ImageEditOperation): Promise<Buffer> {
     if (getLowercaseExtension(targetPath) === '.svg') {
-      return rotateSvgFile(targetPath, direction);
+      return operation.kind === 'rotate'
+        ? rotateSvgFile(targetPath, operation.direction)
+        : mirrorSvgFile(targetPath, operation.axis);
     }
 
     const sharp = await getSharp();
     const sourceBuffer = await fs.readFile(targetPath);
-    return sharp(sourceBuffer, { animated: true })
-      .rotate(direction === 'left' ? -90 : 90)
-      .toBuffer();
+    let sharpPipeline = sharp(sourceBuffer, { animated: true });
+
+    if (operation.kind === 'rotate') {
+      sharpPipeline = sharpPipeline.rotate(operation.direction === 'left' ? -90 : 90);
+    } else if (operation.axis === 'horizontal') {
+      sharpPipeline = sharpPipeline.flop();
+    } else {
+      sharpPipeline = sharpPipeline.flip();
+    }
+
+    return sharpPipeline.toBuffer();
   }
 
   /**
-   * Writes a rotated image buffer to disk using a temporary file replacement strategy.
+   * Writes an edited image buffer to disk using a temporary file replacement strategy.
    *
    * This avoids partial writes and reduces file locking issues on Windows when
    * the original file is being read by another process.
    *
-   * @param targetPath Absolute path of the image file to overwrite.
-   * @param buffer Rotated image bytes.
+  * @param targetPath Absolute path of the image file to overwrite.
+  * @param buffer Edited image bytes.
    */
-  private async writeRotatedBufferToFile(targetPath: string, buffer: Buffer): Promise<void> {
+  private async writeEditedBufferToFile(targetPath: string, buffer: Buffer): Promise<void> {
     const fileExtension = path.extname(targetPath);
     const tempFilePath = path.join(
       path.dirname(targetPath),
-      `.imageinspector-rotate-${Date.now()}-${Math.random().toString(16).slice(2)}${fileExtension || '.tmp'}`
+      `.imageinspector-edit-${Date.now()}-${Math.random().toString(16).slice(2)}${fileExtension || '.tmp'}`
     );
 
     // First try direct overwrite, which can succeed even when replace/delete is blocked.
@@ -2231,6 +2260,18 @@ async function rotateSvgFile(filePath: string, direction: 'left' | 'right'): Pro
 }
 
 /**
+ * Mirrors an SVG file by rewriting its markup instead of rasterizing it.
+ * @param filePath Absolute SVG file path.
+ * @param axis Mirror axis (`horizontal` or `vertical`).
+ * @returns Mirrored SVG bytes.
+ */
+async function mirrorSvgFile(filePath: string, axis: 'horizontal' | 'vertical'): Promise<Buffer> {
+  const svgContent = await fs.readFile(filePath, 'utf8');
+  const mirroredSvgContent = mirrorSvgMarkup(svgContent, axis);
+  return Buffer.from(mirroredSvgContent, 'utf8');
+}
+
+/**
  * Rotates raw SVG markup by wrapping the current content in a transformed group.
  * @param svgContent Original SVG markup.
  * @param direction Rotation direction (`left` or `right`).
@@ -2280,6 +2321,51 @@ function rotateSvgMarkup(svgContent: string, direction: 'left' | 'right'): strin
 
   const rotatedInnerMarkup = `<g transform="${transform}">${innerMarkup}</g>`;
   return `${prefix}${updatedOpeningTag}${rotatedInnerMarkup}${suffix}`;
+}
+
+/**
+ * Mirrors raw SVG markup by wrapping the current content in a transformed group.
+ * @param svgContent Original SVG markup.
+ * @param axis Mirror axis (`horizontal` or `vertical`).
+ * @returns Updated SVG markup.
+ */
+function mirrorSvgMarkup(svgContent: string, axis: 'horizontal' | 'vertical'): string {
+  const openingTagMatch = svgContent.match(/<svg\b[^>]*>/i);
+  const closingTagIndex = svgContent.toLowerCase().lastIndexOf('</svg>');
+
+  if (!openingTagMatch || closingTagIndex < 0) {
+    throw new Error('Unsupported SVG markup.');
+  }
+
+  const openingTag = openingTagMatch[0];
+  const openingTagStart = openingTagMatch.index ?? 0;
+  const openingTagEnd = openingTagStart + openingTag.length;
+  const prefix = svgContent.slice(0, openingTagStart);
+  const innerMarkup = svgContent.slice(openingTagEnd, closingTagIndex);
+  const suffix = svgContent.slice(closingTagIndex);
+
+  const viewBoxMatch = openingTag.match(/\bviewBox\s*=\s*(["'])([^"']+)\1/i);
+  const widthMatch = readSvgLengthAttribute(openingTag, 'width');
+  const heightMatch = readSvgLengthAttribute(openingTag, 'height');
+
+  const parsedViewBox = parseSvgViewBox(viewBoxMatch?.[2]);
+  const sourceWidth = parsedViewBox?.width ?? widthMatch?.numericValue;
+  const sourceHeight = parsedViewBox?.height ?? heightMatch?.numericValue;
+
+  if (!sourceWidth || !sourceHeight) {
+    throw new Error('Unable to determine SVG dimensions for mirroring.');
+  }
+
+  const sourceMinX = parsedViewBox?.minX ?? 0;
+  const sourceMinY = parsedViewBox?.minY ?? 0;
+  const mirrorTranslateX = (sourceMinX * 2) + sourceWidth;
+  const mirrorTranslateY = (sourceMinY * 2) + sourceHeight;
+  const transform = axis === 'horizontal'
+    ? `translate(${formatSvgNumber(mirrorTranslateX)} 0) scale(-1 1)`
+    : `translate(0 ${formatSvgNumber(mirrorTranslateY)}) scale(1 -1)`;
+
+  const mirroredInnerMarkup = `<g transform="${transform}">${innerMarkup}</g>`;
+  return `${prefix}${openingTag}${mirroredInnerMarkup}${suffix}`;
 }
 
 /**

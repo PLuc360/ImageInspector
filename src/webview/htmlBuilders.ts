@@ -189,6 +189,26 @@ export function buildCustomEditorWebview(
         <button id="rotate-right" type="button" title="Rotate right 90°" aria-label="Rotate right 90 degrees">
           <span class="icon" aria-hidden="true">↻</span>
         </button>
+        <button id="mirror-horizontal" type="button" title="Mirror horizontally" aria-label="Mirror horizontally">
+          <span class="icon" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle">
+              <rect x="3" y="4" width="14" height="12" rx="1.8" stroke="currentColor" stroke-width="1.3"/>
+              <path d="M10 4.8v10.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-dasharray="1.6 1.6"/>
+              <path d="M7.1 10l-1.9-1.7v3.4L7.1 10z" fill="currentColor"/>
+              <path d="M12.9 10l1.9-1.7v3.4L12.9 10z" fill="currentColor"/>
+            </svg>
+          </span>
+        </button>
+        <button id="mirror-vertical" type="button" title="Mirror vertically" aria-label="Mirror vertically">
+          <span class="icon" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle">
+              <rect x="3" y="4" width="14" height="12" rx="1.8" stroke="currentColor" stroke-width="1.3"/>
+              <path d="M4.8 10h10.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-dasharray="1.6 1.6"/>
+              <path d="M10 7.1L8.3 5.2h3.4L10 7.1z" fill="currentColor"/>
+              <path d="M10 12.9l-1.7 1.9h3.4L10 12.9z" fill="currentColor"/>
+            </svg>
+          </span>
+        </button>
         <button id="zoom-select" type="button" title="Zoom to selection" aria-label="Zoom to selection">
           <span class="icon" aria-hidden="true">▭</span>
         </button>

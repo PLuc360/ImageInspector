@@ -52,6 +52,8 @@ const zoomResetButton = document.getElementById('zoom-reset');
 const zoomFitButton = document.getElementById('zoom-fit');
 const rotateLeftButton = document.getElementById('rotate-left');
 const rotateRightButton = document.getElementById('rotate-right');
+const mirrorHorizontalButton = document.getElementById('mirror-horizontal');
+const mirrorVerticalButton = document.getElementById('mirror-vertical');
 const zoomSelectButton = document.getElementById('zoom-select');
 const infoToggleButton = document.getElementById('info-toggle');
 const compareToolButton = document.getElementById('compare-tool');
@@ -167,8 +169,8 @@ let compareDiffAutoCenterEnabled = false;
 let compareDiffSensitivity = DEFAULT_COMPARE_DIFF_SENSITIVITY;
 let originalImageSource = image?.getAttribute('src') || '';
 let originalCompareImageSource = compareImage?.getAttribute('src') || '';
-let imageRotationQuarterTurns = 0;
-let imageRotationRenderToken = 0;
+let imageTransformRenderToken = 0;
+let imageTransformOperations = [];
 let saveEditsToOriginalFile = false;
 let initialViewModeDecisionToken = 0;
 const COMPARE_ORIENTATION_VERTICAL_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle"><rect x="3" y="3" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.4"/><path d="M10 4v12" stroke="currentColor" stroke-width="1.4"/></svg>';
@@ -255,35 +257,64 @@ function normalizeQuarterTurns(quarterTurns) {
  * @param source Image source URI.
  * @returns Promise resolved with the loaded image element.
  */
-function loadImageForRotation(source) {
+function loadImageForTransform(source) {
   return new Promise((resolve, reject) => {
     const sourceImage = new Image();
     sourceImage.addEventListener('load', () => resolve(sourceImage), { once: true });
-    sourceImage.addEventListener('error', () => reject(new Error('Unable to load image for rotation.')), { once: true });
+    sourceImage.addEventListener('error', () => reject(new Error('Unable to load image for transform.')), { once: true });
     sourceImage.src = source;
   });
 }
 
 /**
- * Builds a rotated image source from a base source.
+ * Computes the net quarter-turn count from the current transform operation stack.
+ *
+ * @param {Array<{ kind: 'rotate' | 'mirror'; quarterTurnDelta?: number }>} operations Transform operations.
+ * @returns {number} Normalized quarter-turn count.
+ */
+function getNormalizedQuarterTurnsFromOperations(operations) {
+  if (!Array.isArray(operations) || operations.length === 0) {
+    return 0;
+  }
+
+  let quarterTurnSum = 0;
+  for (const operation of operations) {
+    if (operation?.kind !== 'rotate') {
+      continue;
+    }
+
+    const parsedDelta = Number.parseInt(String(operation.quarterTurnDelta), 10);
+    if (!Number.isFinite(parsedDelta)) {
+      continue;
+    }
+
+    quarterTurnSum += parsedDelta;
+  }
+
+  return normalizeQuarterTurns(quarterTurnSum);
+}
+
+/**
+ * Builds a transformed image source from a base source.
  *
  * @param source Base image source URI.
- * @param quarterTurns Rotation amount in 90-degree turns.
- * @returns Promise resolved with the rotated source URI.
+ * @param {Array<{ kind: 'rotate' | 'mirror'; quarterTurnDelta?: number; axis?: 'horizontal' | 'vertical' }>} operations
+ *   Transform operations to apply in order.
+ * @returns Promise resolved with the transformed source URI.
  */
-async function buildRotatedImageSource(source, quarterTurns) {
+async function buildTransformedImageSource(source, operations) {
   if (typeof source !== 'string' || source.length === 0) {
     return source;
   }
 
-  const normalizedTurns = normalizeQuarterTurns(quarterTurns);
-  if (normalizedTurns === 0) {
+  if (!Array.isArray(operations) || operations.length === 0) {
     return source;
   }
 
   try {
-    const sourceImage = await loadImageForRotation(source);
+    const sourceImage = await loadImageForTransform(source);
     const canvas = document.createElement('canvas');
+    const normalizedTurns = getNormalizedQuarterTurnsFromOperations(operations);
     const quarterTurnIsOdd = normalizedTurns % 2 === 1;
     canvas.width = quarterTurnIsOdd ? sourceImage.naturalHeight : sourceImage.naturalWidth;
     canvas.height = quarterTurnIsOdd ? sourceImage.naturalWidth : sourceImage.naturalHeight;
@@ -294,7 +325,27 @@ async function buildRotatedImageSource(source, quarterTurns) {
     }
 
     context.translate(canvas.width / 2, canvas.height / 2);
-    context.rotate(normalizedTurns * (Math.PI / 2));
+
+    for (const operation of operations) {
+      if (operation?.kind === 'rotate') {
+        const normalizedDelta = Number.parseInt(String(operation.quarterTurnDelta), 10);
+        if (Number.isFinite(normalizedDelta) && normalizedDelta !== 0) {
+          context.rotate(normalizedDelta * (Math.PI / 2));
+        }
+        continue;
+      }
+
+      if (operation?.kind !== 'mirror') {
+        continue;
+      }
+
+      if (operation.axis === 'horizontal') {
+        context.scale(-1, 1);
+      } else if (operation.axis === 'vertical') {
+        context.scale(1, -1);
+      }
+    }
+
     context.drawImage(sourceImage, -sourceImage.naturalWidth / 2, -sourceImage.naturalHeight / 2);
     return canvas.toDataURL('image/png');
   } catch {
@@ -303,24 +354,24 @@ async function buildRotatedImageSource(source, quarterTurns) {
 }
 
 /**
- * Applies current rotation to the main and comparison preview images.
+ * Applies the current transform stack to the main and comparison preview images.
  *
  * @returns Promise resolved when sources are updated.
  */
-async function applyImageRotationToPreview() {
+async function applyImageTransformToPreview() {
   if (!image) {
     return;
   }
 
-  const nextRenderToken = imageRotationRenderToken + 1;
-  imageRotationRenderToken = nextRenderToken;
+  const nextRenderToken = imageTransformRenderToken + 1;
+  imageTransformRenderToken = nextRenderToken;
 
-  const nextMainSource = await buildRotatedImageSource(originalImageSource, imageRotationQuarterTurns);
+  const nextMainSource = await buildTransformedImageSource(originalImageSource, imageTransformOperations);
   const nextCompareSource = originalCompareImageSource
-    ? await buildRotatedImageSource(originalCompareImageSource, imageRotationQuarterTurns)
+    ? await buildTransformedImageSource(originalCompareImageSource, imageTransformOperations)
     : '';
 
-  if (nextRenderToken !== imageRotationRenderToken) {
+  if (nextRenderToken !== imageTransformRenderToken) {
     return;
   }
 
@@ -343,8 +394,24 @@ async function applyImageRotationToPreview() {
  * @param quarterTurnDelta Rotation delta in quarter-turns.
  */
 function rotatePreviewImage(quarterTurnDelta) {
-  imageRotationQuarterTurns = normalizeQuarterTurns(imageRotationQuarterTurns + quarterTurnDelta);
-  void applyImageRotationToPreview();
+  imageTransformOperations.push({ kind: 'rotate', quarterTurnDelta });
+  void applyImageTransformToPreview();
+}
+
+/**
+ * Mirrors the preview image around the vertical axis (left/right swap).
+ */
+function mirrorPreviewImageHorizontally() {
+  imageTransformOperations.push({ kind: 'mirror', axis: 'horizontal' });
+  void applyImageTransformToPreview();
+}
+
+/**
+ * Mirrors the preview image around the horizontal axis (top/bottom swap).
+ */
+function mirrorPreviewImageVertically() {
+  imageTransformOperations.push({ kind: 'mirror', axis: 'vertical' });
+  void applyImageTransformToPreview();
 }
 
 /**
@@ -1545,7 +1612,7 @@ function setComparisonImage(source, label) {
   originalCompareImageSource = source;
   // Set a synchronous source first so comparison UI can become visible immediately.
   compareImage.setAttribute('src', source);
-  void applyImageRotationToPreview();
+  void applyImageTransformToPreview();
   compareImageLabel.textContent = label || 'Comparison image';
 
   const shouldEnableSideBySide = enableSideBySideOnNextComparePick || compareViewMode === 'side-by-side';
@@ -1919,7 +1986,7 @@ function initializeIcoGallery() {
       }
 
       originalImageSource = nextSource;
-      void applyImageRotationToPreview();
+      void applyImageTransformToPreview();
     });
   }
 
@@ -3028,6 +3095,22 @@ bindClickAction(rotateRightButton, () => {
   }
 });
 
+bindClickAction(mirrorHorizontalButton, () => {
+  mirrorPreviewImageHorizontally();
+
+  if (saveEditsToOriginalFile) {
+    vscode?.postMessage({ type: 'mirror-image', axis: 'horizontal' });
+  }
+});
+
+bindClickAction(mirrorVerticalButton, () => {
+  mirrorPreviewImageVertically();
+
+  if (saveEditsToOriginalFile) {
+    vscode?.postMessage({ type: 'mirror-image', axis: 'vertical' });
+  }
+});
+
 bindClickAction(zoomSelectButton, () => {
   setSelectionMode(!selectionMode);
 });
@@ -3631,8 +3714,8 @@ initializeInfoOverlayVisibility();
 initializeInfoOverlayPosition();
 initializeIcoGallery();
 syncOverviewMapSource();
-if (imageRotationQuarterTurns !== 0) {
-  void applyImageRotationToPreview();
+if (imageTransformOperations.length > 0) {
+  void applyImageTransformToPreview();
 }
 if (hasComparisonImage()) {
   setCompareEnabled(true);
