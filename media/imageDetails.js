@@ -1,4 +1,7 @@
 /**
+ * Webview script for image details interactions: zoom, compare, navigation, and pipette.
+ */
+/**
  * Dynamically injects the shared badge stylesheet into the document head.
  *
  * @param {string} uri URI of the badge CSS file to inject.
@@ -50,6 +53,9 @@ const zoomInButton = document.getElementById('zoom-in');
 const zoomOutButton = document.getElementById('zoom-out');
 const zoomResetButton = document.getElementById('zoom-reset');
 const zoomFitButton = document.getElementById('zoom-fit');
+const galleryNavPrevButton = document.getElementById('gallery-nav-prev');
+const galleryNavNextButton = document.getElementById('gallery-nav-next');
+const galleryNavPositionLabel = document.getElementById('gallery-nav-position');
 const rotateLeftButton = document.getElementById('rotate-left');
 const rotateRightButton = document.getElementById('rotate-right');
 const mirrorHorizontalButton = document.getElementById('mirror-horizontal');
@@ -172,6 +178,10 @@ let originalCompareImageSource = compareImage?.getAttribute('src') || '';
 let imageTransformRenderToken = 0;
 let imageTransformOperations = [];
 let saveEditsToOriginalFile = false;
+let galleryNavigationEnabled = false;
+let galleryNavigationHasPrevious = false;
+let galleryNavigationHasNext = false;
+let galleryNavigationPositionLabelText = '';
 let initialViewModeDecisionToken = 0;
 const COMPARE_ORIENTATION_VERTICAL_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle"><rect x="3" y="3" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.4"/><path d="M10 4v12" stroke="currentColor" stroke-width="1.4"/></svg>';
 const COMPARE_ORIENTATION_HORIZONTAL_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle"><rect x="3" y="3" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.4"/><path d="M4 10h12" stroke="currentColor" stroke-width="1.4"/></svg>';
@@ -234,6 +244,142 @@ function toBooleanFlag(value, fallbackValue = false) {
   }
 
   return fallbackValue;
+}
+
+/**
+ * Indicates whether gallery navigation shortcuts should be ignored for the current target.
+ *
+ * @param {EventTarget | null} target Event target.
+ * @returns {boolean} True when shortcuts should be ignored.
+ */
+function shouldIgnoreGalleryNavigationTarget(target) {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  return target.isContentEditable
+    || target instanceof HTMLInputElement
+    || target instanceof HTMLTextAreaElement
+    || target instanceof HTMLSelectElement;
+}
+
+/**
+ * Applies gallery navigation state and updates UI affordances.
+ *
+ * @param {{ enabled?: unknown; hasPrevious?: unknown; hasNext?: unknown; positionLabel?: unknown }} navigationState
+ */
+function applyGalleryNavigationState(navigationState) {
+  galleryNavigationEnabled = toBooleanFlag(navigationState?.enabled, false);
+  galleryNavigationHasPrevious = galleryNavigationEnabled && toBooleanFlag(navigationState?.hasPrevious, false);
+  galleryNavigationHasNext = galleryNavigationEnabled && toBooleanFlag(navigationState?.hasNext, false);
+  galleryNavigationPositionLabelText = typeof navigationState?.positionLabel === 'string'
+    ? navigationState.positionLabel.trim()
+    : '';
+
+  const visibilityClassAction = galleryNavigationEnabled ? 'remove' : 'add';
+  galleryNavPrevButton?.classList[visibilityClassAction]('is-hidden');
+  galleryNavNextButton?.classList[visibilityClassAction]('is-hidden');
+  galleryNavPositionLabel?.classList[visibilityClassAction]('is-hidden');
+
+  if (galleryNavPrevButton instanceof HTMLButtonElement) {
+    galleryNavPrevButton.disabled = !galleryNavigationHasPrevious;
+  }
+
+  if (galleryNavNextButton instanceof HTMLButtonElement) {
+    galleryNavNextButton.disabled = !galleryNavigationHasNext;
+  }
+
+  if (galleryNavPositionLabel instanceof HTMLElement) {
+    galleryNavPositionLabel.textContent = galleryNavigationPositionLabelText;
+  }
+}
+
+/**
+ * Requests gallery navigation from the extension host.
+ *
+ * @param {'prev' | 'next'} direction Navigation direction.
+ */
+function requestGalleryNavigation(direction) {
+  if (!galleryNavigationEnabled) {
+    return;
+  }
+
+  if (direction === 'prev' && !galleryNavigationHasPrevious) {
+    return;
+  }
+
+  if (direction === 'next' && !galleryNavigationHasNext) {
+    return;
+  }
+
+  vscode?.postMessage({ type: 'navigate-gallery-image', direction });
+}
+
+/**
+ * Initializes gallery navigation state from layout dataset values.
+ */
+function initializeGalleryNavigationFromDom() {
+  applyGalleryNavigationState({
+    enabled: layoutElement?.dataset?.galleryNavigationEnabled,
+    hasPrevious: layoutElement?.dataset?.galleryNavigationHasPrevious,
+    hasNext: layoutElement?.dataset?.galleryNavigationHasNext,
+    positionLabel: layoutElement?.dataset?.galleryNavigationPositionLabel
+  });
+
+  applyGalleryNavigationBadgePositionForToolbar(getCurrentToolbarPosition());
+}
+
+/**
+ * Applies the gallery navigation badge anchor according to toolbar position.
+ *
+ * When the toolbar is at the top, the badge is shown at the bottom.
+ * When the toolbar is at the bottom, the badge is shown at the top.
+ *
+ * @param {string} toolbarPosition Position identifier: 'top', 'bottom', 'left' or 'right'.
+ */
+function applyGalleryNavigationBadgePositionForToolbar(toolbarPosition) {
+  if (!(galleryNavPositionLabel instanceof HTMLElement)) {
+    return;
+  }
+
+  galleryNavPositionLabel.classList.remove('gallery-nav-position-top', 'gallery-nav-position-bottom');
+
+  if (toolbarPosition === 'top') {
+    galleryNavPositionLabel.classList.add('gallery-nav-position-bottom');
+    return;
+  }
+
+  if (toolbarPosition === 'bottom') {
+    galleryNavPositionLabel.classList.add('gallery-nav-position-top');
+    return;
+  }
+
+  galleryNavPositionLabel.classList.add('gallery-nav-position-top');
+}
+
+/**
+ * Resolves the current toolbar position from CSS classes.
+ *
+ * @returns {string} Current toolbar position token.
+ */
+function getCurrentToolbarPosition() {
+  if (!(zoomToolbar instanceof HTMLElement)) {
+    return 'top';
+  }
+
+  if (zoomToolbar.classList.contains('toolbar-pos-bottom')) {
+    return 'bottom';
+  }
+
+  if (zoomToolbar.classList.contains('toolbar-pos-left')) {
+    return 'left';
+  }
+
+  if (zoomToolbar.classList.contains('toolbar-pos-right')) {
+    return 'right';
+  }
+
+  return 'top';
 }
 
 /**
@@ -580,6 +726,8 @@ function applyToolbarPosition(toolbarPosition) {
   if (TOOLBAR_POSITION_CLASSES.includes(`toolbar-pos-${toolbarPosition}`)) {
     zoomToolbar?.classList.add(`toolbar-pos-${toolbarPosition}`);
   }
+
+  applyGalleryNavigationBadgePositionForToolbar(toolbarPosition);
 }
 
 /**
@@ -626,7 +774,7 @@ function setSelectionMode(isEnabled) {
 /**
  * Returns true when a comparison image is currently loaded.
  *
- * @returns {boolean}
+ * @returns {boolean} True when a comparison image source is available.
  */
 function hasComparisonImage() {
   return Boolean(compareImage?.getAttribute('src'));
@@ -635,7 +783,7 @@ function hasComparisonImage() {
 /**
  * Returns true when side-by-side compare mode is active and a comparison image is loaded.
  *
- * @returns {boolean}
+ * @returns {boolean} True when side-by-side compare mode is currently active.
  */
 function isSideBySideCompareActive() {
   return compareViewMode === 'side-by-side' && hasComparisonImage();
@@ -644,7 +792,7 @@ function isSideBySideCompareActive() {
 /**
  * Returns the 2D canvas context for the primary diff overlay, creating it if necessary.
  *
- * @returns {CanvasRenderingContext2D | null}
+ * @returns {CanvasRenderingContext2D | null} The primary diff overlay context, or null.
  */
 function ensureCompareDiffOverlayContext() {
   if (!compareDiffOverlay) {
@@ -661,7 +809,7 @@ function ensureCompareDiffOverlayContext() {
 /**
  * Returns the 2D canvas context for the secondary diff overlay, creating it if necessary.
  *
- * @returns {CanvasRenderingContext2D | null}
+ * @returns {CanvasRenderingContext2D | null} The secondary diff overlay context, or null.
  */
 function ensureCompareDiffOverlaySecondaryContext() {
   if (!compareDiffOverlaySecondary) {
@@ -2785,10 +2933,10 @@ function toggleFitAndActualSize() {
 
 /**
  * Checks whether a client point is inside an element rendered rectangle.
- * @param {Element | null | undefined} element
- * @param {number} clientX
- * @param {number} clientY
- * @returns {boolean}
+ * @param {Element | null | undefined} element Target element.
+ * @param {number} clientX Pointer X position in client coordinates.
+ * @param {number} clientY Pointer Y position in client coordinates.
+ * @returns {boolean} True when the point falls inside the element rectangle.
  */
 function isClientPointInsideElementRect(element, clientX, clientY) {
   if (!element) {
@@ -2808,8 +2956,8 @@ function isClientPointInsideElementRect(element, clientX, clientY) {
 
 /**
  * Returns true when the double click occurred over one of the rendered images.
- * @param {MouseEvent} event
- * @returns {boolean}
+ * @param {MouseEvent} event Double-click event.
+ * @returns {boolean} True when the event target is a rendered preview image.
  */
 function isDoubleClickOnPreviewImage(event) {
   if (!image) {
@@ -3437,7 +3585,7 @@ let isPreviewWheelZoomListenerActive = false;
 
 /**
  * Handles Ctrl/Cmd + wheel zoom on the preview area.
- * @param {WheelEvent} event
+ * @param {WheelEvent} event Wheel event from the preview area.
  */
 function handlePreviewWheelZoom(event) {
   if (!event.ctrlKey && !event.metaKey) {
@@ -3614,7 +3762,41 @@ window.addEventListener('keydown', (event) => {
     event.preventDefault();
     finishSelection();
     setSelectionMode(false);
+    return;
   }
+
+  if (!galleryNavigationEnabled || shouldIgnoreGalleryNavigationTarget(event.target)) {
+    return;
+  }
+
+  if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+    return;
+  }
+
+  if (key === 'ArrowLeft') {
+    event.preventDefault();
+    requestGalleryNavigation('prev');
+    return;
+  }
+
+  if (key === 'ArrowRight') {
+    event.preventDefault();
+    requestGalleryNavigation('next');
+  }
+});
+
+galleryNavPrevButton?.addEventListener('click', () => {
+  if (galleryNavPrevButton instanceof HTMLElement) {
+    showToolbarClickHalo(galleryNavPrevButton);
+  }
+  requestGalleryNavigation('prev');
+});
+
+galleryNavNextButton?.addEventListener('click', () => {
+  if (galleryNavNextButton instanceof HTMLElement) {
+    showToolbarClickHalo(galleryNavNextButton);
+  }
+  requestGalleryNavigation('next');
 });
 
 image?.addEventListener('load', () => {
@@ -3701,6 +3883,9 @@ window.addEventListener('message', (event) => {
         }
       }
       break;
+    case 'update-gallery-navigation':
+      applyGalleryNavigationState(message.navigation ?? {});
+      break;
     default:
       break;
   }
@@ -3709,6 +3894,7 @@ window.addEventListener('message', (event) => {
 initializeLoupeSettingsFromDom();
 initializeThemeFromDom();
 initializeEditPersistenceSettingsFromDom();
+initializeGalleryNavigationFromDom();
 initializeCompareDiffSettingsFromDom();
 initializeInfoOverlayVisibility();
 initializeInfoOverlayPosition();
@@ -3784,8 +3970,8 @@ window.addEventListener('resize', () => {
   applyInfoOverlayPosition(left, top);
 
   requestOverviewMapViewportUpdate();
-    // Redraw difference regions if side-by-side compare is active
-    if (typeof isSideBySideCompareActive === 'function' && isSideBySideCompareActive()) {
-      renderCompareDifferenceOverlay();
-    }
+  // Redraw difference regions if side-by-side compare is active.
+  if (typeof isSideBySideCompareActive === 'function' && isSideBySideCompareActive()) {
+    renderCompareDifferenceOverlay();
+  }
 });

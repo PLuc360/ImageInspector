@@ -1,4 +1,7 @@
 /**
+ * HTML builders for Image Inspector webviews (details, gallery, and duplicates).
+ */
+/**
  * Formats a file size in bytes to a human-readable string with dynamic unit.
  * @param size File size in bytes.
  * @returns Formatted string (e.g. '512 bytes', '1.2 KB', '3.4 MB').
@@ -73,6 +76,12 @@ export function buildCustomEditorWebview(
     icoVariants?: IcoVariantViewModel[];
     comparisonImageSource?: string;
     comparisonImageLabel?: string;
+    galleryNavigation?: {
+      enabled?: boolean;
+      hasPrevious?: boolean;
+      hasNext?: boolean;
+      positionLabel?: string;
+    };
     pipetteLoupeDiameter?: number;
     pipetteLoupeVirtualResolution?: number;
     pipetteLoupeZoomAtMinImageZoom?: number;
@@ -89,6 +98,10 @@ export function buildCustomEditorWebview(
   const comparisonImageSource = options?.comparisonImageSource ?? '';
   const comparisonImageLabel = options?.comparisonImageLabel ?? '';
   const hasComparisonImage = comparisonImageSource.length > 0;
+  const galleryNavigationEnabled = options?.galleryNavigation?.enabled === true;
+  const galleryHasPrevious = options?.galleryNavigation?.hasPrevious === true;
+  const galleryHasNext = options?.galleryNavigation?.hasNext === true;
+  const galleryNavigationPositionLabel = options?.galleryNavigation?.positionLabel?.trim() || '';
   const mediaRootUri = vscode.Uri.joinPath(extensionUri, 'media');
   const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(mediaRootUri, 'imageDetails.css'));
   const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(mediaRootUri, 'imageDetails.js'));
@@ -164,12 +177,37 @@ export function buildCustomEditorWebview(
     class="layout"
     data-toolbar-green-accent-rgb="${escapeHtml(themeAccentRgb)}"
     data-save-edits-to-original-file="${saveEditsToOriginalFile ? 'true' : 'false'}"
+    data-gallery-navigation-enabled="${galleryNavigationEnabled ? 'true' : 'false'}"
+    data-gallery-navigation-has-previous="${galleryHasPrevious ? 'true' : 'false'}"
+    data-gallery-navigation-has-next="${galleryHasNext ? 'true' : 'false'}"
+    data-gallery-navigation-position-label="${escapeHtml(galleryNavigationPositionLabel)}"
     data-loupe-diameter="${String(loupeDiameter)}"
     data-loupe-virtual-resolution="${String(loupeVirtualResolution)}"
     data-loupe-zoom-at-min-image-zoom="${String(loupeZoomAtMinImageZoom)}"
     data-loupe-zoom-at-max-image-zoom="${String(loupeZoomAtMaxImageZoom)}"
   >
     <section class="preview">
+      <button
+        id="gallery-nav-prev"
+        type="button"
+        class="gallery-nav-button gallery-nav-prev${galleryNavigationEnabled ? '' : ' is-hidden'}"
+        aria-label="Previous image"
+        title="Previous image"
+        ${galleryHasPrevious ? '' : 'disabled'}
+      >
+        <span class="icon" aria-hidden="true">◀</span>
+      </button>
+      <button
+        id="gallery-nav-next"
+        type="button"
+        class="gallery-nav-button gallery-nav-next${galleryNavigationEnabled ? '' : ' is-hidden'}"
+        aria-label="Next image"
+        title="Next image"
+        ${galleryHasNext ? '' : 'disabled'}
+      >
+        <span class="icon" aria-hidden="true">▶</span>
+      </button>
+      <div id="gallery-nav-position" class="gallery-nav-position${galleryNavigationEnabled ? '' : ' is-hidden'}" aria-live="polite">${escapeHtml(galleryNavigationPositionLabel)}</div>
       <div class="${toolbarClass}" aria-label="Zoom controls">
         <button id="zoom-out" type="button" title="Zoom -" aria-label="Zoom -">
           <span class="icon" aria-hidden="true">−</span>

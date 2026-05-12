@@ -1,3 +1,6 @@
+/**
+ * Public exports for webview HTML builders and related view models.
+ */
 export {
   buildCustomEditorWebview,
   buildDuplicateResultsWebview,

@@ -1,3 +1,6 @@
+/**
+ * Webview script for duplicate search progress, grouping, and navigation.
+ */
 (function() {
   'use strict';
 
@@ -11,7 +14,7 @@
 
   /**
    * Applies the accent color used by duplicate panel visual effects.
-   * @param {string} accentRgb
+   * @param {string} accentRgb RGB accent color value.
    */
   function applyThemeAccentRgb(accentRgb) {
     if (!(document.body instanceof HTMLElement) || typeof accentRgb !== 'string') {
@@ -39,9 +42,9 @@
 
   /**
    * Compares two file-path arrays for strict ordered equality.
-   * @param {string[]} left
-   * @param {string[]} right
-   * @returns {boolean}
+   * @param {string[]} left Left-side path list.
+   * @param {string[]} right Right-side path list.
+   * @returns {boolean} True when both arrays contain the same ordered paths.
    */
   function isSamePathList(left, right) {
     if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) {
@@ -53,8 +56,8 @@
 
   /**
    * Updates the scan status text and run button state.
-   * @param {string} statusText
-   * @param {boolean} isRunning
+   * @param {string} statusText Status text to display.
+   * @param {boolean} isRunning Whether the scan is currently running.
    */
   function updateDuplicateScanStatus(statusText, isRunning) {
     const statusElement = document.getElementById('duplicate-search-status');
@@ -120,7 +123,7 @@
 
   /**
    * Clears the duplicate groups list and displays a placeholder message.
-   * @param {string} message
+   * @param {string} message Placeholder message to display.
    */
   function resetDuplicateGroupsList(message) {
     const list = document.getElementById('duplicate-groups-list');
@@ -139,7 +142,7 @@
 
   /**
    * Updates the active visual state for one duplicate-group row.
-   * @param {HTMLElement | null} rowElement
+   * @param {HTMLElement | null} rowElement Row element to mark as active.
    */
   function setActiveGroupRow(rowElement) {
     if (activeGroupRow instanceof HTMLElement) {

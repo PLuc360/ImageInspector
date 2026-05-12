@@ -1,4 +1,4 @@
-// Caches and cache utilities
+// Cache size limits and in-memory stores.
 const MAX_IMAGE_DETAILS_CACHE_ENTRIES = 32;
 const MAX_ICO_CACHE_ENTRIES = 16;
 const MAX_CONVERTED_PREVIEW_CACHE_ENTRIES = 16;
@@ -20,7 +20,7 @@ const galleryThumbnailCache = new Map<string, string>();
  */
 function setBoundedCachedValue<T>(cache: Map<string, T>, key: string, value: T, maxEntries: number): void {
   if (cache.size >= maxEntries) {
-    // Remove oldest entry
+    // Remove the oldest entry.
     const firstKey = cache.keys().next().value;
     if (firstKey !== undefined) {
       cache.delete(firstKey);
@@ -65,7 +65,9 @@ type ImageEditOperation =
   | { kind: 'rotate'; direction: RotationDirection }
   | { kind: 'mirror'; axis: MirrorAxis };
 
-// Minimal provider for custom editor
+/**
+ * Minimal custom document implementation for the image preview editor.
+ */
 class ImageCustomDocument implements vscode.CustomDocument {
   uri: vscode.Uri;
   constructor(uri: vscode.Uri) {
@@ -80,6 +82,8 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
   private activePanel: vscode.WebviewPanel | undefined;
   private readonly openPanels = new Map<vscode.WebviewPanel, vscode.Uri>();
   private readonly editQueueByFilePath = new Map<string, Promise<void>>();
+  private readonly galleryNavigationByPanel = new Map<vscode.WebviewPanel, { orderedFilePaths: string[]; currentPosition: number }>();
+  private readonly pendingGalleryNavigationByUri = new Map<string, { orderedFilePaths: string[]; currentPosition: number }>();
 
   constructor(context: vscode.ExtensionContext) {
     this.context = context;
@@ -105,6 +109,14 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
     token: vscode.CancellationToken
   ): Promise<void> {
     try {
+      const pendingNavigationState = this.pendingGalleryNavigationByUri.get(document.uri.toString());
+      if (pendingNavigationState) {
+        this.galleryNavigationByPanel.set(webviewPanel, pendingNavigationState);
+        this.pendingGalleryNavigationByUri.delete(document.uri.toString());
+      } else {
+        this.galleryNavigationByPanel.delete(webviewPanel);
+      }
+
       webviewPanel.webview.options = {
         enableScripts: true,
         localResourceRoots: [
@@ -148,6 +160,15 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
               currentImageUri,
               { kind: 'mirror', axis: webviewMessage.axis === 'vertical' ? 'vertical' : 'horizontal' }
             );
+            return;
+          }
+
+          if (webviewMessage.type === 'navigate-gallery-image') {
+            void this.navigateGalleryImageForPanel(
+              webviewPanel,
+              currentImageUri,
+              webviewMessage.direction === 'prev' ? 'prev' : 'next'
+            );
           }
         });
 
@@ -159,6 +180,7 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
 
         webviewPanel.onDidDispose(() => {
           this.openPanels.delete(webviewPanel);
+          this.galleryNavigationByPanel.delete(webviewPanel);
           if (this.activePanel === webviewPanel) {
             this.activePanel = undefined;
           }
@@ -212,6 +234,13 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
   private async renderPanelContent(panel: vscode.WebviewPanel, imageUri: vscode.Uri): Promise<void> {
     const filePath = imageUri.fsPath;
     const settings = getImageInspectorSettings();
+    const galleryNavigationState = this.galleryNavigationByPanel.get(panel);
+    const navigationPosition = galleryNavigationState
+      ? galleryNavigationState.orderedFilePaths.findIndex((candidatePath) => candidatePath === filePath)
+      : -1;
+    const hasGalleryNavigation = !!galleryNavigationState
+      && navigationPosition >= 0
+      && galleryNavigationState.orderedFilePaths.length > 1;
     const icoVariants = getLowercaseExtension(filePath) === '.ico'
       ? await getIcoGalleryItems(filePath)
       : [];
@@ -232,12 +261,86 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
         themeAccentRgb: settings.themeAccentRgb,
         saveEditsToOriginalFile: settings.saveEditsToOriginalFile,
         icoVariants,
+        galleryNavigation: {
+          enabled: hasGalleryNavigation,
+          hasPrevious: hasGalleryNavigation && navigationPosition > 0,
+          hasNext: hasGalleryNavigation && navigationPosition < galleryNavigationState.orderedFilePaths.length - 1,
+          positionLabel: hasGalleryNavigation
+            ? `${String(navigationPosition + 1)} / ${String(galleryNavigationState.orderedFilePaths.length)}`
+            : ''
+        },
         pipetteLoupeDiameter: settings.pipetteLoupeDiameter,
         pipetteLoupeVirtualResolution: settings.pipetteLoupeVirtualResolution,
         pipetteLoupeZoomAtMinImageZoom: settings.pipetteLoupeZoomAtMinImageZoom,
         pipetteLoupeZoomAtMaxImageZoom: settings.pipetteLoupeZoomAtMaxImageZoom
       }
     );
+  }
+
+  /**
+   * Applies gallery navigation state to a panel.
+   *
+   * @param panel Target webview panel.
+   * @param orderedFilePaths Gallery file paths ordered as rendered in the gallery.
+   * @param currentPosition Current image position in the ordered list.
+   */
+  private setGalleryNavigationForPanel(
+    panel: vscode.WebviewPanel,
+    orderedFilePaths: string[],
+    currentPosition: number
+  ): void {
+    const normalizedPaths = Array.from(new Set(
+      orderedFilePaths
+        .map((candidatePath) => String(candidatePath || '').trim())
+        .filter((candidatePath) => candidatePath.length > 0)
+    ));
+
+    if (normalizedPaths.length <= 1 || currentPosition < 0 || currentPosition >= normalizedPaths.length) {
+      this.galleryNavigationByPanel.delete(panel);
+      return;
+    }
+
+    this.galleryNavigationByPanel.set(panel, {
+      orderedFilePaths: normalizedPaths,
+      currentPosition
+    });
+  }
+
+  /**
+   * Navigates to the previous or next image within current gallery order.
+   *
+   * @param panel Target webview panel.
+   * @param currentImageUri Currently displayed image URI.
+   * @param direction Navigation direction.
+   */
+  private async navigateGalleryImageForPanel(
+    panel: vscode.WebviewPanel,
+    currentImageUri: vscode.Uri,
+    direction: 'prev' | 'next'
+  ): Promise<void> {
+    const navigationState = this.galleryNavigationByPanel.get(panel);
+    if (!navigationState || navigationState.orderedFilePaths.length <= 1) {
+      return;
+    }
+
+    const currentIndex = navigationState.orderedFilePaths.findIndex((filePath) => filePath === currentImageUri.fsPath);
+    if (currentIndex < 0) {
+      this.galleryNavigationByPanel.delete(panel);
+      await this.renderPanelContent(panel, currentImageUri);
+      this.openPanels.set(panel, currentImageUri);
+      return;
+    }
+
+    const nextIndex = direction === 'prev' ? currentIndex - 1 : currentIndex + 1;
+    if (nextIndex < 0 || nextIndex >= navigationState.orderedFilePaths.length) {
+      return;
+    }
+
+    const nextUri = vscode.Uri.file(navigationState.orderedFilePaths[nextIndex]);
+    this.setGalleryNavigationForPanel(panel, navigationState.orderedFilePaths, nextIndex);
+    this.openPanels.set(panel, nextUri);
+    panel.title = path.basename(nextUri.fsPath);
+    await this.renderPanelContent(panel, nextUri);
   }
 
   /**
@@ -262,7 +365,7 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
       await this.writeEditedBufferToFile(imageUri.fsPath, editedBuffer);
       invalidateFileCaches(imageUri.fsPath);
 
-      // Notify any open gallery panels that this image has been modified
+      // Notify open gallery panels that this image has been modified.
       void ImageFolderGalleryPanel.notifyImageFileChanged(imageUri.fsPath);
 
       await this.renderPanelContent(panel, imageUri);
@@ -527,6 +630,109 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
   }
 
   /**
+   * Opens an image and preserves gallery ordering to enable prev/next navigation.
+   *
+   * @param imageFiles Gallery items currently known by the host.
+   * @param selectedIndex Index of the image to open.
+   * @param navigationOrderIndexes Gallery indexes ordered as displayed in the webview.
+   */
+  async openImageFromGallery(
+    imageFiles: Array<{ filePath: string }>,
+    selectedIndex: number,
+    navigationOrderIndexes: unknown[]
+  ): Promise<void> {
+    const safeSelectedIndex = Math.trunc(selectedIndex);
+    if (safeSelectedIndex < 0 || safeSelectedIndex >= imageFiles.length) {
+      return;
+    }
+
+    const normalizedOrder = Array.from(new Set(
+      navigationOrderIndexes
+        .filter((index): index is number => typeof index === 'number' && Number.isInteger(index))
+        .map((index) => Math.trunc(index))
+        .filter((index) => index >= 0 && index < imageFiles.length)
+    ));
+
+    const fallbackOrder = imageFiles.map((_, index) => index);
+    const effectiveOrder = normalizedOrder.length > 1 ? normalizedOrder : fallbackOrder;
+    const currentPosition = effectiveOrder.indexOf(safeSelectedIndex);
+    if (currentPosition < 0) {
+      return;
+    }
+
+    const orderedFilePaths = effectiveOrder
+      .map((index) => imageFiles[index]?.filePath)
+      .filter((filePath): filePath is string => typeof filePath === 'string' && filePath.length > 0);
+
+    const currentImageUri = vscode.Uri.file(imageFiles[safeSelectedIndex].filePath);
+    this.pendingGalleryNavigationByUri.set(currentImageUri.toString(), {
+      orderedFilePaths,
+      currentPosition
+    });
+
+    await vscode.commands.executeCommand(
+      'vscode.openWith',
+      currentImageUri,
+      ImageDetailsCustomEditorProvider.viewType
+    );
+  }
+
+  /**
+   * Synchronizes navigation order for opened Image Details panels in one folder.
+   *
+   * @param folderPath Absolute folder path owning the gallery.
+   * @param imageFiles Current gallery image list.
+   * @param navigationOrderIndexes Indexes in current gallery rendered order.
+   */
+  syncGalleryNavigationOrderForFolder(
+    folderPath: string,
+    imageFiles: Array<{ filePath: string }>,
+    navigationOrderIndexes: unknown
+  ): void {
+    if (!Array.isArray(navigationOrderIndexes)) {
+      return;
+    }
+
+    const normalizedOrder = Array.from(new Set(
+      navigationOrderIndexes
+        .filter((index): index is number => typeof index === 'number' && Number.isInteger(index))
+        .map((index) => Math.trunc(index))
+        .filter((index) => index >= 0 && index < imageFiles.length)
+    ));
+
+    const orderedFilePaths = Array.from(new Set(
+      normalizedOrder
+        .map((index) => imageFiles[index]?.filePath)
+        .filter((filePath): filePath is string => typeof filePath === 'string' && filePath.length > 0)
+    ));
+
+    for (const [panel, openedUri] of this.openPanels.entries()) {
+      if (path.dirname(openedUri.fsPath) !== folderPath) {
+        continue;
+      }
+
+      const currentPosition = orderedFilePaths.findIndex((filePath) => filePath === openedUri.fsPath);
+      const hasNavigation = currentPosition >= 0 && orderedFilePaths.length > 1;
+
+      if (hasNavigation) {
+        this.setGalleryNavigationForPanel(panel, orderedFilePaths, currentPosition);
+      } else {
+        this.galleryNavigationByPanel.delete(panel);
+      }
+
+      void panel.webview.postMessage({
+        type: 'update-gallery-navigation',
+        navigation: {
+          enabled: hasNavigation,
+          hasPrevious: hasNavigation && currentPosition > 0,
+          hasNext: hasNavigation && currentPosition < orderedFilePaths.length - 1,
+          positionLabel: hasNavigation ? `${String(currentPosition + 1)} / ${String(orderedFilePaths.length)}` : ''
+        }
+      });
+    }
+  }
+
+  /**
    * Finds an opened image inspector panel for the given image URI.
    * @param imageUri Image URI associated with the panel.
    * @returns Matching webview panel when available.
@@ -625,7 +831,7 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
     await this.setComparisonImageForPanel(panel, comparisonImageUri);
   }
 }
-// Types and constants for gallery and inspector
+// Types and constants for gallery and inspector.
 const SUPPORTED_IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tif', '.tiff', '.avif', '.ico', '.svg', '.heic', '.heif'];
 const SUPPORTED_IMAGE_FILTER_EXTENSIONS = SUPPORTED_IMAGE_EXTENSIONS.map((extension) => extension.replace('.', ''));
 const DEFAULT_THEME_ACCENT_HEX = '#00C86E';
@@ -643,7 +849,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { createHash } from 'node:crypto';
 
-// Buffer is global in Node.js, but can be imported explicitly if needed
+// Buffer is global in Node.js, but can be imported explicitly if needed.
 import { Buffer } from 'buffer';
 import * as vscode from 'vscode';
 import {
@@ -676,7 +882,7 @@ async function getSharp(): Promise<SharpModule> {
 
   return sharpModulePromise;
 }
-// Utilities for file version management (cache, refresh)
+// Utilities for file version management (cache and refresh).
 type FileVersionInfo = {
   key: string;
   sizeBytes: number;
@@ -989,7 +1195,7 @@ class ImageFolderGalleryPanel {
         meta: updatedMeta
       });
     } catch {
-      // Silently ignore errors notifying the gallery
+      // Silently ignore errors while notifying the gallery.
     }
   }
 
@@ -1543,7 +1749,14 @@ class ImageFolderGalleryPanel {
           return;
         }
 
-        const message = rawMessage as { type: string; index?: unknown; binPath?: string; indexes?: number[]; mode?: unknown };
+        const message = rawMessage as {
+          type: string;
+          index?: unknown;
+          binPath?: string;
+          indexes?: number[];
+          mode?: unknown;
+          navigationOrderIndexes?: unknown;
+        };
         const normalizeGalleryIndexes = (rawIndexes: unknown): number[] => {
           if (!Array.isArray(rawIndexes)) {
             return [];
@@ -1604,7 +1817,7 @@ class ImageFolderGalleryPanel {
           });
         };
 
-        // Handler for explicit gallery data request (webview refresh)
+        // Handle explicit gallery data requests from the webview.
         if (message.type === 'request-gallery-data') {
           this.panel.webview.postMessage({
             type: 'gallery-data',
@@ -1612,12 +1825,20 @@ class ImageFolderGalleryPanel {
           });
           return;
         }
-        // Handler for duplicate panel opening from the gallery toolbar
+        if (message.type === 'update-navigation-order') {
+          provider.syncGalleryNavigationOrderForFolder(
+            this.folderUri.fsPath,
+            this.imageFiles,
+            message.navigationOrderIndexes
+          );
+          return;
+        }
+        // Handle duplicate panel opening from the gallery toolbar.
         if (message.type === 'open-duplicate-panel') {
           this.openDuplicateResultsPanel();
           return;
         }
-        // Handler for duplicate search trigger from gallery or duplicate panel
+        // Handle duplicate search requests from gallery or duplicate panels.
         if (message.type === 'start-duplicate-search') {
           void this.startDuplicateSearch();
           return;
@@ -1654,13 +1875,13 @@ class ImageFolderGalleryPanel {
           }
           return;
         }
-        // Handler for image removal
+        // Handle image removal requests.
         if (message.type === 'remove-image' && Array.isArray(message.indexes)) {
           const indexes = normalizeGalleryIndexes(message.indexes);
           void removeGalleryImagesByIndexes(indexes);
           return;
         }
-        // Handler for comparison opening from the gallery toolbar
+        // Handle comparison opening from the gallery toolbar.
         if (message.type === 'compare-images' && Array.isArray(message.indexes)) {
           const indexes = Array.from(new Set(
             message.indexes
@@ -1689,18 +1910,16 @@ class ImageFolderGalleryPanel {
           return;
         }
 
-        // Handler for image opening
+        // Handle image opening requests.
         if (message.type === 'open-image' && typeof message.index === 'number') {
           const index = Math.trunc(message.index);
           if (index < 0 || index >= this.imageFiles.length) {
             return;
           }
-          const imageUri = vscode.Uri.file(this.imageFiles[index].filePath);
-          void vscode.commands.executeCommand(
-            'vscode.openWith',
-            imageUri,
-            ImageDetailsCustomEditorProvider.viewType
-          );
+          const navigationOrderIndexes = Array.isArray(message.navigationOrderIndexes)
+            ? message.navigationOrderIndexes
+            : [];
+          void provider.openImageFromGallery(this.imageFiles, index, navigationOrderIndexes);
         }
       }
     );
@@ -2119,7 +2338,7 @@ async function getImageDetails(
       throw error;
     }
 
-    // Extract main variant
+    // Extract the main variant.
     const buffer = await fs.readFile(filePath);
     const entries = await parseIcoEntries(buffer);
     const primaryEntry = entries.slice().sort((a, b) => (b.width * b.height - a.width * a.height) || (b.bitCount - a.bitCount))[0];

@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.16.0] - 2026-05-12
+### Added
+- Added previous/next gallery navigation directly in Image Details when an image is opened from the gallery.
+- Added left/right side navigation arrows in Image Details to browse images in the current gallery sort/filter order.
+- Added keyboard navigation with `ArrowLeft` and `ArrowRight` in Image Details for gallery-opened images.
+
+### Changed
+- Image Details now preserves the gallery's current rendered order when opening an image, so navigation follows active sort and filters.
+
 ## [1.15.0] - 2026-05-12
 ### Added
 - Added range multi-selection in the gallery with `Shift + click` (selects all images between the anchor and clicked item in current visible order).

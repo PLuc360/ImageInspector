@@ -1,4 +1,7 @@
 
+/**
+ * Webview script for folder gallery rendering, sorting, filtering, and selection.
+ */
 (function() {
   'use strict';
   window.__imageGalleryJS_OK = true;
@@ -32,6 +35,8 @@
   let scheduledGalleryRefresh = 0;
   let scheduledMetaUpdateFlush = 0;
   let scheduledProgressUpdate = 0;
+  let scheduledNavigationOrderSync = 0;
+  let lastNavigationOrderSignature = '';
   const pendingMetaUpdates = new Map();
   const loadedImageSources = new Set();
   let activeContextMenu = null;
@@ -43,7 +48,7 @@
 
   /**
    * Applies the accent color used by gallery visual effects.
-   * @param {string} accentRgb
+   * @param {string} accentRgb RGB accent color value.
    */
   function applyThemeAccentRgb(accentRgb) {
     if (!(document.body instanceof HTMLElement) || typeof accentRgb !== 'string') {
@@ -71,8 +76,8 @@
 
   /**
    * Escapes a string so it can be safely injected into HTML.
-   * @param {unknown} value
-   * @returns {string}
+   * @param {unknown} value Input value to process.
+   * @returns {string} The escaped string.
    */
   function escapeHtml(value) {
     return String(value ?? '')
@@ -86,8 +91,8 @@
   /**
    * Returns a stable lowercase type key for sorting and filtering.
    * It prefers the file extension so the menu matches the badge shown on each tile.
-   * @param {any} img
-   * @returns {string}
+   * @param {any} img Gallery image metadata object.
+   * @returns {string} The normalized image type key.
    */
   function getImageTypeKey(img) {
     const fileName = String(img?.name ?? '').trim();
@@ -106,8 +111,8 @@
 
   /**
    * Returns the user-facing type label displayed in the gallery UI.
-   * @param {any} img
-   * @returns {string}
+   * @param {any} img Gallery image metadata object.
+   * @returns {string} The display label for the image type.
    */
   function getImageTypeLabel(img) {
     const typeKey = getImageTypeKey(img);
@@ -116,8 +121,8 @@
 
   /**
    * Normalizes a list of selected type keys.
-   * @param {Iterable<string>} values
-   * @returns {string[]}
+   * @param {Iterable<string>} values Values to normalize.
+   * @returns {string[]} The normalized and sorted type keys.
    */
   function normalizeTypeFilters(values) {
     return Array.from(
@@ -163,7 +168,7 @@
 
   /**
    * Indicates whether one or more type filters are currently active.
-   * @returns {boolean}
+   * @returns {boolean} True when at least one type filter is active.
    */
   function hasActiveTypeFilters() {
     return currentFilterTypes.length > 0;
@@ -171,8 +176,8 @@
 
   /**
    * Returns the compact label displayed on the file type filter dropdown.
-   * @param {string[]} availableTypes
-   * @returns {string}
+   * @param {string[]} availableTypes Available file type keys.
+   * @returns {string} The filter summary label.
    */
   function getTypeFilterSummaryLabel(availableTypes) {
     if (!Array.isArray(availableTypes) || availableTypes.length === 0 || !hasActiveTypeFilters()) {
@@ -240,7 +245,7 @@
 
   /**
    * Returns valid selected indexes while preserving the selection order.
-   * @returns {number[]}
+   * @returns {number[]} The selected indexes in stable order.
    */
   function getOrderedSelectedIndexes() {
     const orderedIndexes = [];
@@ -301,7 +306,7 @@
 
   /**
    * Displays the toolbar halo animation on interaction.
-   * @param {HTMLElement | null | undefined} element
+   * @param {HTMLElement | null | undefined} element Target DOM element.
    */
   function showToolbarClickHalo(element) {
     if (!(element instanceof HTMLElement)) return;
@@ -312,8 +317,8 @@
 
   /**
    * Updates the toolbar count label according to the current filters.
-   * @param {number} visibleCount
-   * @param {number} totalCount
+   * @param {number} visibleCount Number of currently visible items.
+   * @param {number} totalCount Total number of items.
    */
   function updateGalleryCount(visibleCount, totalCount) {
     const countElement = document.querySelector('.gallery-count');
@@ -387,8 +392,8 @@
 
   /**
    * Indicates whether one gallery item still has placeholder metadata.
-   * @param {any} image
-   * @returns {boolean}
+   * @param {any} image Image metadata object.
+   * @returns {boolean} True when metadata is still pending.
    */
   function isMetadataPending(image) {
     return String(image?.type ?? '').trim().toLowerCase() === 'loading...';
@@ -418,8 +423,8 @@
 
   /**
    * Selects all gallery tiles matching a duplicate-group file path list.
-   * @param {string[]} filePaths
-   * @param {'prev' | 'next' | 'cycle'} [direction='cycle']
+   * @param {string[]} filePaths Ordered file paths in the duplicate group.
+   * @param {'prev' | 'next' | 'cycle'} [direction='cycle'] Requested navigation direction.
    */
   function selectDuplicateGroupByFilePaths(filePaths, direction = 'cycle') {
     if (!Array.isArray(filePaths) || filePaths.length < 2) {
@@ -484,9 +489,9 @@
 
   /**
    * Builds the HTML for one gallery card.
-   * @param {any} img
-   * @param {number} index
-   * @returns {string}
+   * @param {any} img Gallery image metadata object.
+   * @param {number} index Gallery item index.
+   * @returns {string} The HTML markup for one gallery item.
    */
   function buildGalleryItemMarkup(img, index) {
     const extMatch = img.name.match(/\.([a-z0-9]+)$/i);
@@ -523,9 +528,9 @@
 
   /**
    * Checks whether a tile is inside the viewport buffer.
-   * @param {HTMLElement} element
-   * @param {number} [margin=LAZY_IMAGE_PRELOAD_MARGIN_PX]
-   * @returns {boolean}
+   * @param {HTMLElement} element Target DOM element.
+   * @param {number} [margin=LAZY_IMAGE_PRELOAD_MARGIN_PX] Viewport preload margin in pixels.
+   * @returns {boolean} True when the element is near the viewport.
    */
   function isElementNearViewport(element, margin = LAZY_IMAGE_PRELOAD_MARGIN_PX) {
     const rect = element.getBoundingClientRect();
@@ -535,7 +540,7 @@
 
   /**
    * Loads a thumbnail immediately when its tile is near the viewport.
-   * @param {HTMLImageElement} imageElement
+   * @param {HTMLImageElement} imageElement Thumbnail image element.
    */
   function loadGalleryImageIfNearViewport(imageElement) {
     if (!(imageElement instanceof HTMLImageElement)) return;
@@ -590,7 +595,7 @@
 
   /**
    * Marks a thumbnail as loaded.
-   * @param {Event} event
+   * @param {Event} event Event payload.
    */
   function handleLazyImageLoad(event) {
     const imageElement = event.target;
@@ -605,7 +610,7 @@
 
   /**
    * Restores a placeholder if a thumbnail fails to load.
-   * @param {Event} event
+   * @param {Event} event Event payload.
    */
   function handleLazyImageError(event) {
     const imageElement = event.target;
@@ -617,7 +622,7 @@
 
   /**
    * Loads a thumbnail when it enters the viewport buffer.
-   * @param {HTMLImageElement} imageElement
+   * @param {HTMLImageElement} imageElement Thumbnail image element.
    */
   function loadGalleryImage(imageElement) {
     if (!(imageElement instanceof HTMLImageElement)) return;
@@ -633,7 +638,7 @@
 
   /**
    * Unloads a distant thumbnail to reduce memory pressure.
-   * @param {HTMLImageElement} imageElement
+   * @param {HTMLImageElement} imageElement Thumbnail image element.
    */
   function unloadGalleryImage(imageElement) {
     if (!(imageElement instanceof HTMLImageElement)) return;
@@ -649,8 +654,8 @@
 
   /**
    * Formats a file size in bytes to a human-readable string.
-   * @param {number} size - File size in bytes.
-   * @returns {string}
+   * @param {number} size File size in bytes.
+   * @returns {string} The formatted size string.
    */
   function formatFileSize(size) {
     if (typeof size !== 'number' || isNaN(size) || size < 0) return 'N/A';
@@ -662,8 +667,8 @@
 
   /**
    * Formats a file modified timestamp to a compact French date-time string.
-   * @param {number} mtimeMs - Last modified timestamp in milliseconds.
-   * @returns {string}
+   * @param {number} mtimeMs Last modified timestamp in milliseconds.
+   * @returns {string} The formatted date-time string.
    */
   function formatModifiedDate(mtimeMs) {
     if (typeof mtimeMs !== 'number' || !Number.isFinite(mtimeMs) || mtimeMs <= 0) {
@@ -687,8 +692,8 @@
 
   /**
    * Keeps selected indexes in sync with the current gallery content.
-   * @param {number[]} indexes
-   * @returns {number[]}
+   * @param {number[]} indexes Gallery indexes to process.
+   * @returns {number[]} The sanitized selected indexes.
    */
   function sanitizeSelectedIndexes(indexes) {
     return Array.from(new Set(
@@ -698,7 +703,7 @@
 
   /**
    * Returns currently visible gallery indexes in their rendered order.
-   * @returns {number[]}
+   * @returns {number[]} The currently visible indexes.
    */
   function getVisibleGalleryIndexes() {
     return Array.from(document.querySelectorAll('.gallery-item'))
@@ -712,10 +717,61 @@
   }
 
   /**
+   * Returns current gallery indexes in active filtered/sorted order.
+   * @returns {number[]} The sorted gallery indexes.
+   */
+  function getSortedGalleryIndexes() {
+    return getFilteredSortedImages()
+      .map(({ index }) => index)
+      .filter((index) => Number.isInteger(index) && index >= 0);
+  }
+
+  /**
+   * Posts the current rendered navigation order to the extension host.
+   * @param {boolean} [force=false] When true, forces synchronization even if unchanged.
+   */
+  function postNavigationOrderToHost(force = false) {
+    if (!window.vscodeApi || typeof window.vscodeApi.postMessage !== 'function') {
+      return;
+    }
+
+    const navigationOrderIndexes = getSortedGalleryIndexes();
+    const signature = navigationOrderIndexes.join(',');
+    if (!force && signature === lastNavigationOrderSignature) {
+      return;
+    }
+
+    lastNavigationOrderSignature = signature;
+    window.vscodeApi.postMessage({
+      type: 'update-navigation-order',
+      navigationOrderIndexes
+    });
+  }
+
+  /**
+   * Schedules one navigation-order sync message in the next frame.
+   * @param {boolean} [force=false] When true, forces synchronization even if unchanged.
+   */
+  function scheduleNavigationOrderSync(force = false) {
+    if (force) {
+      lastNavigationOrderSignature = '';
+    }
+
+    if (scheduledNavigationOrderSync) {
+      return;
+    }
+
+    scheduledNavigationOrderSync = window.requestAnimationFrame(() => {
+      scheduledNavigationOrderSync = 0;
+      postNavigationOrderToHost(force);
+    });
+  }
+
+  /**
    * Computes the inclusive range between two indexes using current rendered order.
-   * @param {number} anchorIndex
-   * @param {number} targetIndex
-   * @returns {number[]}
+   * @param {number} anchorIndex Range anchor index.
+   * @param {number} targetIndex Range target index.
+   * @returns {number[]} The computed inclusive index range.
    */
   function getVisibleRangeSelection(anchorIndex, targetIndex) {
     const visibleIndexes = getVisibleGalleryIndexes();
@@ -733,9 +789,9 @@
 
   /**
    * Resolves a metadata update to the current gallery index, even after deletions.
-   * @param {number} index
-   * @param {any} meta
-   * @returns {number}
+   * @param {number} index Gallery item index.
+   * @param {any} meta Metadata payload to apply.
+   * @returns {number} The resolved gallery index, or -1 when not found.
    */
   function resolveMetaUpdateIndex(index, meta) {
     if (Number.isInteger(index)
@@ -755,7 +811,7 @@
 
   /**
    * Removes deleted items from the in-memory gallery immediately.
-   * @param {number[]} indexes
+   * @param {number[]} indexes Gallery indexes to process.
    */
   function removeImagesFromGallery(indexes) {
     const indexesToRemove = new Set(
@@ -774,7 +830,7 @@
 
   /**
    * Removes the currently selected images from the gallery and notifies the extension.
-   * @param {number[]} indexes
+   * @param {number[]} indexes Gallery indexes to process.
    */
   function deleteSelectedImages(indexes) {
     const indexesToRemove = sanitizeSelectedIndexes(indexes);
@@ -790,7 +846,7 @@
 
   /**
    * Opens the selected images in the requested comparison mode.
-   * @param {'split' | 'side-by-side'} mode
+   * @param {'split' | 'side-by-side'} mode Requested comparison mode.
    */
   function startComparisonForSelectedImages(mode) {
     const indexesToCompare = getOrderedSelectedIndexes();
@@ -834,6 +890,7 @@
     if (galleryImages.length === 0) {
       grid.innerHTML = '<div class="gallery-empty"><p>No images found in this folder.</p></div>';
       applyThumbSizeToGrid();
+      scheduleNavigationOrderSync();
       return;
     }
 
@@ -849,6 +906,7 @@
       initializeLazyGalleryImages();
       scheduleNearbyRowPreload();
       syncSelectionClasses();
+      scheduleNavigationOrderSync();
     });
   }
 
@@ -1015,7 +1073,7 @@
 
   /**
    * Handles selection of a gallery item (single or multi).
-   * @param {HTMLElement} item
+   * @param {HTMLElement} item Target gallery item element.
    * @param {{ ctrlPressed: boolean, shiftPressed: boolean }} modifiers
    */
   function selectItem(item, modifiers) {
@@ -1086,8 +1144,8 @@
 
   /**
    * Applies metadata updates directly to an existing rendered card.
-   * @param {number} index
-   * @param {any} meta
+   * @param {number} index Gallery item index.
+   * @param {any} meta Metadata payload to apply.
    */
   function patchRenderedItemMeta(index, meta) {
     const resolvedIndex = resolveMetaUpdateIndex(index, meta);
@@ -1175,8 +1233,8 @@
         continue;
       }
 
-      // galleryImages[resolvedIndex] already has meta merged via the eager merge in enqueueMetaUpdate.
-      // Re-applying is idempotent.
+      // galleryImages[resolvedIndex] already includes metadata merged in enqueueMetaUpdate().
+      // Re-applying the merge here is idempotent.
       galleryImages[resolvedIndex] = { ...galleryImages[resolvedIndex], ...meta };
 
       const itemRequiresFullRerender = currentSort !== 'name'
@@ -1204,8 +1262,8 @@
 
   /**
    * Queues one metadata update and applies all pending updates on the next frame.
-   * @param {number} index
-   * @param {any} meta
+   * @param {number} index Gallery item index.
+   * @param {any} meta Metadata payload to apply.
    */
   function enqueueMetaUpdate(index, meta) {
     const updateKey = typeof meta?.filePath === 'string' && meta.filePath
@@ -1309,6 +1367,10 @@
         window.cancelAnimationFrame(scheduledProgressUpdate);
         scheduledProgressUpdate = 0;
       }
+      if (scheduledNavigationOrderSync) {
+        window.cancelAnimationFrame(scheduledNavigationOrderSync);
+        scheduledNavigationOrderSync = 0;
+      }
       if (scheduledScrollSave) {
         window.cancelAnimationFrame(scheduledScrollSave);
         scheduledScrollSave = 0;
@@ -1337,6 +1399,7 @@
     if (msg.type === 'gallery-data') {
       if (Array.isArray(msg.images)) {
         galleryImages = msg.images;
+        lastNavigationOrderSignature = '';
         activeDuplicateGroupKey = '';
         activeDuplicateFocusIndex = 0;
         syncGalleryLoadingProgressFromImages();
@@ -1349,8 +1412,12 @@
         localStorage.setItem(window.selectionKey, JSON.stringify(selectedIndexes));
         if (document.readyState === 'complete' || document.readyState === 'interactive') {
           scheduleGalleryRefresh();
+          scheduleNavigationOrderSync(true);
         } else {
-          window.addEventListener('DOMContentLoaded', scheduleGalleryRefresh, { once: true });
+          window.addEventListener('DOMContentLoaded', () => {
+            scheduleGalleryRefresh();
+            scheduleNavigationOrderSync(true);
+          }, { once: true });
         }
       }
     }
@@ -1410,7 +1477,13 @@
     if (index < 0 && selectedIndexes.length > 0) {
       index = selectedIndexes[0];
     }
-    if (index >= 0 && window.vscodeApi) window.vscodeApi.postMessage({ type: 'open-image', index });
+    if (index >= 0 && window.vscodeApi) {
+      window.vscodeApi.postMessage({
+        type: 'open-image',
+        index,
+        navigationOrderIndexes: getSortedGalleryIndexes()
+      });
+    }
   }, { passive: true });
 
   document.addEventListener('contextmenu', (event) => {
@@ -1476,7 +1549,7 @@
 
   /**
    * Handles Ctrl/Cmd + wheel to resize gallery thumbnails.
-   * @param {WheelEvent} event
+   * @param {WheelEvent} event Event payload.
    */
   function handleWheelZoom(event) {
     if (!event.ctrlKey && !event.metaKey) return;
@@ -1506,8 +1579,8 @@
 
   /**
    * Indicates whether keyboard shortcuts should be ignored for an event target.
-   * @param {EventTarget | null} target
-   * @returns {boolean}
+   * @param {EventTarget | null} target Event target element.
+   * @returns {boolean} True when shortcuts must be ignored for the target.
    */
   function shouldIgnoreShortcutTarget(target) {
     if (!(target instanceof HTMLElement)) {
@@ -1522,8 +1595,8 @@
 
   /**
    * Indicates whether a keyboard event corresponds to the Delete key.
-   * @param {KeyboardEvent} event
-   * @returns {boolean}
+   * @param {KeyboardEvent} event Event payload.
+   * @returns {boolean} True when the event matches a delete shortcut.
    */
   function isDeleteShortcut(event) {
     const key = String(event.key ?? '').toLowerCase();
@@ -1597,7 +1670,7 @@
 
   /**
    * Adjusts the thumbnail size by a given delta.
-   * @param {number} delta
+   * @param {number} delta Size delta to apply.
    */
   function adjustThumbSize(delta) {
     currentThumbSize = Math.max(MIN_THUMB_SIZE, Math.min(MAX_THUMB_SIZE, currentThumbSize + delta));

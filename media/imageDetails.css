@@ -57,7 +57,7 @@
   --toolbar-green-halo-mid: rgba(var(--toolbar-green-accent-rgb), 0.22);
 }
 
-/* --- Classes pour remplacer les styles en ligne --- */
+/* Utility classes replacing former inline styles. */
 .svg-inline-middle {
   display: inline;
   vertical-align: middle;
@@ -110,7 +110,7 @@
   z-index: 20;
   filter: drop-shadow(0 2px 6px #0006);
 }
-/* --- Classes dynamiques pour JS --- */
+/* Dynamic state classes toggled by JS. */
 .is-hidden {
   display: none !important;
 }
@@ -173,6 +173,66 @@ body {
   overflow: hidden;
   min-height: 0;
   height: 100%;
+}
+
+.gallery-nav-button {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 32;
+  width: 34px;
+  height: 64px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--vscode-editorWidget-background) 88%, transparent);
+  color: var(--vscode-foreground);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  backdrop-filter: blur(1.5px);
+}
+
+.gallery-nav-button:hover:not(:disabled) {
+  border-color: var(--toolbar-green-accent-border);
+  background: var(--toolbar-green-accent-bg-hover);
+}
+
+.gallery-nav-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.gallery-nav-prev {
+  left: 10px;
+}
+
+.gallery-nav-next {
+  right: 10px;
+}
+
+.gallery-nav-position {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 31;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--vscode-panel-border);
+  background: color-mix(in srgb, var(--vscode-editorWidget-background) 92%, transparent);
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.gallery-nav-position-top {
+  top: 12px;
+  bottom: auto;
+}
+
+.gallery-nav-position-bottom {
+  bottom: 12px;
+  top: auto;
 }
 
 .preview-scroll {
