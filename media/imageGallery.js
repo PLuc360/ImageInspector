@@ -38,6 +38,8 @@
   let activeContextMenuCleanup = null;
   let activeDuplicateGroupKey = '';
   let activeDuplicateFocusIndex = 0;
+  let selectionAnchorIndex = -1;
+  let lastDeleteSelectionRequestAt = 0;
 
   /**
    * Applies the accent color used by gallery visual effects.
@@ -695,6 +697,41 @@
   }
 
   /**
+   * Returns currently visible gallery indexes in their rendered order.
+   * @returns {number[]}
+   */
+  function getVisibleGalleryIndexes() {
+    return Array.from(document.querySelectorAll('.gallery-item'))
+      .map((element) => {
+        if (!(element instanceof HTMLElement)) {
+          return -1;
+        }
+        return parseInt(element.dataset.index ?? '-1', 10);
+      })
+      .filter((index) => Number.isInteger(index) && index >= 0);
+  }
+
+  /**
+   * Computes the inclusive range between two indexes using current rendered order.
+   * @param {number} anchorIndex
+   * @param {number} targetIndex
+   * @returns {number[]}
+   */
+  function getVisibleRangeSelection(anchorIndex, targetIndex) {
+    const visibleIndexes = getVisibleGalleryIndexes();
+    const anchorPosition = visibleIndexes.indexOf(anchorIndex);
+    const targetPosition = visibleIndexes.indexOf(targetIndex);
+
+    if (anchorPosition < 0 || targetPosition < 0) {
+      return [targetIndex];
+    }
+
+    const start = Math.min(anchorPosition, targetPosition);
+    const end = Math.max(anchorPosition, targetPosition);
+    return visibleIndexes.slice(start, end + 1);
+  }
+
+  /**
    * Resolves a metadata update to the current gallery index, even after deletions.
    * @param {number} index
    * @param {any} meta
@@ -979,19 +1016,35 @@
   /**
    * Handles selection of a gallery item (single or multi).
    * @param {HTMLElement} item
-   * @param {boolean} ctrlPressed
+   * @param {{ ctrlPressed: boolean, shiftPressed: boolean }} modifiers
    */
-  function selectItem(item, ctrlPressed) {
+  function selectItem(item, modifiers) {
     const index = parseInt(item.dataset.index ?? '-1', 10);
     if (index < 0) return;
-    if (ctrlPressed) {
+
+    const ctrlPressed = modifiers?.ctrlPressed === true;
+    const shiftPressed = modifiers?.shiftPressed === true;
+
+    if (shiftPressed) {
+      const fallbackAnchor = selectedIndexes.length > 0 ? selectedIndexes[selectedIndexes.length - 1] : index;
+      const anchorIndex = selectionAnchorIndex >= 0 ? selectionAnchorIndex : fallbackAnchor;
+      const rangeSelection = getVisibleRangeSelection(anchorIndex, index);
+      selectedIndexes = ctrlPressed
+        ? Array.from(new Set([...selectedIndexes, ...rangeSelection]))
+        : rangeSelection;
+      if (selectionAnchorIndex < 0) {
+        selectionAnchorIndex = anchorIndex;
+      }
+    } else if (ctrlPressed) {
       if (selectedIndexes.includes(index)) {
         selectedIndexes = selectedIndexes.filter(i => i !== index);
       } else {
         selectedIndexes.push(index);
       }
+      selectionAnchorIndex = index;
     } else {
       selectedIndexes = [index];
+      selectionAnchorIndex = index;
     }
     syncSelectionClasses();
     if (selectedIndexes.includes(index)) {
@@ -1009,8 +1062,10 @@
     const savedIndexes = JSON.parse(localStorage.getItem(window.selectionKey) || '[]');
     if (Array.isArray(savedIndexes)) {
       selectedIndexes = sanitizeSelectedIndexes(savedIndexes);
+      selectionAnchorIndex = selectedIndexes.length > 0 ? selectedIndexes[selectedIndexes.length - 1] : -1;
       syncSelectionClasses();
     } else {
+      selectionAnchorIndex = -1;
       updateSelectionToolbar();
     }
   }
@@ -1285,7 +1340,12 @@
         activeDuplicateGroupKey = '';
         activeDuplicateFocusIndex = 0;
         syncGalleryLoadingProgressFromImages();
-        selectedIndexes = sanitizeSelectedIndexes(selectedIndexes);
+        if (msg.resetSelection === true) {
+          selectedIndexes = [];
+        } else {
+          selectedIndexes = sanitizeSelectedIndexes(selectedIndexes);
+        }
+        selectionAnchorIndex = selectedIndexes.length > 0 ? selectedIndexes[selectedIndexes.length - 1] : -1;
         localStorage.setItem(window.selectionKey, JSON.stringify(selectedIndexes));
         if (document.readyState === 'complete' || document.readyState === 'interactive') {
           scheduleGalleryRefresh();
@@ -1320,6 +1380,9 @@
       const direction = msg.direction === 'prev' ? 'prev' : 'next';
       selectDuplicateGroupByFilePaths(msg.filePaths, direction);
     }
+    if (msg.type === 'trigger-delete-selected' || msg.type === 'request-delete-selected') {
+      requestDeleteSelectionFromHost();
+    }
   });
 
   document.addEventListener('click', (event) => {
@@ -1328,7 +1391,10 @@
 
     const item = target.closest('.gallery-item');
     if (item instanceof HTMLElement) {
-      selectItem(item, event.ctrlKey);
+      selectItem(item, {
+        ctrlPressed: event.ctrlKey || event.metaKey,
+        shiftPressed: event.shiftKey
+      });
       localStorage.setItem(scrollKey, String(window.scrollY));
     }
   }, { passive: true });
@@ -1360,6 +1426,7 @@
 
       if (!selectedIndexes.includes(idx)) {
         selectedIndexes = [idx];
+        selectionAnchorIndex = idx;
         localStorage.setItem(window.selectionKey, JSON.stringify(selectedIndexes));
         syncSelectionClasses();
       }
@@ -1437,11 +1504,88 @@
     isWheelZoomListenerActive = false;
   }
 
+  /**
+   * Indicates whether keyboard shortcuts should be ignored for an event target.
+   * @param {EventTarget | null} target
+   * @returns {boolean}
+   */
+  function shouldIgnoreShortcutTarget(target) {
+    if (!(target instanceof HTMLElement)) {
+      return false;
+    }
+
+    return target.isContentEditable
+      || target instanceof HTMLInputElement
+      || target instanceof HTMLTextAreaElement
+      || target instanceof HTMLSelectElement;
+  }
+
+  /**
+   * Indicates whether a keyboard event corresponds to the Delete key.
+   * @param {KeyboardEvent} event
+   * @returns {boolean}
+   */
+  function isDeleteShortcut(event) {
+    const key = String(event.key ?? '').toLowerCase();
+    const code = String(event.code ?? '').toLowerCase();
+    return key === 'delete'
+      || key === 'del'
+      || key === 'suppr'
+      || key === 'backspace'
+      || code === 'delete'
+      || code === 'backspace'
+      || event.keyCode === 46
+      || event.keyCode === 8;
+  }
+
+  /**
+   * Requests deletion of current selection from the extension host.
+   * Host is responsible for showing the confirmation popup.
+   * @returns {boolean} True when a deletion request was sent.
+   */
+  function requestDeleteSelectionFromHost() {
+    const indexesToRemove = sanitizeSelectedIndexes([...selectedIndexes]);
+    if (indexesToRemove.length === 0) {
+      return false;
+    }
+
+    const now = Date.now();
+    if (now - lastDeleteSelectionRequestAt < 250) {
+      return true;
+    }
+
+    if (window.vscodeApi && typeof window.vscodeApi.postMessage === 'function') {
+      lastDeleteSelectionRequestAt = now;
+      window.vscodeApi.postMessage({
+        type: 'request-delete-selected',
+        indexes: indexesToRemove
+      });
+      return true;
+    }
+
+    return false;
+  }
+
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Control' || event.key === 'Meta') {
       enableWheelZoomListener();
     }
   }, { passive: true });
+
+  window.addEventListener('keydown', (event) => {
+    if (!isDeleteShortcut(event)) {
+      return;
+    }
+
+    if (shouldIgnoreShortcutTarget(event.target)) {
+      return;
+    }
+
+    const hasDeleted = requestDeleteSelectionFromHost();
+    if (hasDeleted) {
+      event.preventDefault();
+    }
+  }, true);
 
   document.addEventListener('keyup', (event) => {
     if ((event.key === 'Control' || event.key === 'Meta') && !event.ctrlKey && !event.metaKey) {

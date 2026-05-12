@@ -870,6 +870,7 @@ class ImageFolderGalleryPanel {
   private readonly panelDisposables: vscode.Disposable[] = [];
   private duplicateResultsPanel: vscode.WebviewPanel | undefined;
   private isDisposed = false;
+  private deleteSelectionConfirmationInProgress = false;
   private refreshGeneration = 0;
   private duplicateScanGeneration = 0;
   private duplicateScanRunning = false;
@@ -926,6 +927,23 @@ class ImageFolderGalleryPanel {
     for (const panel of ImageFolderGalleryPanel.activePanels.values()) {
       void panel.refreshFromSettings(settings);
     }
+  }
+
+  /**
+   * Requests deletion of selected images in the currently active gallery panel.
+   * @returns True when a gallery panel was targeted.
+   */
+  static async requestDeleteSelectedInActivePanel(): Promise<boolean> {
+    for (const galleryPanel of ImageFolderGalleryPanel.activePanels.values()) {
+      if (!galleryPanel.panel.active || galleryPanel.isDisposed) {
+        continue;
+      }
+
+      await galleryPanel.panel.webview.postMessage({ type: 'trigger-delete-selected' });
+      return true;
+    }
+
+    return false;
   }
 
   /**
@@ -1516,7 +1534,7 @@ class ImageFolderGalleryPanel {
     );
 
     const messageDisposable = this.panel.webview.onDidReceiveMessage(
-      (rawMessage: unknown) => {
+      async (rawMessage: unknown) => {
         if (this.isDisposed) {
           return;
         }
@@ -1526,6 +1544,66 @@ class ImageFolderGalleryPanel {
         }
 
         const message = rawMessage as { type: string; index?: unknown; binPath?: string; indexes?: number[]; mode?: unknown };
+        const normalizeGalleryIndexes = (rawIndexes: unknown): number[] => {
+          if (!Array.isArray(rawIndexes)) {
+            return [];
+          }
+
+          return Array.from(new Set(
+            rawIndexes
+              .filter((value): value is number => typeof value === 'number')
+              .map((value) => Math.trunc(value))
+              .filter((index) => index >= 0 && index < this.imageFiles.length)
+          )).sort((left, right) => left - right);
+        };
+
+        const removeGalleryImagesByIndexes = async (indexes: number[]): Promise<void> => {
+          if (indexes.length === 0) {
+            return;
+          }
+
+          const deletedPaths = new Set<string>();
+
+          await Promise.all(
+            indexes.map(async (index) => {
+              const img = this.imageFiles[index];
+              if (!img || typeof img.filePath !== 'string') {
+                return;
+              }
+
+              try {
+                const openEditors = vscode.window.visibleTextEditors.filter((editor) => editor.document.uri.fsPath === img.filePath);
+                for (const editor of openEditors) {
+                  await vscode.window.showTextDocument(editor.document, editor.viewColumn, false);
+                  await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+                }
+
+                await fs.unlink(img.filePath);
+                deletedPaths.add(img.filePath);
+              } catch (err) {
+                // eslint-disable-next-line no-console
+                console.error('[ImageInspector] Failed to delete image file', img.filePath, err);
+              }
+            })
+          );
+
+          if (this.isDisposed) {
+            return;
+          }
+
+          if (deletedPaths.size > 0) {
+            const remainingImages = this.imageFiles.filter((img) => !deletedPaths.has(img.filePath));
+            this.imageFiles.length = 0;
+            this.imageFiles.push(...remainingImages);
+          }
+
+          await this.panel.webview.postMessage({
+            type: 'gallery-data',
+            images: this.imageFiles,
+            resetSelection: true
+          });
+        };
+
         // Handler for explicit gallery data request (webview refresh)
         if (message.type === 'request-gallery-data') {
           this.panel.webview.postMessage({
@@ -1544,60 +1622,42 @@ class ImageFolderGalleryPanel {
           void this.startDuplicateSearch();
           return;
         }
-        // Handler for image removal
-        if (message.type === 'remove-image' && Array.isArray(message.indexes)) {
-          const indexes = Array.from(new Set(
-            message.indexes
-              .filter((value): value is number => typeof value === 'number')
-              .map((value) => Math.trunc(value))
-              .filter((index) => index >= 0 && index < this.imageFiles.length)
-          )).sort((left, right) => left - right);
+        if (message.type === 'request-delete-selected') {
+          if (this.deleteSelectionConfirmationInProgress) {
+            return;
+          }
 
+          const indexes = normalizeGalleryIndexes(message.indexes);
           if (indexes.length === 0) {
             return;
           }
 
-          void (async () => {
-            const deletedPaths = new Set<string>();
-
-            await Promise.all(
-              indexes.map(async (index) => {
-                const img = this.imageFiles[index];
-                if (!img || typeof img.filePath !== 'string') {
-                  return;
-                }
-
-                try {
-                  const openEditors = vscode.window.visibleTextEditors.filter((editor) => editor.document.uri.fsPath === img.filePath);
-                  for (const editor of openEditors) {
-                    await vscode.window.showTextDocument(editor.document, editor.viewColumn, false);
-                    await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
-                  }
-
-                  await fs.unlink(img.filePath);
-                  deletedPaths.add(img.filePath);
-                } catch (err) {
-                  // eslint-disable-next-line no-console
-                  console.error('[ImageInspector] Failed to delete image file', img.filePath, err);
-                }
-              })
+          this.deleteSelectionConfirmationInProgress = true;
+          try {
+            const confirmationAction = 'Delete';
+            const confirmationMessage = indexes.length === 1
+              ? 'Delete the selected image?'
+              : `Delete ${indexes.length} selected images?`;
+            const confirmedAction = await vscode.window.showWarningMessage(
+              confirmationMessage,
+              { modal: true },
+              confirmationAction
             );
 
-            if (this.isDisposed) {
+            if (confirmedAction !== confirmationAction) {
               return;
             }
 
-            if (deletedPaths.size > 0) {
-              const remainingImages = this.imageFiles.filter((img) => !deletedPaths.has(img.filePath));
-              this.imageFiles.length = 0;
-              this.imageFiles.push(...remainingImages);
-            }
-
-            await this.panel.webview.postMessage({
-              type: 'gallery-data',
-              images: this.imageFiles
-            });
-          })();
+            await removeGalleryImagesByIndexes(indexes);
+          } finally {
+            this.deleteSelectionConfirmationInProgress = false;
+          }
+          return;
+        }
+        // Handler for image removal
+        if (message.type === 'remove-image' && Array.isArray(message.indexes)) {
+          const indexes = normalizeGalleryIndexes(message.indexes);
+          void removeGalleryImagesByIndexes(indexes);
           return;
         }
         // Handler for comparison opening from the gallery toolbar
@@ -1743,6 +1803,13 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   );
 
+  const deleteSelectedGalleryImagesDisposable = vscode.commands.registerCommand(
+    'imageInspector.deleteSelectedGalleryImages',
+    async () => {
+      await ImageFolderGalleryPanel.requestDeleteSelectedInActivePanel();
+    }
+  );
+
   const pickThemeAccentColorDisposable = vscode.commands.registerCommand(
     'imageInspector.pickThemeAccentColor',
     () => {
@@ -1760,6 +1827,7 @@ export function activate(context: vscode.ExtensionContext): void {
     selectComparisonImageDisposable,
     configurationChangeDisposable,
     openFolderGalleryDisposable,
+    deleteSelectedGalleryImagesDisposable,
     pickThemeAccentColorDisposable
   );
 }

@@ -4,10 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [1.14.1] - 2026-05-09
+## [1.15.0] - 2026-05-12
+### Added
+- Added range multi-selection in the gallery with `Shift + click` (selects all images between the anchor and clicked item in current visible order).
+- Added keyboard delete actions in the gallery with `Delete`/`Backspace` support and confirmation before removing files.
+
 ### Fixed
 - Fixed gallery toolbar visual consistency by normalizing badge sizing/alignment and unifying combobox chevrons and spacing.
-
 
 ## [1.14.0] - 2026-05-08
 ### Added
