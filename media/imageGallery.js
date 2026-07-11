@@ -18,6 +18,7 @@
   let selectedIndexes = [];
   let currentFilterTypes = persistedGalleryState.filterTypes;
   let currentSearchQuery = persistedGalleryState.searchQuery;
+  let currentSearchMatchers = buildSearchMatchers(currentSearchQuery);
   let currentSort = persistedGalleryState.sort;
   let currentSortOrder = persistedGalleryState.sortOrder;
   const MIN_THUMB_SIZE = 196;
@@ -143,6 +144,111 @@
   }
 
   /**
+   * Builds a file-name contains matcher.
+   * @param {string} fragment Lowercase text fragment to match.
+   * @returns {(img: any) => boolean} Predicate returning true when the image name contains the fragment.
+   */
+  function createNameContainsMatcher(fragment) {
+    return (img) => String(img?.name ?? '').toLowerCase().includes(fragment);
+  }
+
+  /**
+   * Parses one structured search token.
+   * Supported forms include `type:png`, `name:warm`, `width>1000`, and `height<=512`.
+   * @param {string} token Lowercase token to parse.
+   * @returns {((img: any) => boolean) | null} A matcher for the token, or null when it is not structured.
+   */
+  function parseStructuredSearchToken(token) {
+    const fieldMatch = token.match(/^(type|name):(.+)$/i);
+    if (fieldMatch) {
+      const fieldName = fieldMatch[1].toLowerCase();
+      const rawValue = fieldMatch[2].trim().toLowerCase();
+      if (!rawValue) {
+        return null;
+      }
+
+      if (fieldName === 'type') {
+        const normalizedType = rawValue.replace(/^\./, '');
+        return (img) => getImageTypeKey(img) === normalizedType;
+      }
+
+      if (fieldName === 'name') {
+        return createNameContainsMatcher(rawValue);
+      }
+    }
+
+    const numericMatch = token.match(/^(width|height|size)(<=|>=|=|:|<|>)(\d+)$/i);
+    if (!numericMatch) {
+      return null;
+    }
+
+    const fieldName = numericMatch[1].toLowerCase();
+    const operator = numericMatch[2] === ':' ? '=' : numericMatch[2];
+    const expectedValue = Number.parseInt(numericMatch[3], 10);
+    if (!Number.isFinite(expectedValue)) {
+      return null;
+    }
+
+    return (img) => {
+      const actualValue = Number(img?.[fieldName]);
+      if (!Number.isFinite(actualValue)) {
+        return false;
+      }
+
+      if (operator === '>') {
+        return actualValue > expectedValue;
+      }
+
+      if (operator === '>=') {
+        return actualValue >= expectedValue;
+      }
+
+      if (operator === '<') {
+        return actualValue < expectedValue;
+      }
+
+      if (operator === '<=') {
+        return actualValue <= expectedValue;
+      }
+
+      return actualValue === expectedValue;
+    };
+  }
+
+  /**
+   * Builds the active search predicates for the current query.
+   * Plain text keeps the legacy file-name substring behavior. Structured tokens are combined with free-text tokens.
+   * @param {string} searchQuery Normalized raw search query.
+   * @returns {Array<(img: any) => boolean>} Predicates that must all match.
+   */
+  function buildSearchMatchers(searchQuery) {
+    const normalizedQuery = normalizeSearchQuery(searchQuery);
+    if (!normalizedQuery) {
+      return [];
+    }
+
+    const rawTokens = normalizedQuery.split(/\s+/).filter(Boolean);
+    const structuredMatchers = [];
+    const freeTextTokens = [];
+
+    rawTokens.forEach((token) => {
+      const matcher = parseStructuredSearchToken(token);
+      if (matcher) {
+        structuredMatchers.push(matcher);
+        return;
+      }
+
+      freeTextTokens.push(token);
+    });
+
+    if (structuredMatchers.length === 0) {
+      return [createNameContainsMatcher(normalizedQuery)];
+    }
+
+    return structuredMatchers.concat(freeTextTokens.map((token) => createNameContainsMatcher(token)));
+  }
+
+  /**
    * Reads the persisted sort and filter state for this gallery.
    * @returns {{ filterTypes: string[], searchQuery: string, sort: string, sortOrder: string }}
    */
@@ -190,21 +296,20 @@
    * @returns {boolean} True when a normalized search query is present.
    */
   function hasActiveTextSearch() {
-    return currentSearchQuery.length > 0;
+    return currentSearchMatchers.length > 0;
   }
 
   /**
-   * Checks whether an image matches the current free-text search.
+   * Checks whether an image matches the current search query.
    * @param {any} img Gallery image metadata object.
-   * @returns {boolean} True when the image name contains the query.
+   * @returns {boolean} True when all active search predicates match.
    */
   function matchesTextSearch(img) {
     if (!hasActiveTextSearch()) {
       return true;
     }
 
-    const imageName = String(img?.name ?? '').toLowerCase();
-    return imageName.includes(currentSearchQuery);
+    return currentSearchMatchers.every((matcher) => matcher(img));
   }
 
   /**
@@ -998,9 +1103,10 @@
             class="gallery-menu-search-input"
             type="search"
             value="${escapeHtml(currentSearchQuery)}"
-            placeholder="File name"
+            placeholder="name:warm type:png width>1000"
             spellcheck="false"
-            aria-label="Search images by file name"
+            aria-label="Search images with text or structured filters"
+            title="Examples: warm, type:png, name:warm, width>1000, height<=512"
           />
         </label>
         <label class="gallery-menu-field gallery-menu-field-select">
@@ -1073,6 +1179,7 @@
       const target = event.target;
       if (!(target instanceof HTMLInputElement)) return;
       currentSearchQuery = normalizeSearchQuery(target.value);
+      currentSearchMatchers = buildSearchMatchers(currentSearchQuery);
       persistGalleryState();
       renderGallery();
     });

@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 ### Added
-- Added a text search field to the gallery toolbar to filter images by file name as you type.
+- Added a gallery toolbar search field with multi-criteria filtering support, including free-text name matching and structured queries such as `type:png`, `name:warm`, `width>1000`, and `height<=512`.
 
 ### Changed
 - Unified gallery and Image Details toolbar item borders with an accent-derived color that adapts to the active light/dark theme.
