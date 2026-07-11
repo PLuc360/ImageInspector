@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+### Added
+- Added a text search field to the gallery toolbar to filter images by file name as you type.
+
+### Changed
+- Unified gallery and Image Details toolbar item borders with an accent-derived color that adapts to the active light/dark theme.
+
 ## [1.16.1] - 2026-07-11
 ### Added
 - Added a new Image Details toolbar toggle to switch the preview area between the editor theme background and a dedicated custom background.

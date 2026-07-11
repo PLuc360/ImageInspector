@@ -57,6 +57,20 @@
   --toolbar-green-accent-bg-hover: rgba(var(--toolbar-green-accent-rgb), 0.28);
   --toolbar-green-halo-strong: rgba(var(--toolbar-green-accent-rgb), 0.5);
   --toolbar-green-halo-mid: rgba(var(--toolbar-green-accent-rgb), 0.22);
+  --toolbar-control-border-color: color-mix(in srgb, rgb(var(--toolbar-green-accent-rgb)) 46%, var(--vscode-editorWidget-background) 54%);
+}
+
+body.vscode-dark .layout {
+  --toolbar-control-border-color: color-mix(in srgb, rgb(var(--toolbar-green-accent-rgb)) 42%, black 58%);
+}
+
+body.vscode-light .layout {
+  --toolbar-control-border-color: color-mix(in srgb, rgb(var(--toolbar-green-accent-rgb)) 42%, white 58%);
+}
+
+body.vscode-high-contrast .layout,
+body.vscode-high-contrast-light .layout {
+  --toolbar-control-border-color: var(--toolbar-green-accent-border);
 }
 
 .layout.custom-preview-background-enabled {
@@ -417,7 +431,7 @@ body {
 }
 
 .zoom-toolbar button {
-  border: 1px solid var(--vscode-button-border, transparent);
+  border: 1px solid var(--toolbar-control-border-color);
   background: var(--vscode-button-secondaryBackground);
   color: var(--vscode-button-secondaryForeground);
   width: 26px;
@@ -452,7 +466,7 @@ body {
 .zoom-toolbar #compare-side-by-side.is-active,
 .zoom-toolbar #info-toggle.is-active {
   background: var(--toolbar-green-accent-bg);
-  border-color: var(--toolbar-green-accent-border);
+  border-color: var(--toolbar-control-border-color);
   color: var(--vscode-foreground);
 }
 
@@ -535,7 +549,7 @@ body {
 .compare-diff-target,
 .compare-diff-all,
 .compare-diff-autocenter {
-  border: 1px solid var(--vscode-button-border, transparent);
+  border: 1px solid var(--toolbar-control-border-color);
   background: var(--vscode-button-secondaryBackground);
   color: var(--vscode-button-secondaryForeground);
   border-radius: 999px;
@@ -566,7 +580,7 @@ body {
 
 .compare-diff-all.is-active {
   background: var(--toolbar-green-accent-bg);
-  border-color: var(--toolbar-green-accent-border);
+  border-color: var(--toolbar-control-border-color);
   color: var(--vscode-foreground);
 }
 
@@ -576,7 +590,7 @@ body {
 
 .compare-diff-autocenter.is-active {
   background: var(--toolbar-green-accent-bg);
-  border-color: var(--toolbar-green-accent-border);
+  border-color: var(--toolbar-control-border-color);
   color: var(--vscode-foreground);
 }
 
@@ -596,7 +610,7 @@ body {
   gap: 6px;
   padding: 0 8px;
   box-sizing: border-box;
-  border: 1px solid var(--vscode-button-border, transparent);
+  border: 1px solid var(--toolbar-control-border-color);
   border-radius: 999px;
   height: 26px;
   background: var(--vscode-button-secondaryBackground);
@@ -654,7 +668,7 @@ body {
 
 .compare-pick-button,
 .compare-orientation-button {
-  border: 1px solid var(--vscode-button-border, transparent);
+  border: 1px solid var(--toolbar-control-border-color);
   background: var(--vscode-button-secondaryBackground);
   color: var(--vscode-button-secondaryForeground);
   border-radius: 999px;
@@ -690,7 +704,7 @@ body {
 
 .compare-orientation-button.is-active {
   background: var(--toolbar-green-accent-bg);
-  border-color: var(--toolbar-green-accent-border);
+  border-color: var(--toolbar-control-border-color);
   color: var(--vscode-foreground);
 }
 

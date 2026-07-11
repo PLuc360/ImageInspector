@@ -17,6 +17,7 @@
   let galleryImages = [];
   let selectedIndexes = [];
   let currentFilterTypes = persistedGalleryState.filterTypes;
+  let currentSearchQuery = persistedGalleryState.searchQuery;
   let currentSort = persistedGalleryState.sort;
   let currentSortOrder = persistedGalleryState.sortOrder;
   const MIN_THUMB_SIZE = 196;
@@ -133,24 +134,34 @@
   }
 
   /**
+   * Normalizes the free-text query used to filter gallery items.
+   * @param {unknown} value Raw search value.
+   * @returns {string} The normalized query.
+   */
+  function normalizeSearchQuery(value) {
+    return String(value ?? '').trim().toLowerCase();
+  }
+
+  /**
    * Reads the persisted sort and filter state for this gallery.
-   * @returns {{ filterTypes: string[], sort: string, sortOrder: string }}
+   * @returns {{ filterTypes: string[], searchQuery: string, sort: string, sortOrder: string }}
    */
   function readPersistedGalleryState() {
     try {
       const rawState = localStorage.getItem(galleryStateKey);
       if (!rawState) {
-        return { filterTypes: [], sort: 'name', sortOrder: 'asc' };
+        return { filterTypes: [], searchQuery: '', sort: 'name', sortOrder: 'asc' };
       }
 
       const savedState = JSON.parse(rawState);
       const filterTypes = normalizeTypeFilters(Array.isArray(savedState?.filterTypes) ? savedState.filterTypes : []);
+      const searchQuery = normalizeSearchQuery(savedState?.searchQuery);
       const sort = ['name', 'type', 'size', 'date'].includes(savedState?.sort) ? savedState.sort : 'name';
       const sortOrder = savedState?.sortOrder === 'desc' ? 'desc' : 'asc';
 
-      return { filterTypes, sort, sortOrder };
+      return { filterTypes, searchQuery, sort, sortOrder };
     } catch {
-      return { filterTypes: [], sort: 'name', sortOrder: 'asc' };
+      return { filterTypes: [], searchQuery: '', sort: 'name', sortOrder: 'asc' };
     }
   }
 
@@ -160,6 +171,7 @@
   function persistGalleryState() {
     localStorage.setItem(galleryStateKey, JSON.stringify({
       filterTypes: currentFilterTypes,
+      searchQuery: currentSearchQuery,
       sort: currentSort,
       sortOrder: currentSortOrder
     }));
@@ -171,6 +183,28 @@
    */
   function hasActiveTypeFilters() {
     return currentFilterTypes.length > 0;
+  }
+
+  /**
+   * Indicates whether a free-text search is currently active.
+   * @returns {boolean} True when a normalized search query is present.
+   */
+  function hasActiveTextSearch() {
+    return currentSearchQuery.length > 0;
+  }
+
+  /**
+   * Checks whether an image matches the current free-text search.
+   * @param {any} img Gallery image metadata object.
+   * @returns {boolean} True when the image name contains the query.
+   */
+  function matchesTextSearch(img) {
+    if (!hasActiveTextSearch()) {
+      return true;
+    }
+
+    const imageName = String(img?.name ?? '').toLowerCase();
+    return imageName.includes(currentSearchQuery);
   }
 
   /**
@@ -197,7 +231,8 @@
   function getFilteredSortedImages() {
     const images = galleryImages
       .map((img, index) => ({ img, index }))
-      .filter(({ img }) => !hasActiveTypeFilters() || currentFilterTypes.includes(getImageTypeKey(img)));
+      .filter(({ img }) => (!hasActiveTypeFilters() || currentFilterTypes.includes(getImageTypeKey(img)))
+        && matchesTextSearch(img));
 
     images.sort((left, right) => {
       const leftName = String(left.img?.name ?? '');
@@ -892,6 +927,13 @@
       return;
     }
 
+    if (images.length === 0) {
+      grid.innerHTML = '<div class="gallery-empty"><p>No images match the current filters.</p></div>';
+      applyThumbSizeToGrid();
+      scheduleNavigationOrderSync();
+      return;
+    }
+
     grid.innerHTML = images.map(({ img, index }) => buildGalleryItemMarkup(img, index)).join('');
     applyThumbSizeToGrid();
 
@@ -909,7 +951,7 @@
   }
 
   /**
-   * Builds and attaches the gallery menu (sort/filter selectors).
+  * Builds and attaches the gallery menu (sort/filter/search controls).
    */
   function buildGalleryMenu() {
     const header = document.querySelector('.gallery-header');
@@ -949,6 +991,18 @@
     menu.setAttribute('aria-label', 'Gallery filters and sorting');
     menu.innerHTML = `
       <div class="gallery-menu-group">
+        <label class="gallery-menu-field gallery-menu-field-search">
+          <span class="gallery-menu-label">Search</span>
+          <input
+            id="gallery-search-input"
+            class="gallery-menu-search-input"
+            type="search"
+            value="${escapeHtml(currentSearchQuery)}"
+            placeholder="File name"
+            spellcheck="false"
+            aria-label="Search images by file name"
+          />
+        </label>
         <label class="gallery-menu-field gallery-menu-field-select">
           <span class="gallery-menu-label">Sort</span>
           <select id="sort-select">
@@ -984,10 +1038,12 @@
 
     const sortSelect = menu.querySelector('#sort-select');
     const sortOrderSelect = menu.querySelector('#sort-order-select');
+    const searchInput = menu.querySelector('#gallery-search-input');
     const typeFilterSummary = menu.querySelector('#filter-type-summary');
     const typeFilterAllInput = menu.querySelector('#filter-type-all');
     const typeFilterInputs = Array.from(menu.querySelectorAll('.gallery-type-filter-option input[type="checkbox"][data-type]'));
     if (!(sortSelect instanceof HTMLSelectElement)
+      || !(searchInput instanceof HTMLInputElement)
       || !(sortOrderSelect instanceof HTMLSelectElement)) {
       return;
     }
@@ -1006,11 +1062,19 @@
     sortOrderSelect.value = currentSortOrder;
     updateTypeFilterSummary();
 
-    [sortSelect, sortOrderSelect, typeFilterSummary, typeFilterAllInput, ...typeFilterInputs].forEach((controlElement) => {
+    [searchInput, sortSelect, sortOrderSelect, typeFilterSummary, typeFilterAllInput, ...typeFilterInputs].forEach((controlElement) => {
       if (!(controlElement instanceof HTMLElement)) return;
       controlElement.addEventListener('pointerdown', () => {
         showToolbarClickHalo(controlElement);
       }, { passive: true });
+    });
+
+    searchInput.addEventListener('input', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement)) return;
+      currentSearchQuery = normalizeSearchQuery(target.value);
+      persistGalleryState();
+      renderGallery();
     });
 
     sortSelect.addEventListener('change', (event) => {
