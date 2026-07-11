@@ -2,7 +2,7 @@
   "name": "image-inspector",
   "displayName": "Image Inspector",
   "description": "Displays image information (dimensions, size, format, metadata).",
-  "version": "1.16.0",
+  "version": "1.16.1",
   "publisher": "pierre-luc-guegan",
   "icon": "assets/icon.png",
   "repository": {
@@ -56,6 +56,12 @@
           "default": "#00C86E",
           "pattern": "^#([0-9a-fA-F]{6})$",
           "description": "Accent color used by toolbar active tools, click halo, and selection rectangles (hex format: #RRGGBB)."
+        },
+        "imageInspector.imageDetailsBackgroundColor": {
+          "type": "string",
+          "default": "",
+          "pattern": "^$|^#([0-9a-fA-F]{6})$",
+          "description": "Custom background color used by the Image Details toolbar toggle. Leave empty to automatically use a light color on dark themes and a dark color on light themes."
         },
         "imageInspector.saveEditsToOriginalFile": {
           "type": "boolean",

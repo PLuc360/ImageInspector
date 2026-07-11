@@ -53,6 +53,7 @@ const zoomInButton = document.getElementById('zoom-in');
 const zoomOutButton = document.getElementById('zoom-out');
 const zoomResetButton = document.getElementById('zoom-reset');
 const zoomFitButton = document.getElementById('zoom-fit');
+const customBackgroundToggleButton = document.getElementById('custom-background-toggle');
 const galleryNavPrevButton = document.getElementById('gallery-nav-prev');
 const galleryNavNextButton = document.getElementById('gallery-nav-next');
 const galleryNavPositionLabel = document.getElementById('gallery-nav-position');
@@ -101,9 +102,11 @@ let overviewMapViewportFrameId = null;
 let pipetteMode = false;
 let pipetteResultFadeTimeoutId = null;
 let pipetteResultHideTimeoutId = null;
+let customBackgroundEnabled = false;
 const INFO_OVERLAY_STORAGE_KEY = 'imageDetails.infoOverlayVisible';
 const INFO_OVERLAY_POSITION_STORAGE_KEY = 'imageDetails.infoOverlayPosition';
 const COMPARE_DIFF_SENSITIVITY_STORAGE_KEY = 'imageDetails.compareDiffSensitivity';
+const CUSTOM_BACKGROUND_ENABLED_STORAGE_KEY = 'imageDetails.customBackgroundEnabled';
 const DIFF_ANALYSIS_MAX_DIMENSION_MIN = 2048;
 const DIFF_ANALYSIS_MAX_DIMENSION_MAX = 8192;
 const DIFF_PIXEL_THRESHOLD_MIN = 0.08;
@@ -596,6 +599,38 @@ function initializeThemeFromDom() {
 }
 
 /**
+ * Reads the configured preview background color from the layout element data attributes and applies it.
+ */
+function initializePreviewBackgroundFromDom() {
+  if (!layoutElement) {
+    return;
+  }
+
+  const previewBackgroundRgb = layoutElement.dataset.previewBackgroundRgb;
+  if (typeof previewBackgroundRgb === 'string' && previewBackgroundRgb.trim().length > 0) {
+    applyPreviewBackgroundRgb(previewBackgroundRgb);
+  }
+}
+
+/**
+ * Restores the custom preview background toggle state from local storage.
+ */
+function initializeCustomBackgroundToggleState() {
+  let nextEnabled = false;
+
+  try {
+    const storedValue = localStorage.getItem(CUSTOM_BACKGROUND_ENABLED_STORAGE_KEY);
+    if (storedValue !== null) {
+      nextEnabled = toBooleanFlag(storedValue, nextEnabled);
+    }
+  } catch {
+    // Ignore storage errors and keep default value.
+  }
+
+  setCustomBackgroundEnabled(nextEnabled);
+}
+
+/**
  * Initializes edit persistence behavior from webview data attributes.
  */
 function initializeEditPersistenceSettingsFromDom() {
@@ -719,6 +754,55 @@ function applyThemeAccentRgb(accentRgb) {
   }
 
   layoutElement.style.setProperty('--toolbar-green-accent-rgb', accentRgb.trim());
+}
+
+/**
+ * Sets the custom preview background color via a CSS custom property on the layout element.
+ *
+ * @param {string} backgroundRgb RGB value string, e.g. '32,32,32'.
+ */
+function applyPreviewBackgroundRgb(backgroundRgb) {
+  if (!layoutElement || typeof backgroundRgb !== 'string' || backgroundRgb.trim().length === 0) {
+    return;
+  }
+
+  layoutElement.style.setProperty('--image-details-custom-background-rgb', backgroundRgb.trim());
+}
+
+/**
+ * Synchronizes the custom preview background toggle appearance and preview state.
+ */
+function updateCustomBackgroundToggleUi() {
+  if (!layoutElement || !customBackgroundToggleButton) {
+    return;
+  }
+
+  layoutElement.classList.toggle('custom-preview-background-enabled', customBackgroundEnabled);
+  customBackgroundToggleButton.classList.toggle('is-active', customBackgroundEnabled);
+
+  const nextLabel = customBackgroundEnabled
+    ? 'Use theme background'
+    : 'Use custom background';
+
+  customBackgroundToggleButton.setAttribute('aria-pressed', customBackgroundEnabled ? 'true' : 'false');
+  customBackgroundToggleButton.setAttribute('aria-label', nextLabel);
+  customBackgroundToggleButton.setAttribute('title', nextLabel);
+}
+
+/**
+ * Enables or disables the custom preview background and persists the current choice.
+ *
+ * @param {boolean} isEnabled Whether the custom preview background should be enabled.
+ */
+function setCustomBackgroundEnabled(isEnabled) {
+  customBackgroundEnabled = Boolean(isEnabled);
+  updateCustomBackgroundToggleUi();
+
+  try {
+    localStorage.setItem(CUSTOM_BACKGROUND_ENABLED_STORAGE_KEY, String(customBackgroundEnabled));
+  } catch {
+    // Ignore storage errors.
+  }
 }
 
 /**
@@ -3205,6 +3289,10 @@ bindClickAction(zoomFitButton, () => {
   setFitMode();
 });
 
+bindClickAction(customBackgroundToggleButton, () => {
+  setCustomBackgroundEnabled(!customBackgroundEnabled);
+});
+
 bindClickAction(rotateLeftButton, () => {
   rotatePreviewImage(-1);
 
@@ -3841,6 +3929,7 @@ window.addEventListener('message', (event) => {
       if (message.settings && typeof message.settings === 'object') {
         applyToolbarPosition(typeof message.settings.toolbarPosition === 'string' ? message.settings.toolbarPosition : 'top');
         applyThemeAccentRgb(typeof message.settings.themeAccentRgb === 'string' ? message.settings.themeAccentRgb : '');
+        applyPreviewBackgroundRgb(typeof message.settings.previewBackgroundRgb === 'string' ? message.settings.previewBackgroundRgb : '');
         saveEditsToOriginalFile = toBooleanFlag(
           message.settings.saveEditsToOriginalFile,
           saveEditsToOriginalFile
@@ -3871,9 +3960,11 @@ window.addEventListener('message', (event) => {
 
 initializeLoupeSettingsFromDom();
 initializeThemeFromDom();
+initializePreviewBackgroundFromDom();
 initializeEditPersistenceSettingsFromDom();
 initializeGalleryNavigationFromDom();
 initializeCompareDiffSettingsFromDom();
+initializeCustomBackgroundToggleState();
 initializeInfoOverlayVisibility();
 initializeInfoOverlayPosition();
 initializeIcoGallery();

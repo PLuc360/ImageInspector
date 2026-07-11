@@ -42,6 +42,7 @@ function getLowercaseExtension(filePath: string): string {
 interface ImageInspectorSettings {
   toolbarPosition: string;
   themeAccentRgb: string;
+  previewBackgroundRgb: string;
   saveEditsToOriginalFile: boolean;
   pipetteLoupeDiameter: number;
   pipetteLoupeVirtualResolution: number;
@@ -592,7 +593,7 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
   /**
    * Refreshes runtime settings for all opened image inspector panels.
    */
-  refreshActivePanelFromConfiguration(_event: vscode.ConfigurationChangeEvent): void {
+  refreshActivePanelFromConfiguration(): void {
     const settings = getImageInspectorSettings();
 
     for (const panel of this.openPanels.keys()) {
@@ -835,6 +836,8 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
 const SUPPORTED_IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tif', '.tiff', '.avif', '.ico', '.svg', '.heic', '.heif'];
 const SUPPORTED_IMAGE_FILTER_EXTENSIONS = SUPPORTED_IMAGE_EXTENSIONS.map((extension) => extension.replace('.', ''));
 const DEFAULT_THEME_ACCENT_HEX = '#00C86E';
+const DEFAULT_IMAGE_DETAILS_BACKGROUND_HEX_DARK_THEME = '#F3F3F3';
+const DEFAULT_IMAGE_DETAILS_BACKGROUND_HEX_LIGHT_THEME = '#202020';
 
 type CompareViewMode = 'split' | 'side-by-side';
 
@@ -890,6 +893,7 @@ type FileVersionInfo = {
 };
 
 /**
+        previewBackgroundRgb: settings.previewBackgroundRgb,
  * Builds a stable cache key that encodes the file path, size and modification timestamp.
  *
  * @param filePath Absolute file path.
@@ -1125,9 +1129,8 @@ class ImageFolderGalleryPanel {
 
   /**
    * Refreshes runtime settings for all opened gallery panels.
-   * @param _event Configuration change event from VS Code.
    */
-  static refreshActivePanelsFromConfiguration(_event: vscode.ConfigurationChangeEvent): void {
+  static refreshActivePanelsFromConfiguration(): void {
     const settings = getImageInspectorSettings();
 
     for (const panel of ImageFolderGalleryPanel.activePanels.values()) {
@@ -2005,8 +2008,12 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
 
-    void provider.refreshActivePanelFromConfiguration(event);
-    ImageFolderGalleryPanel.refreshActivePanelsFromConfiguration(event);
+    provider.refreshActivePanelFromConfiguration();
+    ImageFolderGalleryPanel.refreshActivePanelsFromConfiguration();
+  });
+
+  const activeColorThemeChangeDisposable = vscode.window.onDidChangeActiveColorTheme(() => {
+    provider.refreshActivePanelFromConfiguration();
   });
 
   const openFolderGalleryDisposable = vscode.commands.registerCommand(
@@ -2045,6 +2052,7 @@ export function activate(context: vscode.ExtensionContext): void {
     zoomFitDisposable,
     selectComparisonImageDisposable,
     configurationChangeDisposable,
+    activeColorThemeChangeDisposable,
     openFolderGalleryDisposable,
     deleteSelectedGalleryImagesDisposable,
     pickThemeAccentColorDisposable
@@ -2531,10 +2539,12 @@ function buildAccentColorPickerHtml(currentColor: string): string {
 function getImageInspectorSettings(): ImageInspectorSettings {
   const imageInspectorConfig = vscode.workspace.getConfiguration('imageInspector');
   const themeAccentColor = imageInspectorConfig.get<string>('themeAccentColor', DEFAULT_THEME_ACCENT_HEX);
+  const imageDetailsBackgroundColor = imageInspectorConfig.get<string>('imageDetailsBackgroundColor', '');
 
   return {
     toolbarPosition: imageInspectorConfig.get<string>('toolbarPosition', 'top'),
     themeAccentRgb: resolveThemeAccentRgb(themeAccentColor),
+    previewBackgroundRgb: resolvePreviewBackgroundRgb(imageDetailsBackgroundColor),
     saveEditsToOriginalFile: imageInspectorConfig.get<boolean>('saveEditsToOriginalFile', true),
     pipetteLoupeDiameter: clampInteger(imageInspectorConfig.get<number>('pipetteLoupeDiameter', 96), 48, 256),
     pipetteLoupeVirtualResolution: clampInteger(
@@ -3084,6 +3094,34 @@ function resolveThemeAccentRgb(candidateColor: string): string {
   }
 
   return hexColorToRgbTuple(`#${match[1].toUpperCase()}`);
+}
+
+/**
+ * Resolves the preview background RGB tuple, falling back to a theme-adaptive default.
+ * @param candidateColor Hex color candidate from settings (#RRGGBB) or empty string.
+ * @returns RGB tuple string usable in CSS variables (e.g. "243,243,243").
+ */
+function resolvePreviewBackgroundRgb(candidateColor: string): string {
+  const normalizedColor = candidateColor.trim();
+  if (normalizedColor.length === 0) {
+    return hexColorToRgbTuple(getDefaultImageDetailsBackgroundHex());
+  }
+
+  return resolveThemeAccentRgb(normalizedColor);
+}
+
+/**
+ * Returns the theme-adaptive default preview background color.
+ * @returns Hex color string used when the preview background setting is empty.
+ */
+function getDefaultImageDetailsBackgroundHex(): string {
+  switch (vscode.window.activeColorTheme.kind) {
+    case vscode.ColorThemeKind.Light:
+    case vscode.ColorThemeKind.HighContrastLight:
+      return DEFAULT_IMAGE_DETAILS_BACKGROUND_HEX_LIGHT_THEME;
+    default:
+      return DEFAULT_IMAGE_DETAILS_BACKGROUND_HEX_DARK_THEME;
+  }
 }
 
 /**

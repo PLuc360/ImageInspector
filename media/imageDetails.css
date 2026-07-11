@@ -42,6 +42,7 @@
 :root {
   color-scheme: light dark;
   --toolbar-green-accent-rgb: 0, 200, 110;
+  --image-details-custom-background-rgb: 32, 32, 32;
   --toolbar-green-accent-border: rgba(0, 200, 110, 0.6);
   --toolbar-green-accent-bg: rgba(0, 160, 90, 0.2);
   --toolbar-green-accent-bg-hover: rgba(0, 170, 95, 0.28);
@@ -50,11 +51,16 @@
 }
 
 .layout {
+  --image-details-preview-background: var(--vscode-editor-background);
   --toolbar-green-accent-border: rgba(var(--toolbar-green-accent-rgb), 0.6);
   --toolbar-green-accent-bg: rgba(var(--toolbar-green-accent-rgb), 0.2);
   --toolbar-green-accent-bg-hover: rgba(var(--toolbar-green-accent-rgb), 0.28);
   --toolbar-green-halo-strong: rgba(var(--toolbar-green-accent-rgb), 0.5);
   --toolbar-green-halo-mid: rgba(var(--toolbar-green-accent-rgb), 0.22);
+}
+
+.layout.custom-preview-background-enabled {
+  --image-details-preview-background: rgb(var(--image-details-custom-background-rgb));
 }
 
 /* Utility classes replacing former inline styles. */
@@ -169,7 +175,7 @@ body {
 .preview {
   position: relative;
   padding: 0;
-  background: var(--vscode-editor-background);
+  background: var(--image-details-preview-background);
   overflow: hidden;
   min-height: 0;
   height: 100%;
@@ -239,6 +245,7 @@ body {
   height: 100%;
   width: 100%;
   overflow: auto;
+  background: var(--image-details-preview-background);
 }
 
 .preview-scroll.pan-enabled {
@@ -267,6 +274,7 @@ body {
   align-items: center;
   justify-content: center;
   padding: 0;
+  background: var(--image-details-preview-background);
 }
 
 .preview-body.side-by-side-mode {
@@ -438,6 +446,7 @@ body {
 }
 
 .zoom-toolbar #zoom-select.is-active,
+.zoom-toolbar #custom-background-toggle.is-active,
 .zoom-toolbar #pipette-tool.is-active,
 .zoom-toolbar #compare-tool.is-active,
 .zoom-toolbar #compare-side-by-side.is-active,
@@ -448,6 +457,7 @@ body {
 }
 
 .zoom-toolbar #zoom-select.is-active:hover,
+.zoom-toolbar #custom-background-toggle.is-active:hover,
 .zoom-toolbar #pipette-tool.is-active:hover,
 .zoom-toolbar #compare-tool.is-active:hover,
 .zoom-toolbar #compare-side-by-side.is-active:hover,

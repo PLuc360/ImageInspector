@@ -72,6 +72,7 @@ export function buildCustomEditorWebview(
   options?: {
     toolbarPosition?: string;
     themeAccentRgb?: string;
+    previewBackgroundRgb?: string;
     saveEditsToOriginalFile?: boolean;
     icoVariants?: IcoVariantViewModel[];
     comparisonImageSource?: string;
@@ -90,6 +91,7 @@ export function buildCustomEditorWebview(
 ): string {
   const toolbarPosition = options?.toolbarPosition || 'top';
   const themeAccentRgb = options?.themeAccentRgb ?? '0,200,110';
+  const previewBackgroundRgb = options?.previewBackgroundRgb ?? '32,32,32';
   const saveEditsToOriginalFile = options?.saveEditsToOriginalFile ?? false;
   const loupeDiameter = options?.pipetteLoupeDiameter ?? 96;
   const loupeVirtualResolution = options?.pipetteLoupeVirtualResolution ?? 25;
@@ -176,6 +178,7 @@ export function buildCustomEditorWebview(
   <div
     class="layout"
     data-toolbar-green-accent-rgb="${escapeHtml(themeAccentRgb)}"
+    data-preview-background-rgb="${escapeHtml(previewBackgroundRgb)}"
     data-save-edits-to-original-file="${saveEditsToOriginalFile ? 'true' : 'false'}"
     data-gallery-navigation-enabled="${galleryNavigationEnabled ? 'true' : 'false'}"
     data-gallery-navigation-has-previous="${galleryHasPrevious ? 'true' : 'false'}"
@@ -220,6 +223,9 @@ export function buildCustomEditorWebview(
         </button>
         <button id="zoom-fit" type="button" title="Fit to view" aria-label="Fit to view">
           <span class="icon" aria-hidden="true">⤢</span>
+        </button>
+        <button id="custom-background-toggle" type="button" title="Use custom background" aria-label="Use custom background" aria-pressed="false">
+          <span class="icon" aria-hidden="true">◪</span>
         </button>
         <button id="rotate-left" type="button" title="Rotate left 90°" aria-label="Rotate left 90 degrees">
           <span class="icon" aria-hidden="true">↺</span>

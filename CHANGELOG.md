@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.16.1] - 2026-07-11
+### Added
+- Added a new Image Details toolbar toggle to switch the preview area between the editor theme background and a dedicated custom background.
+- Added a new `imageInspector.imageDetailsBackgroundColor` setting to define the custom Image Details preview background color.
+
+### Changed
+- The default custom Image Details preview background now adapts automatically to the active VS Code light/dark theme when no explicit color is configured.
+- Open Image Details panels now refresh their preview background when the active VS Code color theme changes.
+
 ## [1.16.0] - 2026-05-12
 ### Added
 - Added previous/next gallery navigation directly in Image Details when an image is opened from the gallery.
