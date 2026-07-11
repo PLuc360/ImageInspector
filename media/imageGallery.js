@@ -29,7 +29,6 @@
   const LAZY_IMAGE_PRELOAD_MARGIN_PX = 1400;
   const EMPTY_IMAGE_SRC = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
   const THUMB_SIZE_CLASS_PREFIX = 'thumb-size-';
-  let galleryImageObserver = null;
   let scheduledRowPreload = 0;
   let scheduledScrollSave = 0;
   let scheduledGalleryRefresh = 0;
@@ -502,7 +501,7 @@
     ].includes(ext) ? `badge badge-ext-${ext}` : 'badge';
     const sizeVal = formatFileSize(img.size);
     const dateVal = formatModifiedDate(img.mtimeMs);
-    const dimVal = (typeof img.width === 'number' && typeof img.height === 'number' && img.width > 0 && img.height > 0 && !isNaN(img.width) && !isNaN(img.height)) ? `${img.width}×${img.height}` : 'N/A';
+    const dimVal = formatImageDimensions(img);
     const rawThumbSrc = img.thumbUrl || '';
     const thumbSrc = escapeHtml(rawThumbSrc);
     const isLoaded = loadedImageSources.has(rawThumbSrc);
@@ -585,15 +584,6 @@
   }
 
   /**
-   * Disposes the active thumbnail observer.
-   */
-  function disposeGalleryImageObserver() {
-    if (!galleryImageObserver) return;
-    galleryImageObserver.disconnect();
-    galleryImageObserver = null;
-  }
-
-  /**
    * Marks a thumbnail as loaded.
    * @param {Event} event Event payload.
    */
@@ -637,21 +627,29 @@
   }
 
   /**
-   * Unloads a distant thumbnail to reduce memory pressure.
-   * @param {HTMLImageElement} imageElement Thumbnail image element.
-   */
-  function unloadGalleryImage(imageElement) {
-    if (!(imageElement instanceof HTMLImageElement)) return;
-  }
-
-  /**
    * Enables viewport-based thumbnail loading with a preload buffer.
    */
   function initializeLazyGalleryImages() {
-    disposeGalleryImageObserver();
     preloadNearbyGalleryRows();
   }
 
+  /**
+   * Formats image dimensions for gallery badges.
+   * @param {{ width?: number; height?: number }} imageLike Image-like metadata object.
+   * @returns {string} A `WIDTHxHEIGHT` label, or `N/A` when unavailable.
+   */
+  function formatImageDimensions(imageLike) {
+    if (typeof imageLike?.width === 'number'
+      && typeof imageLike?.height === 'number'
+      && imageLike.width > 0
+      && imageLike.height > 0
+      && !isNaN(imageLike.width)
+      && !isNaN(imageLike.height)) {
+      return `${imageLike.width}×${imageLike.height}`;
+    }
+
+    return 'N/A';
+  }
   /**
    * Formats a file size in bytes to a human-readable string.
    * @param {number} size File size in bytes.
@@ -1211,7 +1209,7 @@
     }
 
     const metaDim = item.querySelector('.meta-dim');
-    const dimVal = (typeof meta.width === 'number' && typeof meta.height === 'number' && meta.width > 0 && meta.height > 0 && !isNaN(meta.width) && !isNaN(meta.height)) ? `${meta.width}×${meta.height}` : 'N/A';
+    const dimVal = formatImageDimensions(meta);
     if (metaDim) {
       metaDim.textContent = dimVal;
     }
@@ -1350,7 +1348,6 @@
       scheduleNearbyRowPreload();
     }, { passive: true });
     window.addEventListener('beforeunload', () => {
-      disposeGalleryImageObserver();
       if (scheduledRowPreload) {
         window.cancelAnimationFrame(scheduledRowPreload);
         scheduledRowPreload = 0;

@@ -209,18 +209,23 @@
     filesLabel.textContent = files.join(', ');
     filesLabel.title = files.join(' | ');
 
-    row.addEventListener('click', () => {
+    const activateGroupSelection = () => {
       if (isSamePathList(activeGroupFilePaths, filePaths)) {
         activeGroupFocusIndex = (activeGroupFocusIndex + 1) % filePaths.length;
       } else {
         activeGroupFilePaths = [...filePaths];
         activeGroupFocusIndex = 0;
       }
+
       setActiveGroupRow(row);
       updateDuplicateNavigationButtons();
       if (vscodeApi && typeof vscodeApi.postMessage === 'function') {
         vscodeApi.postMessage({ type: 'select-duplicate-group', filePaths });
       }
+    };
+
+    row.addEventListener('click', () => {
+      activateGroupSelection();
     });
 
     row.addEventListener('keydown', (event) => {
@@ -229,17 +234,7 @@
       }
 
       event.preventDefault();
-      if (isSamePathList(activeGroupFilePaths, filePaths)) {
-        activeGroupFocusIndex = (activeGroupFocusIndex + 1) % filePaths.length;
-      } else {
-        activeGroupFilePaths = [...filePaths];
-        activeGroupFocusIndex = 0;
-      }
-      setActiveGroupRow(row);
-      updateDuplicateNavigationButtons();
-      if (vscodeApi && typeof vscodeApi.postMessage === 'function') {
-        vscodeApi.postMessage({ type: 'select-duplicate-group', filePaths });
-      }
+      activateGroupSelection();
     });
 
     body.appendChild(title);

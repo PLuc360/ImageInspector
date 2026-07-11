@@ -95,28 +95,6 @@ const PIPETTE_RESULT_VISIBLE_DURATION_MS = 500;
 const PIPETTE_RESULT_FADE_DURATION_MS = 260;
 const selectedIcoSizeBadge = document.getElementById('selected-ico-size');
 let icoGalleryItems = [];
-
-/**
- * Attaches click listeners to all ICO gallery items to update the preview image on selection.
- */
-function attachIcoGalleryListeners() {
-  for (const galleryItem of icoGalleryItems) {
-    galleryItem.addEventListener('click', (event) => {
-      event.preventDefault();
-
-      const nextSource = galleryItem.getAttribute('data-image-source');
-      if (!nextSource) {
-        return;
-      }
-
-      setActiveIcoGalleryItem(galleryItem);
-
-      image.setAttribute('src', nextSource);
-      syncOverviewMapSource();
-      updateView();
-    });
-  }
-}
 let isDraggingOverviewMap = false;
 let overviewMapDragPointerId = null;
 let overviewMapViewportFrameId = null;
