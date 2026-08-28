@@ -7,9 +7,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 ### Added
 - Added a gallery toolbar search field with multi-criteria filtering support, including free-text name matching and structured queries such as `type:png`, `name:warm`, `width>1000`, and `height<=512`.
+- Added image crop controls to the Image Details toolbar, including automatic border-aware crop detection, manual crop adjustment, and apply/reset actions.
+- Added redo support for Image Details transformations, including saved edits during the current VS Code session.
 
 ### Changed
 - Unified gallery and Image Details toolbar item borders with an accent-derived color that adapts to the active light/dark theme.
+- Updated the Image Details undo control to use context-aware behavior and labels for crop reset, preview undo, and saved-edit undo.
+
+### Fixed
+- Fixed Image Details saved crop undo staying disabled after the webview refreshes by preserving undo/redo history for persisted edits during the current session.
 
 ## [1.16.1] - 2026-07-11
 ### Added

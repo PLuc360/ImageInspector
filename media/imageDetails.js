@@ -62,6 +62,10 @@ const rotateRightButton = document.getElementById('rotate-right');
 const mirrorHorizontalButton = document.getElementById('mirror-horizontal');
 const mirrorVerticalButton = document.getElementById('mirror-vertical');
 const zoomSelectButton = document.getElementById('zoom-select');
+const cropAutoButton = document.getElementById('crop-auto');
+const cropApplyButton = document.getElementById('crop-apply');
+const transformUndoButton = document.getElementById('transform-undo');
+const transformRedoButton = document.getElementById('transform-redo');
 const infoToggleButton = document.getElementById('info-toggle');
 const compareToolButton = document.getElementById('compare-tool');
 const compareSideBySideButton = document.getElementById('compare-side-by-side');
@@ -83,6 +87,7 @@ const compareDivider = document.getElementById('compare-divider');
 const compareDiffOverlay = document.getElementById('compare-diff-overlay');
 const compareDiffOverlaySecondary = document.getElementById('compare-diff-overlay-secondary');
 const zoomSelectionBox = document.getElementById('zoom-selection-box');
+const cropSelectionBox = document.getElementById('crop-selection-box');
 const pipetteButton = document.getElementById('pipette-tool');
 const pipetteCanvas = document.getElementById('pipette-canvas');
 const pipetteColorResult = document.getElementById('pipette-color-result');
@@ -117,6 +122,11 @@ const DIFF_REGION_MAX_ITEMS_MAX = 2000;
 const DIFF_REGION_MERGE_GAP_PX_MIN = 0;
 const DIFF_REGION_MERGE_GAP_PX_MAX = 6;
 const DEFAULT_COMPARE_DIFF_SENSITIVITY = 10;
+const AUTO_CROP_BORDER_COLOR_TOLERANCE = 12;
+const AUTO_CROP_BORDER_MATCH_RATIO = 0.995;
+const AUTO_CROP_MAX_TRIM_RATIO = 0.45;
+const AUTO_CROP_MIN_CONTENT_SIZE = 4;
+const CROP_MIN_SIZE = 4;
 
 let zoom = 1;
 let fitMode = false;
@@ -135,6 +145,18 @@ let isSelectingZoomArea = false;
 let selectionPointerId = null;
 let selectionStartClientX = 0;
 let selectionStartClientY = 0;
+let cropMode = false;
+let cropDraftBounds = null;
+let cropDefaultBounds = null;
+let cropInteractionPointerId = null;
+let cropInteractionKind = '';
+let cropInteractionHandle = '';
+let cropInteractionStartBounds = null;
+let cropInteractionStartClientX = 0;
+let cropInteractionStartClientY = 0;
+let cropInteractionStartNaturalX = 0;
+let cropInteractionStartNaturalY = 0;
+let cropInteractionCaptureElement = null;
 let compareEnabled = false;
 let compareSplitPercent = 50;
 let compareOrientation = 'vertical';
@@ -158,7 +180,10 @@ let originalImageSource = image?.getAttribute('src') || '';
 let originalCompareImageSource = compareImage?.getAttribute('src') || '';
 let imageTransformRenderToken = 0;
 let imageTransformOperations = [];
+let imageTransformRedoOperations = [];
 let saveEditsToOriginalFile = false;
+let persistedUndoAvailable = false;
+let persistedRedoAvailable = false;
 let galleryNavigationEnabled = false;
 let galleryNavigationHasPrevious = false;
 let galleryNavigationHasNext = false;
@@ -394,38 +419,90 @@ function loadImageForTransform(source) {
 }
 
 /**
- * Computes the net quarter-turn count from the current transform operation stack.
+ * Creates a canvas populated from a source image.
  *
- * @param {Array<{ kind: 'rotate' | 'mirror'; quarterTurnDelta?: number }>} operations Transform operations.
- * @returns {number} Normalized quarter-turn count.
+ * @param {HTMLImageElement | HTMLCanvasElement} sourceImage Source image to draw.
+ * @returns {HTMLCanvasElement} Canvas containing the source pixels.
  */
-function getNormalizedQuarterTurnsFromOperations(operations) {
-  if (!Array.isArray(operations) || operations.length === 0) {
-    return 0;
+function createCanvasFromImage(sourceImage) {
+  const canvas = document.createElement('canvas');
+  canvas.width = sourceImage.naturalWidth || sourceImage.width;
+  canvas.height = sourceImage.naturalHeight || sourceImage.height;
+
+  const context = canvas.getContext('2d');
+  if (context) {
+    context.drawImage(sourceImage, 0, 0);
   }
 
-  let quarterTurnSum = 0;
-  for (const operation of operations) {
-    if (operation?.kind !== 'rotate') {
-      continue;
-    }
+  return canvas;
+}
 
-    const parsedDelta = Number.parseInt(String(operation.quarterTurnDelta), 10);
-    if (!Number.isFinite(parsedDelta)) {
-      continue;
-    }
-
-    quarterTurnSum += parsedDelta;
+/**
+ * Applies one preview transform operation to a source canvas and returns the resulting canvas.
+ *
+ * @param {HTMLCanvasElement} sourceCanvas Current source canvas.
+ * @param {{ kind: 'rotate' | 'mirror' | 'crop'; quarterTurnDelta?: number; axis?: 'horizontal' | 'vertical'; left?: number; top?: number; width?: number; height?: number }} operation
+ *   Operation to apply.
+ * @returns {HTMLCanvasElement} Resulting canvas.
+ */
+function applyTransformOperationToCanvas(sourceCanvas, operation) {
+  if (!(sourceCanvas instanceof HTMLCanvasElement) || !operation || typeof operation.kind !== 'string') {
+    return sourceCanvas;
   }
 
-  return normalizeQuarterTurns(quarterTurnSum);
+  if (operation.kind === 'crop') {
+    const left = clamp(Math.round(Number(operation.left)), 0, Math.max(0, sourceCanvas.width - 1));
+    const top = clamp(Math.round(Number(operation.top)), 0, Math.max(0, sourceCanvas.height - 1));
+    const requestedWidth = Math.round(Number(operation.width));
+    const requestedHeight = Math.round(Number(operation.height));
+    const width = clamp(requestedWidth, 1, Math.max(1, sourceCanvas.width - left));
+    const height = clamp(requestedHeight, 1, Math.max(1, sourceCanvas.height - top));
+    const nextCanvas = document.createElement('canvas');
+    nextCanvas.width = width;
+    nextCanvas.height = height;
+    const nextContext = nextCanvas.getContext('2d');
+
+    if (!nextContext) {
+      return sourceCanvas;
+    }
+
+    nextContext.drawImage(sourceCanvas, left, top, width, height, 0, 0, width, height);
+    return nextCanvas;
+  }
+
+  const normalizedQuarterTurns = operation.kind === 'rotate'
+    ? normalizeQuarterTurns(operation.quarterTurnDelta)
+    : 0;
+  const quarterTurnIsOdd = normalizedQuarterTurns % 2 === 1;
+  const nextCanvas = document.createElement('canvas');
+  nextCanvas.width = quarterTurnIsOdd ? sourceCanvas.height : sourceCanvas.width;
+  nextCanvas.height = quarterTurnIsOdd ? sourceCanvas.width : sourceCanvas.height;
+
+  const nextContext = nextCanvas.getContext('2d');
+  if (!nextContext) {
+    return sourceCanvas;
+  }
+
+  nextContext.translate(nextCanvas.width / 2, nextCanvas.height / 2);
+  if (operation.kind === 'rotate' && normalizedQuarterTurns !== 0) {
+    nextContext.rotate(normalizedQuarterTurns * (Math.PI / 2));
+  } else if (operation.kind === 'mirror') {
+    if (operation.axis === 'horizontal') {
+      nextContext.scale(-1, 1);
+    } else if (operation.axis === 'vertical') {
+      nextContext.scale(1, -1);
+    }
+  }
+
+  nextContext.drawImage(sourceCanvas, -sourceCanvas.width / 2, -sourceCanvas.height / 2);
+  return nextCanvas;
 }
 
 /**
  * Builds a transformed image source from a base source.
  *
  * @param source Base image source URI.
- * @param {Array<{ kind: 'rotate' | 'mirror'; quarterTurnDelta?: number; axis?: 'horizontal' | 'vertical' }>} operations
+ * @param {Array<{ kind: 'rotate' | 'mirror' | 'crop'; quarterTurnDelta?: number; axis?: 'horizontal' | 'vertical'; left?: number; top?: number; width?: number; height?: number }>} operations
  *   Transform operations to apply in order.
  * @returns Promise resolved with the transformed source URI.
  */
@@ -440,40 +517,11 @@ async function buildTransformedImageSource(source, operations) {
 
   try {
     const sourceImage = await loadImageForTransform(source);
-    const canvas = document.createElement('canvas');
-    const normalizedTurns = getNormalizedQuarterTurnsFromOperations(operations);
-    const quarterTurnIsOdd = normalizedTurns % 2 === 1;
-    canvas.width = quarterTurnIsOdd ? sourceImage.naturalHeight : sourceImage.naturalWidth;
-    canvas.height = quarterTurnIsOdd ? sourceImage.naturalWidth : sourceImage.naturalHeight;
-
-    const context = canvas.getContext('2d');
-    if (!context) {
-      return source;
-    }
-
-    context.translate(canvas.width / 2, canvas.height / 2);
-
+    let canvas = createCanvasFromImage(sourceImage);
     for (const operation of operations) {
-      if (operation?.kind === 'rotate') {
-        const normalizedDelta = Number.parseInt(String(operation.quarterTurnDelta), 10);
-        if (Number.isFinite(normalizedDelta) && normalizedDelta !== 0) {
-          context.rotate(normalizedDelta * (Math.PI / 2));
-        }
-        continue;
-      }
-
-      if (operation?.kind !== 'mirror') {
-        continue;
-      }
-
-      if (operation.axis === 'horizontal') {
-        context.scale(-1, 1);
-      } else if (operation.axis === 'vertical') {
-        context.scale(1, -1);
-      }
+      canvas = applyTransformOperationToCanvas(canvas, operation);
     }
 
-    context.drawImage(sourceImage, -sourceImage.naturalWidth / 2, -sourceImage.naturalHeight / 2);
     return canvas.toDataURL('image/png');
   } catch {
     return source;
@@ -522,6 +570,8 @@ async function applyImageTransformToPreview() {
  */
 function rotatePreviewImage(quarterTurnDelta) {
   imageTransformOperations.push({ kind: 'rotate', quarterTurnDelta });
+  imageTransformRedoOperations = [];
+  updateTransformHistoryButtonsState();
   void applyImageTransformToPreview();
 }
 
@@ -530,6 +580,8 @@ function rotatePreviewImage(quarterTurnDelta) {
  */
 function mirrorPreviewImageHorizontally() {
   imageTransformOperations.push({ kind: 'mirror', axis: 'horizontal' });
+  imageTransformRedoOperations = [];
+  updateTransformHistoryButtonsState();
   void applyImageTransformToPreview();
 }
 
@@ -538,7 +590,187 @@ function mirrorPreviewImageHorizontally() {
  */
 function mirrorPreviewImageVertically() {
   imageTransformOperations.push({ kind: 'mirror', axis: 'vertical' });
+  imageTransformRedoOperations = [];
+  updateTransformHistoryButtonsState();
   void applyImageTransformToPreview();
+}
+
+/**
+ * Returns the RGBA channels for a pixel within a linear pixel buffer.
+ *
+ * @param {Uint8ClampedArray} pixelData Source pixel data.
+ * @param {number} imageWidth Image width in pixels.
+ * @param {number} x Pixel X coordinate.
+ * @param {number} y Pixel Y coordinate.
+ * @returns {[number, number, number, number]} RGBA tuple.
+ */
+function getRgbaAt(pixelData, imageWidth, x, y) {
+  const offset = (y * imageWidth + x) * 4;
+  return [
+    pixelData[offset],
+    pixelData[offset + 1],
+    pixelData[offset + 2],
+    pixelData[offset + 3]
+  ];
+}
+
+/**
+ * Returns whether two RGBA colors are similar enough to be treated as the same border color.
+ *
+ * @param {[number, number, number, number]} colorA First RGBA tuple.
+ * @param {[number, number, number, number]} colorB Second RGBA tuple.
+ * @param {number} tolerance Allowed absolute delta per channel.
+ * @returns {boolean} True when both colors are within tolerance.
+ */
+function areRgbaColorsSimilar(colorA, colorB, tolerance) {
+  return Math.abs(colorA[0] - colorB[0]) <= tolerance
+    && Math.abs(colorA[1] - colorB[1]) <= tolerance
+    && Math.abs(colorA[2] - colorB[2]) <= tolerance
+    && Math.abs(colorA[3] - colorB[3]) <= tolerance;
+}
+
+/**
+ * Returns whether most pixels in a row match the reference border color.
+ *
+ * @param {Uint8ClampedArray} pixelData Source pixel data.
+ * @param {number} imageWidth Image width in pixels.
+ * @param {number} rowIndex Row index to inspect.
+ * @param {[number, number, number, number]} borderColor Reference border color.
+ * @returns {boolean} True when the row behaves like a uniform border row.
+ */
+function isUniformBorderRow(pixelData, imageWidth, rowIndex, borderColor) {
+  let matchingPixels = 0;
+
+  for (let x = 0; x < imageWidth; x += 1) {
+    if (areRgbaColorsSimilar(getRgbaAt(pixelData, imageWidth, x, rowIndex), borderColor, AUTO_CROP_BORDER_COLOR_TOLERANCE)) {
+      matchingPixels += 1;
+    }
+  }
+
+  return matchingPixels / imageWidth >= AUTO_CROP_BORDER_MATCH_RATIO;
+}
+
+/**
+ * Returns whether most pixels in a column match the reference border color.
+ *
+ * @param {Uint8ClampedArray} pixelData Source pixel data.
+ * @param {number} imageWidth Image width in pixels.
+ * @param {number} imageHeight Image height in pixels.
+ * @param {number} columnIndex Column index to inspect.
+ * @param {[number, number, number, number]} borderColor Reference border color.
+ * @returns {boolean} True when the column behaves like a uniform border column.
+ */
+function isUniformBorderColumn(pixelData, imageWidth, imageHeight, columnIndex, borderColor) {
+  let matchingPixels = 0;
+
+  for (let y = 0; y < imageHeight; y += 1) {
+    if (areRgbaColorsSimilar(getRgbaAt(pixelData, imageWidth, columnIndex, y), borderColor, AUTO_CROP_BORDER_COLOR_TOLERANCE)) {
+      matchingPixels += 1;
+    }
+  }
+
+  return matchingPixels / imageHeight >= AUTO_CROP_BORDER_MATCH_RATIO;
+}
+
+/**
+ * Detects an auto-crop rectangle by trimming a near-uniform border color from every side.
+ *
+ * @returns {{ left: number; top: number; width: number; height: number } | null} Crop bounds, or null when no border is detected.
+ */
+function detectAutoCropBounds() {
+  if (!image || image.naturalWidth < 3 || image.naturalHeight < 3) {
+    return null;
+  }
+
+  refreshPipetteImageBuffer();
+  const bufferContext = ensurePipetteBufferContext();
+  if (!bufferContext) {
+    return null;
+  }
+
+  const imageWidth = image.naturalWidth;
+  const imageHeight = image.naturalHeight;
+  const pixelData = bufferContext.getImageData(0, 0, imageWidth, imageHeight).data;
+  const borderReference = getRgbaAt(pixelData, imageWidth, 0, 0);
+  const cornerPixels = [
+    getRgbaAt(pixelData, imageWidth, imageWidth - 1, 0),
+    getRgbaAt(pixelData, imageWidth, 0, imageHeight - 1),
+    getRgbaAt(pixelData, imageWidth, imageWidth - 1, imageHeight - 1)
+  ];
+
+  if (!cornerPixels.every((cornerPixel) => areRgbaColorsSimilar(borderReference, cornerPixel, AUTO_CROP_BORDER_COLOR_TOLERANCE))) {
+    return null;
+  }
+
+  const maxHorizontalTrim = Math.floor(imageWidth * AUTO_CROP_MAX_TRIM_RATIO);
+  const maxVerticalTrim = Math.floor(imageHeight * AUTO_CROP_MAX_TRIM_RATIO);
+  let top = 0;
+  let bottom = imageHeight - 1;
+  let left = 0;
+  let right = imageWidth - 1;
+
+  while (top < maxVerticalTrim && isUniformBorderRow(pixelData, imageWidth, top, borderReference)) {
+    top += 1;
+  }
+
+  while (imageHeight - 1 - bottom < maxVerticalTrim && isUniformBorderRow(pixelData, imageWidth, bottom, borderReference)) {
+    bottom -= 1;
+  }
+
+  while (left < maxHorizontalTrim && isUniformBorderColumn(pixelData, imageWidth, imageHeight, left, borderReference)) {
+    left += 1;
+  }
+
+  while (imageWidth - 1 - right < maxHorizontalTrim && isUniformBorderColumn(pixelData, imageWidth, imageHeight, right, borderReference)) {
+    right -= 1;
+  }
+
+  const hasDetectedBorder = top > 0 || bottom < imageHeight - 1 || left > 0 || right < imageWidth - 1;
+  if (!hasDetectedBorder) {
+    return null;
+  }
+
+  const cropWidth = right - left + 1;
+  const cropHeight = bottom - top + 1;
+  if (cropWidth < AUTO_CROP_MIN_CONTENT_SIZE || cropHeight < AUTO_CROP_MIN_CONTENT_SIZE) {
+    return null;
+  }
+
+  return { left, top, width: cropWidth, height: cropHeight };
+}
+
+/**
+ * Applies a crop transform to the current preview state.
+ *
+ * @param {{ left: number; top: number; width: number; height: number }} cropBounds Crop bounds in current image pixels.
+ */
+function cropPreviewImage(cropBounds) {
+  if (!cropBounds || cropBounds.width <= 0 || cropBounds.height <= 0) {
+    return;
+  }
+
+  imageTransformOperations.push({
+    kind: 'crop',
+    left: cropBounds.left,
+    top: cropBounds.top,
+    width: cropBounds.width,
+    height: cropBounds.height
+  });
+  imageTransformRedoOperations = [];
+  updateTransformHistoryButtonsState();
+  void applyImageTransformToPreview();
+}
+
+/**
+ * Toggles manual crop mode. The initial draft is prefilled from border auto-detection when possible.
+ */
+function triggerAutoCrop() {
+  if (cropMode) {
+    setCropMode(false);
+    return;
+  }
+
+  enterCropModeWithDefaultBounds();
 }
 
 /**
@@ -641,6 +873,14 @@ function initializeEditPersistenceSettingsFromDom() {
   saveEditsToOriginalFile = toBooleanFlag(
     layoutElement.dataset.saveEditsToOriginalFile,
     saveEditsToOriginalFile
+  );
+  persistedUndoAvailable = toBooleanFlag(
+    layoutElement.dataset.canUndoPersistedEdit,
+    persistedUndoAvailable
+  );
+  persistedRedoAvailable = toBooleanFlag(
+    layoutElement.dataset.canRedoPersistedEdit,
+    persistedRedoAvailable
   );
 }
 
@@ -824,6 +1064,10 @@ function updateSelectionModeUi() {
  * @param {boolean} isEnabled Whether selection mode should be active.
  */
 function setSelectionMode(isEnabled) {
+  if (isEnabled && cropMode) {
+    setCropMode(false);
+  }
+
   selectionMode = isEnabled;
 
   if (!selectionMode) {
@@ -831,6 +1075,478 @@ function setSelectionMode(isEnabled) {
   }
 
   updateSelectionModeUi();
+}
+
+/**
+ * Returns a full-image crop rectangle matching the current transformed image dimensions.
+ *
+ * @returns {{ left: number; top: number; width: number; height: number } | null} Full-image bounds.
+ */
+function getFullImageCropBounds() {
+  if (!image || image.naturalWidth <= 0 || image.naturalHeight <= 0) {
+    return null;
+  }
+
+  return {
+    left: 0,
+    top: 0,
+    width: image.naturalWidth,
+    height: image.naturalHeight
+  };
+}
+
+/**
+ * Clones a crop bounds object.
+ *
+ * @param {{ left: number; top: number; width: number; height: number } | null | undefined} bounds Source bounds.
+ * @returns {{ left: number; top: number; width: number; height: number } | null} Cloned bounds.
+ */
+function cloneCropBounds(bounds) {
+  if (!bounds) {
+    return null;
+  }
+
+  return {
+    left: bounds.left,
+    top: bounds.top,
+    width: bounds.width,
+    height: bounds.height
+  };
+}
+
+/**
+ * Clamps crop bounds to the current image dimensions and enforces a minimum size.
+ *
+ * @param {{ left: number; top: number; width: number; height: number } | null | undefined} bounds Candidate bounds.
+ * @returns {{ left: number; top: number; width: number; height: number } | null} Normalized bounds.
+ */
+function normalizeCropBounds(bounds) {
+  const fullBounds = getFullImageCropBounds();
+  if (!fullBounds || !bounds) {
+    return fullBounds;
+  }
+
+  const left = clamp(Math.round(Number(bounds.left)), 0, Math.max(0, fullBounds.width - 1));
+  const top = clamp(Math.round(Number(bounds.top)), 0, Math.max(0, fullBounds.height - 1));
+  const width = clamp(Math.round(Number(bounds.width)), CROP_MIN_SIZE, Math.max(CROP_MIN_SIZE, fullBounds.width - left));
+  const height = clamp(Math.round(Number(bounds.height)), CROP_MIN_SIZE, Math.max(CROP_MIN_SIZE, fullBounds.height - top));
+
+  return {
+    left,
+    top,
+    width,
+    height
+  };
+}
+
+/**
+ * Converts a client pointer position to natural image coordinates.
+ *
+ * @param {number} clientX Pointer X position in viewport coordinates.
+ * @param {number} clientY Pointer Y position in viewport coordinates.
+ * @returns {{ x: number; y: number } | null} Natural image coordinates.
+ */
+function getNaturalImagePointFromClient(clientX, clientY) {
+  if (!image) {
+    return null;
+  }
+
+  const imageRect = image.getBoundingClientRect();
+  const currentZoom = getDisplayedZoom();
+  if (currentZoom <= 0 || imageRect.width <= 0 || imageRect.height <= 0) {
+    return null;
+  }
+
+  const clampedClientX = clamp(clientX, imageRect.left, imageRect.right);
+  const clampedClientY = clamp(clientY, imageRect.top, imageRect.bottom);
+  return {
+    x: clamp((clampedClientX - imageRect.left) / currentZoom, 0, image.naturalWidth),
+    y: clamp((clampedClientY - imageRect.top) / currentZoom, 0, image.naturalHeight)
+  };
+}
+
+/**
+ * Updates undo/redo buttons to reflect local and persisted transform history.
+ */
+function updateTransformHistoryButtonsState() {
+  const canUndoLocalTransform = imageTransformOperations.length > 0;
+  const canRedoLocalTransform = imageTransformRedoOperations.length > 0;
+
+  if (transformUndoButton) {
+    transformUndoButton.disabled = !cropMode && !canUndoLocalTransform && !persistedUndoAvailable;
+
+    let undoTitle = 'Undo last transform';
+    if (cropMode) {
+      undoTitle = 'Reset crop selection';
+    } else if (canUndoLocalTransform) {
+      undoTitle = 'Undo last preview transform';
+    } else if (persistedUndoAvailable) {
+      undoTitle = 'Undo last saved edit';
+    }
+
+    transformUndoButton.title = undoTitle;
+    transformUndoButton.setAttribute('aria-label', undoTitle);
+  }
+
+  if (transformRedoButton) {
+    transformRedoButton.disabled = cropMode || (!canRedoLocalTransform && !persistedRedoAvailable);
+
+    let redoTitle = 'Redo last transform';
+    if (canRedoLocalTransform) {
+      redoTitle = 'Redo last preview transform';
+    } else if (persistedRedoAvailable) {
+      redoTitle = 'Redo last saved edit';
+    }
+
+    transformRedoButton.title = redoTitle;
+    transformRedoButton.setAttribute('aria-label', redoTitle);
+  }
+}
+
+/**
+ * Renders the crop selection box from the current draft bounds.
+ */
+function renderCropSelectionBox() {
+  if (!previewContainer || !cropSelectionBox || !cropMode) {
+    cropSelectionBox?.classList.add('is-hidden');
+    return;
+  }
+
+  const normalizedBounds = normalizeCropBounds(cropDraftBounds);
+  if (!normalizedBounds || !image) {
+    cropSelectionBox.classList.add('is-hidden');
+    return;
+  }
+
+  cropDraftBounds = normalizedBounds;
+
+  const imageRect = image.getBoundingClientRect();
+  const containerRect = previewContainer.getBoundingClientRect();
+  const currentZoom = getDisplayedZoom();
+  if (currentZoom <= 0 || imageRect.width <= 0 || imageRect.height <= 0) {
+    cropSelectionBox.classList.add('is-hidden');
+    return;
+  }
+
+  const left = imageRect.left - containerRect.left + normalizedBounds.left * currentZoom;
+  const top = imageRect.top - containerRect.top + normalizedBounds.top * currentZoom;
+  const width = Math.max(1, normalizedBounds.width * currentZoom);
+  const height = Math.max(1, normalizedBounds.height * currentZoom);
+
+  cropSelectionBox.style.left = `${String(Math.round(left))}px`;
+  cropSelectionBox.style.top = `${String(Math.round(top))}px`;
+  cropSelectionBox.style.width = `${String(Math.round(width))}px`;
+  cropSelectionBox.style.height = `${String(Math.round(height))}px`;
+  cropSelectionBox.classList.toggle('is-dragging', cropInteractionPointerId !== null);
+  cropSelectionBox.classList.remove('is-hidden');
+}
+
+/**
+ * Syncs crop-mode CSS classes and button states.
+ */
+function updateCropModeUi() {
+  previewContainer?.classList.toggle('crop-mode', cropMode);
+
+  if (cropAutoButton) {
+    cropAutoButton.classList.toggle('is-active', cropMode);
+    cropAutoButton.setAttribute('aria-pressed', cropMode ? 'true' : 'false');
+  }
+
+  if (cropApplyButton) {
+    cropApplyButton.classList.toggle('is-hidden', !cropMode);
+    cropApplyButton.disabled = !cropMode || !cropDraftBounds;
+  }
+
+  if (!cropMode) {
+    cropSelectionBox?.classList.add('is-hidden');
+  } else {
+    renderCropSelectionBox();
+  }
+
+  updateTransformHistoryButtonsState();
+}
+
+/**
+ * Clears the active crop drag/resize/draw interaction and releases pointer capture.
+ */
+function endCropInteraction() {
+  const captureElement = cropInteractionCaptureElement;
+  if (captureElement && cropInteractionPointerId !== null && captureElement.hasPointerCapture?.(cropInteractionPointerId)) {
+    captureElement.releasePointerCapture(cropInteractionPointerId);
+  }
+
+  cropInteractionPointerId = null;
+  cropInteractionKind = '';
+  cropInteractionHandle = '';
+  cropInteractionStartBounds = null;
+  cropInteractionCaptureElement = null;
+  renderCropSelectionBox();
+}
+
+/**
+ * Enables or disables manual crop mode.
+ *
+ * @param {boolean} isEnabled Whether crop mode should be active.
+ * @param {{ left: number; top: number; width: number; height: number } | null} [initialBounds] Optional initial crop bounds.
+ */
+function setCropMode(isEnabled, initialBounds = null) {
+  if (isEnabled) {
+    if (selectionMode) {
+      setSelectionMode(false);
+    }
+    if (pipetteMode) {
+      setPipetteMode(false);
+    }
+
+    cropMode = true;
+    cropDefaultBounds = normalizeCropBounds(initialBounds) || getFullImageCropBounds();
+    cropDraftBounds = normalizeCropBounds(cropDraftBounds || cropDefaultBounds);
+  } else {
+    cropMode = false;
+    cropDraftBounds = null;
+    cropDefaultBounds = null;
+    endCropInteraction();
+  }
+
+  updateCropModeUi();
+}
+
+/**
+ * Resets the current crop draft to the default auto-detected bounds, or to the full image.
+ */
+function resetCropDraftBounds() {
+  if (!cropMode) {
+    return;
+  }
+
+  cropDraftBounds = normalizeCropBounds(cropDefaultBounds) || getFullImageCropBounds();
+  updateCropModeUi();
+}
+
+/**
+ * Enters crop mode using auto-detected border-trim bounds when available.
+ */
+function enterCropModeWithDefaultBounds() {
+  const defaultBounds = detectAutoCropBounds() || getFullImageCropBounds();
+  setCropMode(true, defaultBounds);
+}
+
+/**
+ * Applies the current crop draft to the preview and optionally to the original file.
+ */
+function applyCropDraftSelection() {
+  const normalizedBounds = cropDraftBounds ? normalizeCropBounds(cropDraftBounds) : null;
+  if (!normalizedBounds) {
+    return;
+  }
+
+  setCropMode(false);
+  cropPreviewImage(normalizedBounds);
+  if (saveEditsToOriginalFile) {
+    vscode?.postMessage({ type: 'crop-image', bounds: normalizedBounds });
+  }
+}
+
+/**
+ * Starts a new crop draft by dragging on the image.
+ *
+ * @param {PointerEvent} event Pointer event that begins the interaction.
+ */
+function beginCropDrawInteraction(event) {
+  if (!previewBody) {
+    return;
+  }
+
+  const startPoint = getNaturalImagePointFromClient(event.clientX, event.clientY);
+  if (!startPoint) {
+    return;
+  }
+
+  cropInteractionPointerId = event.pointerId;
+  cropInteractionKind = 'draw';
+  cropInteractionCaptureElement = previewBody;
+  cropInteractionStartNaturalX = startPoint.x;
+  cropInteractionStartNaturalY = startPoint.y;
+  cropDraftBounds = normalizeCropBounds({
+    left: Math.floor(startPoint.x),
+    top: Math.floor(startPoint.y),
+    width: CROP_MIN_SIZE,
+    height: CROP_MIN_SIZE
+  });
+  previewBody.setPointerCapture(event.pointerId);
+  renderCropSelectionBox();
+  stopEvent(event);
+}
+
+/**
+ * Starts a crop move or resize interaction on the existing crop box.
+ *
+ * @param {PointerEvent} event Pointer event that begins the interaction.
+ * @param {string} handle Resize handle identifier, or empty string for move.
+ */
+function beginCropBoxInteraction(event, handle) {
+  if (!cropSelectionBox || !cropDraftBounds) {
+    return;
+  }
+
+  cropInteractionPointerId = event.pointerId;
+  cropInteractionKind = handle ? 'resize' : 'move';
+  cropInteractionHandle = handle;
+  cropInteractionStartBounds = cloneCropBounds(cropDraftBounds);
+  cropInteractionStartClientX = event.clientX;
+  cropInteractionStartClientY = event.clientY;
+  cropInteractionCaptureElement = cropSelectionBox;
+  cropSelectionBox.setPointerCapture(event.pointerId);
+  renderCropSelectionBox();
+  stopEvent(event);
+}
+
+/**
+ * Updates the crop draft based on the active crop interaction and pointer position.
+ *
+ * @param {number} clientX Pointer X position in viewport coordinates.
+ * @param {number} clientY Pointer Y position in viewport coordinates.
+ */
+function updateCropInteraction(clientX, clientY) {
+  if (!cropMode || cropInteractionPointerId === null) {
+    return;
+  }
+
+  const fullBounds = getFullImageCropBounds();
+  if (!fullBounds) {
+    return;
+  }
+
+  if (cropInteractionKind === 'draw') {
+    const currentPoint = getNaturalImagePointFromClient(clientX, clientY);
+    if (!currentPoint) {
+      return;
+    }
+
+    const left = Math.min(cropInteractionStartNaturalX, currentPoint.x);
+    const top = Math.min(cropInteractionStartNaturalY, currentPoint.y);
+    const right = Math.max(cropInteractionStartNaturalX, currentPoint.x);
+    const bottom = Math.max(cropInteractionStartNaturalY, currentPoint.y);
+    cropDraftBounds = normalizeCropBounds({
+      left,
+      top,
+      width: Math.max(CROP_MIN_SIZE, right - left),
+      height: Math.max(CROP_MIN_SIZE, bottom - top)
+    });
+    renderCropSelectionBox();
+    return;
+  }
+
+  const startBounds = cropInteractionStartBounds;
+  if (!startBounds) {
+    return;
+  }
+
+  const currentZoom = getDisplayedZoom();
+  if (currentZoom <= 0) {
+    return;
+  }
+
+  const deltaX = (clientX - cropInteractionStartClientX) / currentZoom;
+  const deltaY = (clientY - cropInteractionStartClientY) / currentZoom;
+
+  if (cropInteractionKind === 'move') {
+    const nextLeft = clamp(Math.round(startBounds.left + deltaX), 0, Math.max(0, fullBounds.width - startBounds.width));
+    const nextTop = clamp(Math.round(startBounds.top + deltaY), 0, Math.max(0, fullBounds.height - startBounds.height));
+    cropDraftBounds = {
+      left: nextLeft,
+      top: nextTop,
+      width: startBounds.width,
+      height: startBounds.height
+    };
+    renderCropSelectionBox();
+    return;
+  }
+
+  let nextLeft = startBounds.left;
+  let nextTop = startBounds.top;
+  let nextRight = startBounds.left + startBounds.width;
+  let nextBottom = startBounds.top + startBounds.height;
+
+  if (cropInteractionHandle.includes('w')) {
+    nextLeft = clamp(Math.round(startBounds.left + deltaX), 0, nextRight - CROP_MIN_SIZE);
+  }
+  if (cropInteractionHandle.includes('e')) {
+    nextRight = clamp(Math.round(startBounds.left + startBounds.width + deltaX), nextLeft + CROP_MIN_SIZE, fullBounds.width);
+  }
+  if (cropInteractionHandle.includes('n')) {
+    nextTop = clamp(Math.round(startBounds.top + deltaY), 0, nextBottom - CROP_MIN_SIZE);
+  }
+  if (cropInteractionHandle.includes('s')) {
+    nextBottom = clamp(Math.round(startBounds.top + startBounds.height + deltaY), nextTop + CROP_MIN_SIZE, fullBounds.height);
+  }
+
+  cropDraftBounds = {
+    left: nextLeft,
+    top: nextTop,
+    width: nextRight - nextLeft,
+    height: nextBottom - nextTop
+  };
+  renderCropSelectionBox();
+}
+
+/**
+ * Resets the current crop draft or undoes the last local preview transform.
+ */
+function resetCropOrUndoLastTransform() {
+  if (cropMode) {
+    resetCropDraftBounds();
+    return;
+  }
+
+  if (imageTransformOperations.length > 0) {
+    const lastOperation = imageTransformOperations.pop();
+    if (lastOperation) {
+      imageTransformRedoOperations.push(lastOperation);
+    }
+    updateTransformHistoryButtonsState();
+    void applyImageTransformToPreview();
+    return;
+  }
+
+  if (!persistedUndoAvailable || !saveEditsToOriginalFile) {
+    return;
+  }
+
+  persistedUndoAvailable = false;
+  persistedRedoAvailable = false;
+  updateTransformHistoryButtonsState();
+  vscode?.postMessage({ type: 'undo-image-edit' });
+}
+
+/**
+ * Reapplies the most recently undone local or persisted transform.
+ */
+function redoLastTransform() {
+  if (cropMode) {
+    return;
+  }
+
+  if (imageTransformRedoOperations.length > 0) {
+    const nextOperation = imageTransformRedoOperations.pop();
+    if (!nextOperation) {
+      return;
+    }
+
+    imageTransformOperations.push(nextOperation);
+    updateTransformHistoryButtonsState();
+    void applyImageTransformToPreview();
+    return;
+  }
+
+  if (!persistedRedoAvailable || !saveEditsToOriginalFile) {
+    return;
+  }
+
+  persistedUndoAvailable = false;
+  persistedRedoAvailable = false;
+  updateTransformHistoryButtonsState();
+  vscode?.postMessage({ type: 'redo-image-edit' });
 }
 
 /**
@@ -2906,6 +3622,7 @@ function updateView() {
     zoomLabel.textContent = 'Fit';
     applyCompareSplit();
     requestOverviewMapViewportUpdate();
+    renderCropSelectionBox();
     return;
   }
 
@@ -2923,6 +3640,7 @@ function updateView() {
   zoomLabel.textContent = `${String(Math.round(zoom * 100))}%`;
   applyCompareSplit();
   requestOverviewMapViewportUpdate();
+  renderCropSelectionBox();
 }
 
 /**
@@ -3329,6 +4047,22 @@ bindClickAction(zoomSelectButton, () => {
   setSelectionMode(!selectionMode);
 });
 
+bindClickAction(cropAutoButton, () => {
+  triggerAutoCrop();
+});
+
+bindClickAction(cropApplyButton, () => {
+  applyCropDraftSelection();
+});
+
+bindClickAction(transformUndoButton, () => {
+  resetCropOrUndoLastTransform();
+});
+
+bindClickAction(transformRedoButton, () => {
+  redoLastTransform();
+});
+
 bindClickAction(infoToggleButton, () => {
   const isCurrentlyHidden = infoOverlay?.classList.contains('is-hidden') ?? true;
   setInfoOverlayVisible(isCurrentlyHidden);
@@ -3612,6 +4346,11 @@ infoOverlayHandle?.addEventListener('pointerdown', (event) => {
 });
 
 window.addEventListener('pointermove', (event) => {
+  if (cropInteractionPointerId !== null && cropInteractionPointerId === event.pointerId) {
+    updateCropInteraction(event.clientX, event.clientY);
+    return;
+  }
+
   if (!isDraggingOverlay || overlayDragPointerId !== event.pointerId) {
     return;
   }
@@ -3620,6 +4359,11 @@ window.addEventListener('pointermove', (event) => {
 });
 
 window.addEventListener('pointerup', (event) => {
+  if (cropInteractionPointerId !== null && cropInteractionPointerId === event.pointerId) {
+    endCropInteraction();
+    return;
+  }
+
   if (!isDraggingOverlay || overlayDragPointerId !== event.pointerId) {
     return;
   }
@@ -3628,6 +4372,11 @@ window.addEventListener('pointerup', (event) => {
 });
 
 window.addEventListener('pointercancel', (event) => {
+  if (cropInteractionPointerId !== null && cropInteractionPointerId === event.pointerId) {
+    endCropInteraction();
+    return;
+  }
+
   if (!isDraggingOverlay || overlayDragPointerId !== event.pointerId) {
     return;
   }
@@ -3636,6 +4385,10 @@ window.addEventListener('pointercancel', (event) => {
 });
 
 window.addEventListener('blur', () => {
+  if (cropInteractionPointerId !== null) {
+    endCropInteraction();
+  }
+
   if (isDraggingOverlay) {
     endOverlayDrag();
   }
@@ -3714,6 +4467,15 @@ previewBody?.addEventListener('pointerdown', (event) => {
     return;
   }
 
+  if (cropMode) {
+    if (event.target instanceof Element && event.target.closest('#crop-selection-box')) {
+      return;
+    }
+
+    beginCropDrawInteraction(event);
+    return;
+  }
+
   if (selectionMode) {
     isSelectingZoomArea = true;
     selectionPointerId = event.pointerId;
@@ -3744,6 +4506,12 @@ previewBody?.addEventListener('pointerdown', (event) => {
 });
 
 previewBody?.addEventListener('pointermove', (event) => {
+  if (cropInteractionPointerId !== null && cropInteractionPointerId === event.pointerId) {
+    updateCropInteraction(event.clientX, event.clientY);
+    event.preventDefault();
+    return;
+  }
+
   if (isSelectingZoomArea && selectionPointerId === event.pointerId) {
     drawSelectionBox(selectionStartClientX, selectionStartClientY, event.clientX, event.clientY);
     event.preventDefault();
@@ -3761,6 +4529,11 @@ previewBody?.addEventListener('pointermove', (event) => {
 });
 
 previewBody?.addEventListener('pointerup', (event) => {
+  if (cropInteractionPointerId !== null && cropInteractionPointerId === event.pointerId) {
+    endCropInteraction();
+    return;
+  }
+
   if (isSelectingZoomArea && selectionPointerId === event.pointerId) {
     zoomToSelection(selectionStartClientX, selectionStartClientY, event.clientX, event.clientY);
     finishSelection();
@@ -3772,6 +4545,11 @@ previewBody?.addEventListener('pointerup', (event) => {
 });
 
 previewBody?.addEventListener('pointercancel', (event) => {
+  if (cropInteractionPointerId !== null && cropInteractionPointerId === event.pointerId) {
+    endCropInteraction();
+    return;
+  }
+
   if (isSelectingZoomArea && selectionPointerId === event.pointerId) {
     finishSelection();
     return;
@@ -3781,6 +4559,10 @@ previewBody?.addEventListener('pointercancel', (event) => {
 });
 
 previewBody?.addEventListener('dblclick', (event) => {
+  if (cropMode) {
+    return;
+  }
+
   if (!isDoubleClickOnPreviewImage(event)) {
     return;
   }
@@ -3789,14 +4571,51 @@ previewBody?.addEventListener('dblclick', (event) => {
   toggleFitAndActualSize();
 });
 
+cropSelectionBox?.addEventListener('pointerdown', (event) => {
+  if (event.button !== 0 || !cropMode) {
+    return;
+  }
+
+  const targetHandle = event.target instanceof Element
+    ? event.target.getAttribute('data-crop-handle') || ''
+    : '';
+  beginCropBoxInteraction(event, targetHandle);
+});
+
 window.addEventListener('keydown', (event) => {
   const key = event.key;
   const code = event.code;
   const hasCtrlOrMeta = event.ctrlKey || event.metaKey;
 
+  if (cropMode && key === 'Enter') {
+    event.preventDefault();
+    applyCropDraftSelection();
+    return;
+  }
+
+  if (hasCtrlOrMeta && key.toLowerCase() === 'z' && !event.shiftKey && (cropMode || imageTransformOperations.length > 0 || persistedUndoAvailable)) {
+    event.preventDefault();
+    resetCropOrUndoLastTransform();
+    return;
+  }
+
+  if ((hasCtrlOrMeta && key.toLowerCase() === 'y') || (hasCtrlOrMeta && event.shiftKey && key.toLowerCase() === 'z')) {
+    if (!cropMode && (imageTransformRedoOperations.length > 0 || persistedRedoAvailable)) {
+      event.preventDefault();
+      redoLastTransform();
+      return;
+    }
+  }
+
   if (pipetteMode && key === 'Escape') {
     event.preventDefault();
     setPipetteMode(false);
+    return;
+  }
+
+  if (cropMode && key === 'Escape') {
+    event.preventDefault();
+    setCropMode(false);
     return;
   }
 
@@ -3869,11 +4688,12 @@ image?.addEventListener('load', () => {
   image.setAttribute('draggable', 'false');
   syncActiveIcoGalleryItemFromImage();
   syncOverviewMapSource();
-  if (pipetteMode) {
-    refreshPipetteImageBuffer();
-  }
+  refreshPipetteImageBuffer();
+  cropDraftBounds = cropDraftBounds ? normalizeCropBounds(cropDraftBounds) : null;
+  cropDefaultBounds = cropDefaultBounds ? normalizeCropBounds(cropDefaultBounds) : null;
   scheduleInitialViewModeDecision();
   requestOverviewMapViewportUpdate();
+  updateCropModeUi();
 
   if (isSideBySideCompareActive()) {
     scheduleCompareDifferenceAnalysis();
@@ -3982,9 +4802,11 @@ if (compareSlider) {
   compareSlider.value = String(compareSplitPercent);
 }
 updateSelectionModeUi();
+updateCropModeUi();
 updateView();
 
 if (image?.complete && image.naturalWidth > 0 && image.naturalHeight > 0) {
+  refreshPipetteImageBuffer();
   scheduleInitialViewModeDecision();
 }
 
@@ -3994,6 +4816,7 @@ preview?.addEventListener('scroll', () => {
   }
 
   requestOverviewMapViewportUpdate();
+  renderCropSelectionBox();
 });
 
 overviewMapImage?.addEventListener('load', () => {

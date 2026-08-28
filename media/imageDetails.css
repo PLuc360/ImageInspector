@@ -277,6 +277,12 @@ body {
   cursor: crosshair;
 }
 
+.preview.crop-mode .preview-scroll,
+.preview.crop-mode .preview-body,
+.preview.crop-mode .preview img {
+  cursor: crosshair;
+}
+
 .preview-body {
   position: relative;
   min-height: 100%;
@@ -460,6 +466,7 @@ body {
 }
 
 .zoom-toolbar #zoom-select.is-active,
+.zoom-toolbar #crop-auto.is-active,
 .zoom-toolbar #custom-background-toggle.is-active,
 .zoom-toolbar #pipette-tool.is-active,
 .zoom-toolbar #compare-tool.is-active,
@@ -471,12 +478,18 @@ body {
 }
 
 .zoom-toolbar #zoom-select.is-active:hover,
+.zoom-toolbar #crop-auto.is-active:hover,
 .zoom-toolbar #custom-background-toggle.is-active:hover,
 .zoom-toolbar #pipette-tool.is-active:hover,
 .zoom-toolbar #compare-tool.is-active:hover,
 .zoom-toolbar #compare-side-by-side.is-active:hover,
 .zoom-toolbar #info-toggle.is-active:hover {
   background: var(--toolbar-green-accent-bg-hover);
+}
+
+.zoom-toolbar button:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .zoom-toolbar button:focus-visible {
@@ -924,6 +937,101 @@ th {
   box-shadow: 0 0 6px var(--toolbar-green-accent-border);
   pointer-events: none;
   z-index: 3;
+}
+
+.crop-selection-box {
+  position: absolute;
+  display: block;
+  border: 1.5px solid var(--toolbar-green-accent-border);
+  background: rgba(var(--toolbar-green-accent-rgb), 0.08);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.34), 0 0 10px rgba(var(--toolbar-green-accent-rgb), 0.36);
+  box-sizing: border-box;
+  pointer-events: auto;
+  touch-action: none;
+  z-index: 5;
+}
+
+.crop-selection-box.is-dragging {
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.4), 0 0 14px rgba(var(--toolbar-green-accent-rgb), 0.45);
+}
+
+.crop-selection-label {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--vscode-editorWidget-background) 84%, rgba(var(--toolbar-green-accent-rgb), 0.2));
+  color: var(--vscode-foreground);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+}
+
+.crop-selection-handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border: 1px solid var(--vscode-editorWidget-background);
+  border-radius: 999px;
+  background: rgb(var(--toolbar-green-accent-rgb));
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25);
+}
+
+.crop-selection-handle.handle-nw,
+.crop-selection-handle.handle-ne,
+.crop-selection-handle.handle-se,
+.crop-selection-handle.handle-sw {
+  width: 12px;
+  height: 12px;
+}
+
+.crop-selection-handle.handle-nw {
+  left: -6px;
+  top: -6px;
+  cursor: nwse-resize;
+}
+
+.crop-selection-handle.handle-ne {
+  right: -6px;
+  top: -6px;
+  cursor: nesw-resize;
+}
+
+.crop-selection-handle.handle-se {
+  right: -6px;
+  bottom: -6px;
+  cursor: nwse-resize;
+}
+
+.crop-selection-handle.handle-sw {
+  left: -6px;
+  bottom: -6px;
+  cursor: nesw-resize;
+}
+
+.crop-selection-handle.handle-n {
+  left: calc(50% - 5px);
+  top: -5px;
+  cursor: ns-resize;
+}
+
+.crop-selection-handle.handle-e {
+  right: -5px;
+  top: calc(50% - 5px);
+  cursor: ew-resize;
+}
+
+.crop-selection-handle.handle-s {
+  left: calc(50% - 5px);
+  bottom: -5px;
+  cursor: ns-resize;
+}
+
+.crop-selection-handle.handle-w {
+  left: -5px;
+  top: calc(50% - 5px);
+  cursor: ew-resize;
 }
 
 #pipette-color-result {

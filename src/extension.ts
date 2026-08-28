@@ -3,6 +3,7 @@ const MAX_IMAGE_DETAILS_CACHE_ENTRIES = 32;
 const MAX_ICO_CACHE_ENTRIES = 16;
 const MAX_CONVERTED_PREVIEW_CACHE_ENTRIES = 16;
 const MAX_GALLERY_THUMBNAIL_CACHE_ENTRIES = 128;
+const MAX_PERSISTED_EDIT_UNDO_ENTRIES = 20;
 
 const imageDetailsCache = new Map<string, ImageDetailsViewModel>();
 const icoEntriesCache = new Map<string, IcoImageEntry[]>();
@@ -62,9 +63,43 @@ interface IcoImageEntry {
 type IcoSource = string | Buffer;
 type RotationDirection = 'left' | 'right';
 type MirrorAxis = 'horizontal' | 'vertical';
+interface CropBounds {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
 type ImageEditOperation =
   | { kind: 'rotate'; direction: RotationDirection }
-  | { kind: 'mirror'; axis: MirrorAxis };
+  | { kind: 'mirror'; axis: MirrorAxis }
+  | { kind: 'crop'; bounds: CropBounds };
+
+/**
+ * Validates and normalizes crop bounds received from the webview.
+ *
+ * @param bounds Candidate crop bounds payload.
+ * @returns Sanitized crop bounds, or undefined when invalid.
+ */
+function sanitizeCropBounds(bounds: CropBounds | undefined): CropBounds | undefined {
+  if (!bounds) {
+    return undefined;
+  }
+
+  const left = Math.round(bounds.left);
+  const top = Math.round(bounds.top);
+  const width = Math.round(bounds.width);
+  const height = Math.round(bounds.height);
+  if (!Number.isFinite(left) || !Number.isFinite(top) || !Number.isFinite(width) || !Number.isFinite(height)) {
+    return undefined;
+  }
+
+  if (left < 0 || top < 0 || width <= 0 || height <= 0) {
+    return undefined;
+  }
+
+  return { left, top, width, height };
+}
 
 /**
  * Minimal custom document implementation for the image preview editor.
@@ -83,6 +118,8 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
   private activePanel: vscode.WebviewPanel | undefined;
   private readonly openPanels = new Map<vscode.WebviewPanel, vscode.Uri>();
   private readonly editQueueByFilePath = new Map<string, Promise<void>>();
+  private readonly persistedEditUndoStackByFilePath = new Map<string, Buffer[]>();
+  private readonly persistedEditRedoStackByFilePath = new Map<string, Buffer[]>();
   private readonly galleryNavigationByPanel = new Map<vscode.WebviewPanel, { orderedFilePaths: string[]; currentPosition: number }>();
   private readonly pendingGalleryNavigationByUri = new Map<string, { orderedFilePaths: string[]; currentPosition: number }>();
 
@@ -139,7 +176,7 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
             return;
           }
 
-          const webviewMessage = message as { type: string; direction?: string; axis?: string };
+          const webviewMessage = message as { type: string; direction?: string; axis?: string; bounds?: CropBounds };
           const currentImageUri = this.openPanels.get(webviewPanel) ?? document.uri;
           if (webviewMessage.type === 'pick-compare-image') {
             void this.promptComparisonImageForPanel(webviewPanel, currentImageUri);
@@ -161,6 +198,30 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
               currentImageUri,
               { kind: 'mirror', axis: webviewMessage.axis === 'vertical' ? 'vertical' : 'horizontal' }
             );
+            return;
+          }
+
+          if (webviewMessage.type === 'crop-image') {
+            const cropBounds = sanitizeCropBounds(webviewMessage.bounds);
+            if (!cropBounds) {
+              return;
+            }
+
+            this.enqueueImageEditAndRefreshPanel(
+              webviewPanel,
+              currentImageUri,
+              { kind: 'crop', bounds: cropBounds }
+            );
+            return;
+          }
+
+          if (webviewMessage.type === 'undo-image-edit') {
+            this.enqueueUndoImageEditAndRefreshPanel(webviewPanel, currentImageUri);
+            return;
+          }
+
+          if (webviewMessage.type === 'redo-image-edit') {
+            this.enqueueRedoImageEditAndRefreshPanel(webviewPanel, currentImageUri);
             return;
           }
 
@@ -227,6 +288,64 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
   }
 
   /**
+   * Queues persisted image undo requests per file to prevent overlapping writes.
+   *
+   * @param panel Source webview panel that triggered the undo action.
+   * @param imageUri Image URI to restore.
+   */
+  private enqueueUndoImageEditAndRefreshPanel(
+    panel: vscode.WebviewPanel,
+    imageUri: vscode.Uri
+  ): void {
+    const filePath = imageUri.fsPath;
+    const previousTask = this.editQueueByFilePath.get(filePath) ?? Promise.resolve();
+
+    const nextTask = previousTask
+      .catch(() => {
+        // Keep queue alive even if a previous operation failed.
+      })
+      .then(async () => {
+        await this.undoImageEditAndRefreshPanel(panel, imageUri);
+      })
+      .finally(() => {
+        if (this.editQueueByFilePath.get(filePath) === nextTask) {
+          this.editQueueByFilePath.delete(filePath);
+        }
+      });
+
+    this.editQueueByFilePath.set(filePath, nextTask);
+  }
+
+  /**
+   * Queues persisted image redo requests per file to prevent overlapping writes.
+   *
+   * @param panel Source webview panel that triggered the redo action.
+   * @param imageUri Image URI to reapply.
+   */
+  private enqueueRedoImageEditAndRefreshPanel(
+    panel: vscode.WebviewPanel,
+    imageUri: vscode.Uri
+  ): void {
+    const filePath = imageUri.fsPath;
+    const previousTask = this.editQueueByFilePath.get(filePath) ?? Promise.resolve();
+
+    const nextTask = previousTask
+      .catch(() => {
+        // Keep queue alive even if a previous operation failed.
+      })
+      .then(async () => {
+        await this.redoImageEditAndRefreshPanel(panel, imageUri);
+      })
+      .finally(() => {
+        if (this.editQueueByFilePath.get(filePath) === nextTask) {
+          this.editQueueByFilePath.delete(filePath);
+        }
+      });
+
+    this.editQueueByFilePath.set(filePath, nextTask);
+  }
+
+  /**
    * Renders the image details webview HTML for a specific panel and image.
    *
    * @param panel Target webview panel.
@@ -261,6 +380,8 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
         toolbarPosition: settings.toolbarPosition,
         themeAccentRgb: settings.themeAccentRgb,
         saveEditsToOriginalFile: settings.saveEditsToOriginalFile,
+        canUndoPersistedEdit: this.canUndoPersistedEdit(filePath),
+        canRedoPersistedEdit: this.canRedoPersistedEdit(filePath),
         icoVariants,
         galleryNavigation: {
           enabled: hasGalleryNavigation,
@@ -362,7 +483,10 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
     }
 
     try {
+      const originalBuffer = await fs.readFile(imageUri.fsPath);
       const editedBuffer = await this.getEditedImageBuffer(imageUri.fsPath, operation);
+      this.pushPersistedUndoBuffer(imageUri.fsPath, originalBuffer);
+      this.clearPersistedRedoBuffers(imageUri.fsPath);
       await this.writeEditedBufferToFile(imageUri.fsPath, editedBuffer);
       invalidateFileCaches(imageUri.fsPath);
 
@@ -375,13 +499,208 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
       const osErrorCode = getNodeLikeErrorCode(error);
       const actionLabel = operation.kind === 'rotate'
         ? 'rotated'
-        : operation.axis === 'horizontal'
-          ? 'mirrored horizontally'
-          : 'mirrored vertically';
+        : operation.kind === 'mirror'
+          ? operation.axis === 'horizontal'
+            ? 'mirrored horizontally'
+            : 'mirrored vertically'
+          : 'cropped';
       void vscode.window.showErrorMessage(
         `Unable to save the ${actionLabel} image. ${errorMessage}${osErrorCode ? ` (code: ${osErrorCode})` : ''} Ensure the file is writable and not locked by another application.`
       );
     }
+  }
+
+  /**
+   * Restores the previous persisted image state for the given file, then refreshes the panel.
+   *
+   * @param panel Source webview panel that triggered the undo action.
+   * @param imageUri Image URI to restore.
+   */
+  private async undoImageEditAndRefreshPanel(
+    panel: vscode.WebviewPanel,
+    imageUri: vscode.Uri
+  ): Promise<void> {
+    const settings = getImageInspectorSettings();
+    if (!settings.saveEditsToOriginalFile) {
+      return;
+    }
+
+    const previousBuffer = this.popPersistedUndoBuffer(imageUri.fsPath);
+    if (!previousBuffer) {
+      return;
+    }
+
+    try {
+      const currentBuffer = await fs.readFile(imageUri.fsPath);
+      this.pushPersistedRedoBuffer(imageUri.fsPath, currentBuffer);
+      await this.writeEditedBufferToFile(imageUri.fsPath, previousBuffer);
+      invalidateFileCaches(imageUri.fsPath);
+
+      // Notify open gallery panels that this image has been restored.
+      void ImageFolderGalleryPanel.notifyImageFileChanged(imageUri.fsPath);
+
+      await this.renderPanelContent(panel, imageUri);
+    } catch (error) {
+      this.pushPersistedUndoBuffer(imageUri.fsPath, previousBuffer);
+      const errorMessage = getImageLoadErrorMessage(imageUri.fsPath, error);
+      const osErrorCode = getNodeLikeErrorCode(error);
+      void vscode.window.showErrorMessage(
+        `Unable to undo the last saved image edit. ${errorMessage}${osErrorCode ? ` (code: ${osErrorCode})` : ''} Ensure the file is writable and not locked by another application.`
+      );
+    }
+  }
+
+  /**
+   * Reapplies the next persisted image state for the given file, then refreshes the panel.
+   *
+   * @param panel Source webview panel that triggered the redo action.
+   * @param imageUri Image URI to reapply.
+   */
+  private async redoImageEditAndRefreshPanel(
+    panel: vscode.WebviewPanel,
+    imageUri: vscode.Uri
+  ): Promise<void> {
+    const settings = getImageInspectorSettings();
+    if (!settings.saveEditsToOriginalFile) {
+      return;
+    }
+
+    const nextBuffer = this.popPersistedRedoBuffer(imageUri.fsPath);
+    if (!nextBuffer) {
+      return;
+    }
+
+    try {
+      const currentBuffer = await fs.readFile(imageUri.fsPath);
+      this.pushPersistedUndoBuffer(imageUri.fsPath, currentBuffer);
+      await this.writeEditedBufferToFile(imageUri.fsPath, nextBuffer);
+      invalidateFileCaches(imageUri.fsPath);
+
+      // Notify open gallery panels that this image has been restored.
+      void ImageFolderGalleryPanel.notifyImageFileChanged(imageUri.fsPath);
+
+      await this.renderPanelContent(panel, imageUri);
+    } catch (error) {
+      this.pushPersistedRedoBuffer(imageUri.fsPath, nextBuffer);
+      const errorMessage = getImageLoadErrorMessage(imageUri.fsPath, error);
+      const osErrorCode = getNodeLikeErrorCode(error);
+      void vscode.window.showErrorMessage(
+        `Unable to redo the last saved image edit. ${errorMessage}${osErrorCode ? ` (code: ${osErrorCode})` : ''} Ensure the file is writable and not locked by another application.`
+      );
+    }
+  }
+
+  /**
+   * Returns whether a persisted image edit can currently be undone for the given file.
+   *
+   * @param filePath Absolute image file path.
+   * @returns True when an undo buffer is available.
+   */
+  private canUndoPersistedEdit(filePath: string): boolean {
+    return (this.persistedEditUndoStackByFilePath.get(filePath)?.length ?? 0) > 0;
+  }
+
+  /**
+   * Returns whether a persisted image edit can currently be redone for the given file.
+   *
+   * @param filePath Absolute image file path.
+   * @returns True when a redo buffer is available.
+   */
+  private canRedoPersistedEdit(filePath: string): boolean {
+    return (this.persistedEditRedoStackByFilePath.get(filePath)?.length ?? 0) > 0;
+  }
+
+  /**
+   * Pushes a new undo buffer for a persisted edit, trimming the stack to its configured max size.
+   *
+   * @param filePath Absolute image file path.
+   * @param buffer Previous file bytes to restore when undoing.
+   */
+  private pushPersistedUndoBuffer(filePath: string, buffer: Buffer): void {
+    const existingStack = this.persistedEditUndoStackByFilePath.get(filePath) ?? [];
+    existingStack.push(Buffer.from(buffer));
+    if (existingStack.length > MAX_PERSISTED_EDIT_UNDO_ENTRIES) {
+      existingStack.splice(0, existingStack.length - MAX_PERSISTED_EDIT_UNDO_ENTRIES);
+    }
+
+    this.persistedEditUndoStackByFilePath.set(filePath, existingStack);
+  }
+
+  /**
+   * Pushes a new redo buffer for a persisted edit, trimming the stack to its configured max size.
+   *
+   * @param filePath Absolute image file path.
+   * @param buffer Next file bytes to restore when redoing.
+   */
+  private pushPersistedRedoBuffer(filePath: string, buffer: Buffer): void {
+    const existingStack = this.persistedEditRedoStackByFilePath.get(filePath) ?? [];
+    existingStack.push(Buffer.from(buffer));
+    if (existingStack.length > MAX_PERSISTED_EDIT_UNDO_ENTRIES) {
+      existingStack.splice(0, existingStack.length - MAX_PERSISTED_EDIT_UNDO_ENTRIES);
+    }
+
+    this.persistedEditRedoStackByFilePath.set(filePath, existingStack);
+  }
+
+  /**
+   * Clears persisted redo history for a file after a new edit branch is created.
+   *
+   * @param filePath Absolute image file path.
+   */
+  private clearPersistedRedoBuffers(filePath: string): void {
+    this.persistedEditRedoStackByFilePath.delete(filePath);
+  }
+
+  /**
+   * Pops the most recent persisted undo buffer for a file.
+   *
+   * @param filePath Absolute image file path.
+   * @returns Previous file bytes, or undefined when no undo is available.
+   */
+  private popPersistedUndoBuffer(filePath: string): Buffer | undefined {
+    const existingStack = this.persistedEditUndoStackByFilePath.get(filePath);
+    if (!existingStack || existingStack.length === 0) {
+      return undefined;
+    }
+
+    const previousBuffer = existingStack.pop();
+    if (!previousBuffer) {
+      return undefined;
+    }
+
+    if (existingStack.length === 0) {
+      this.persistedEditUndoStackByFilePath.delete(filePath);
+    } else {
+      this.persistedEditUndoStackByFilePath.set(filePath, existingStack);
+    }
+
+    return previousBuffer;
+  }
+
+  /**
+   * Pops the most recent persisted redo buffer for a file.
+   *
+   * @param filePath Absolute image file path.
+   * @returns Redo file bytes, or undefined when no redo is available.
+   */
+  private popPersistedRedoBuffer(filePath: string): Buffer | undefined {
+    const existingStack = this.persistedEditRedoStackByFilePath.get(filePath);
+    if (!existingStack || existingStack.length === 0) {
+      return undefined;
+    }
+
+    const nextBuffer = existingStack.pop();
+    if (!nextBuffer) {
+      return undefined;
+    }
+
+    if (existingStack.length === 0) {
+      this.persistedEditRedoStackByFilePath.delete(filePath);
+    } else {
+      this.persistedEditRedoStackByFilePath.set(filePath, existingStack);
+    }
+
+    return nextBuffer;
   }
 
   /**
@@ -396,6 +715,10 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
    */
   private async getEditedImageBuffer(targetPath: string, operation: ImageEditOperation): Promise<Buffer> {
     if (getLowercaseExtension(targetPath) === '.svg') {
+      if (operation.kind === 'crop') {
+        throw new Error('Cropping SVG files is not supported when saving to the original file.');
+      }
+
       return operation.kind === 'rotate'
         ? rotateSvgFile(targetPath, operation.direction)
         : mirrorSvgFile(targetPath, operation.axis);
@@ -407,10 +730,12 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
 
     if (operation.kind === 'rotate') {
       sharpPipeline = sharpPipeline.rotate(operation.direction === 'left' ? -90 : 90);
-    } else if (operation.axis === 'horizontal') {
+    } else if (operation.kind === 'mirror' && operation.axis === 'horizontal') {
       sharpPipeline = sharpPipeline.flop();
-    } else {
+    } else if (operation.kind === 'mirror') {
       sharpPipeline = sharpPipeline.flip();
+    } else {
+      sharpPipeline = sharpPipeline.extract(operation.bounds);
     }
 
     return sharpPipeline.toBuffer();

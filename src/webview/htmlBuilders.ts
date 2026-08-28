@@ -74,6 +74,8 @@ export function buildCustomEditorWebview(
     themeAccentRgb?: string;
     previewBackgroundRgb?: string;
     saveEditsToOriginalFile?: boolean;
+    canUndoPersistedEdit?: boolean;
+    canRedoPersistedEdit?: boolean;
     icoVariants?: IcoVariantViewModel[];
     comparisonImageSource?: string;
     comparisonImageLabel?: string;
@@ -93,6 +95,8 @@ export function buildCustomEditorWebview(
   const themeAccentRgb = options?.themeAccentRgb ?? '0,200,110';
   const previewBackgroundRgb = options?.previewBackgroundRgb ?? '32,32,32';
   const saveEditsToOriginalFile = options?.saveEditsToOriginalFile ?? false;
+  const canUndoPersistedEdit = options?.canUndoPersistedEdit ?? false;
+  const canRedoPersistedEdit = options?.canRedoPersistedEdit ?? false;
   const loupeDiameter = options?.pipetteLoupeDiameter ?? 96;
   const loupeVirtualResolution = options?.pipetteLoupeVirtualResolution ?? 25;
   const loupeZoomAtMinImageZoom = options?.pipetteLoupeZoomAtMinImageZoom ?? 6;
@@ -180,6 +184,8 @@ export function buildCustomEditorWebview(
     data-toolbar-green-accent-rgb="${escapeHtml(themeAccentRgb)}"
     data-preview-background-rgb="${escapeHtml(previewBackgroundRgb)}"
     data-save-edits-to-original-file="${saveEditsToOriginalFile ? 'true' : 'false'}"
+    data-can-undo-persisted-edit="${canUndoPersistedEdit ? 'true' : 'false'}"
+    data-can-redo-persisted-edit="${canRedoPersistedEdit ? 'true' : 'false'}"
     data-gallery-navigation-enabled="${galleryNavigationEnabled ? 'true' : 'false'}"
     data-gallery-navigation-has-previous="${galleryHasPrevious ? 'true' : 'false'}"
     data-gallery-navigation-has-next="${galleryHasNext ? 'true' : 'false'}"
@@ -255,6 +261,18 @@ export function buildCustomEditorWebview(
         </button>
         <button id="zoom-select" type="button" title="Zoom to selection" aria-label="Zoom to selection">
           <span class="icon" aria-hidden="true">▭</span>
+        </button>
+        <button id="crop-auto" type="button" title="Crop image" aria-label="Crop image" aria-pressed="false">
+          <span class="icon" aria-hidden="true">✂</span>
+        </button>
+        <button id="crop-apply" type="button" class="is-hidden" title="Apply crop" aria-label="Apply crop">
+          <span class="icon" aria-hidden="true">✓</span>
+        </button>
+        <button id="transform-undo" type="button" title="Reset crop or undo last transform" aria-label="Reset crop or undo last transform">
+          <span class="icon" aria-hidden="true">↶</span>
+        </button>
+        <button id="transform-redo" type="button" title="Redo last transform" aria-label="Redo last transform">
+          <span class="icon" aria-hidden="true">↷</span>
         </button>
         <button id="pipette-tool" type="button" title="Color picker" aria-label="Color picker">
           <span class="icon" aria-hidden="true">
@@ -381,6 +399,17 @@ export function buildCustomEditorWebview(
       </div>
       ${icoGalleryMarkup}
       <div id="zoom-selection-box" class="zoom-selection-box" aria-hidden="true"></div>
+      <div id="crop-selection-box" class="crop-selection-box is-hidden" aria-hidden="true">
+        <div class="crop-selection-label">Crop</div>
+        <div class="crop-selection-handle handle-nw" data-crop-handle="nw"></div>
+        <div class="crop-selection-handle handle-ne" data-crop-handle="ne"></div>
+        <div class="crop-selection-handle handle-se" data-crop-handle="se"></div>
+        <div class="crop-selection-handle handle-sw" data-crop-handle="sw"></div>
+        <div class="crop-selection-handle handle-n" data-crop-handle="n"></div>
+        <div class="crop-selection-handle handle-e" data-crop-handle="e"></div>
+        <div class="crop-selection-handle handle-s" data-crop-handle="s"></div>
+        <div class="crop-selection-handle handle-w" data-crop-handle="w"></div>
+      </div>
     </section>
   </div>
   <script src="${escapeHtml(scriptUri.toString())}" nonce="${nonce}"></script>
