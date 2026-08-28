@@ -217,146 +217,162 @@ export function buildCustomEditorWebview(
         <span class="icon" aria-hidden="true">▶</span>
       </button>
       <div id="gallery-nav-position" class="gallery-nav-position${galleryNavigationEnabled ? '' : ' is-hidden'}" aria-live="polite">${escapeHtml(galleryNavigationPositionLabel)}</div>
-      <div class="${toolbarClass}" aria-label="Zoom controls">
-        <button id="zoom-out" type="button" title="Zoom -" aria-label="Zoom -">
-          <span class="icon" aria-hidden="true">−</span>
-        </button>
-        <button id="zoom-in" type="button" title="Zoom +" aria-label="Zoom +">
-          <span class="icon" aria-hidden="true">＋</span>
-        </button>
-        <button id="zoom-reset" type="button" title="Zoom 100%" aria-label="Zoom 100%">
-          <span class="icon" aria-hidden="true">◎</span>
-        </button>
-        <button id="zoom-fit" type="button" title="Fit to view" aria-label="Fit to view">
-          <span class="icon" aria-hidden="true">⤢</span>
-        </button>
-        <button id="custom-background-toggle" type="button" title="Use custom background" aria-label="Use custom background" aria-pressed="false">
-          <span class="icon" aria-hidden="true">◪</span>
-        </button>
-        <button id="rotate-left" type="button" title="Rotate left 90°" aria-label="Rotate left 90 degrees">
-          <span class="icon" aria-hidden="true">↺</span>
-        </button>
-        <button id="rotate-right" type="button" title="Rotate right 90°" aria-label="Rotate right 90 degrees">
-          <span class="icon" aria-hidden="true">↻</span>
-        </button>
-        <button id="mirror-horizontal" type="button" title="Mirror horizontally" aria-label="Mirror horizontally">
-          <span class="icon" aria-hidden="true">
-            <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle">
-              <rect x="3" y="4" width="14" height="12" rx="1.8" stroke="currentColor" stroke-width="1.3"/>
-              <path d="M10 4.8v10.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-dasharray="1.6 1.6"/>
-              <path d="M7.1 10l-1.9-1.7v3.4L7.1 10z" fill="currentColor"/>
-              <path d="M12.9 10l1.9-1.7v3.4L12.9 10z" fill="currentColor"/>
-            </svg>
-          </span>
-        </button>
-        <button id="mirror-vertical" type="button" title="Mirror vertically" aria-label="Mirror vertically">
-          <span class="icon" aria-hidden="true">
-            <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle">
-              <rect x="3" y="4" width="14" height="12" rx="1.8" stroke="currentColor" stroke-width="1.3"/>
-              <path d="M4.8 10h10.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-dasharray="1.6 1.6"/>
-              <path d="M10 7.1L8.3 5.2h3.4L10 7.1z" fill="currentColor"/>
-              <path d="M10 12.9l-1.7 1.9h3.4L10 12.9z" fill="currentColor"/>
-            </svg>
-          </span>
-        </button>
-        <button id="zoom-select" type="button" title="Zoom to selection" aria-label="Zoom to selection">
-          <span class="icon" aria-hidden="true">▭</span>
-        </button>
-        <button id="crop-auto" type="button" title="Crop image" aria-label="Crop image" aria-pressed="false">
-          <span class="icon" aria-hidden="true">✂</span>
-        </button>
-        <button id="crop-apply" type="button" class="is-hidden" title="Apply crop" aria-label="Apply crop">
-          <span class="icon" aria-hidden="true">✓</span>
-        </button>
-        <button id="transform-undo" type="button" title="Reset crop or undo last transform" aria-label="Reset crop or undo last transform">
-          <span class="icon" aria-hidden="true">↶</span>
-        </button>
-        <button id="transform-redo" type="button" title="Redo last transform" aria-label="Redo last transform">
-          <span class="icon" aria-hidden="true">↷</span>
-        </button>
-        <button id="pipette-tool" type="button" title="Color picker" aria-label="Color picker">
-          <span class="icon" aria-hidden="true">
-            <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle">
-              <path d="M14.44 2.44a2.5 2.5 0 0 1 3.54 3.54l-1.13 1.13-3.54-3.54 1.13-1.13zm-2.2 2.2l3.54 3.54-9.19 9.19c-.2.2-.45.34-.72.4l-3.13.7a.5.5 0 0 1-.6-.6l.7-3.13c.06-.27.2-.52.4-.72l9.19-9.19z" fill="var(--vscode-icon-foreground)"/>
-            </svg>
-          </span>
-        </button>
-        <button id="info-toggle" type="button" title="Show/Hide info" aria-label="Show/Hide info">
-          <span class="icon" aria-hidden="true">?</span>
-        </button>
-        <button id="compare-tool" type="button" title="Before/after compare" aria-label="Before/after compare" aria-pressed="false">
-          <span class="icon" aria-hidden="true">⇆</span>
-        </button>
-        <button id="compare-side-by-side" type="button" title="Side-by-side compare" aria-label="Side-by-side compare" aria-pressed="false">
-          <span class="icon" aria-hidden="true">
-            <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle">
-              <rect x="2.5" y="4" width="6.5" height="11" rx="1.4" stroke="currentColor" stroke-width="1.4"/>
-              <rect x="11" y="4" width="6.5" height="11" rx="1.4" stroke="currentColor" stroke-width="1.4"/>
-              <path d="M10 5.2v8.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-dasharray="1.8 1.8"/>
-              <path d="M9.2 2.7l.65 1.35 1.5.18-1.1 1.02.3 1.47-1.35-.72-1.35.72.3-1.47-1.1-1.02 1.5-.18.65-1.35z" fill="currentColor"/>
-            </svg>
-          </span>
-        </button>
-        <span id="zoom-label" class="zoom-label">Fit</span>
+      <div class="${toolbarClass}" aria-label="Image tools">
+        <div class="toolbar-group toolbar-group-zoom" role="group" aria-label="Zoom and framing controls">
+          <button id="zoom-out" type="button" title="Zoom -" aria-label="Zoom -">
+            <span class="icon" aria-hidden="true">−</span>
+          </button>
+          <button id="zoom-in" type="button" title="Zoom +" aria-label="Zoom +">
+            <span class="icon" aria-hidden="true">＋</span>
+          </button>
+          <button id="zoom-reset" type="button" title="Zoom 100%" aria-label="Zoom 100%">
+            <span class="icon" aria-hidden="true">◎</span>
+          </button>
+          <button id="zoom-fit" type="button" title="Fit to view" aria-label="Fit to view">
+            <span class="icon" aria-hidden="true">⤢</span>
+          </button>
+          <button id="zoom-select" type="button" title="Zoom to selection" aria-label="Zoom to selection">
+            <span class="icon" aria-hidden="true">▭</span>
+          </button>
+          <span id="zoom-label" class="zoom-label">Fit</span>
+        </div>
+        <div class="toolbar-group toolbar-group-transform" role="group" aria-label="Transform controls">
+          <button id="rotate-left" type="button" title="Rotate left 90°" aria-label="Rotate left 90 degrees">
+            <span class="icon" aria-hidden="true">↺</span>
+          </button>
+          <button id="rotate-right" type="button" title="Rotate right 90°" aria-label="Rotate right 90 degrees">
+            <span class="icon" aria-hidden="true">↻</span>
+          </button>
+          <button id="mirror-horizontal" type="button" title="Mirror horizontally" aria-label="Mirror horizontally">
+            <span class="icon" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle">
+                <rect x="3" y="4" width="14" height="12" rx="1.8" stroke="currentColor" stroke-width="1.3"/>
+                <path d="M10 4.8v10.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-dasharray="1.6 1.6"/>
+                <path d="M7.1 10l-1.9-1.7v3.4L7.1 10z" fill="currentColor"/>
+                <path d="M12.9 10l1.9-1.7v3.4L12.9 10z" fill="currentColor"/>
+              </svg>
+            </span>
+          </button>
+          <button id="mirror-vertical" type="button" title="Mirror vertically" aria-label="Mirror vertically">
+            <span class="icon" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle">
+                <rect x="3" y="4" width="14" height="12" rx="1.8" stroke="currentColor" stroke-width="1.3"/>
+                <path d="M4.8 10h10.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-dasharray="1.6 1.6"/>
+                <path d="M10 7.1L8.3 5.2h3.4L10 7.1z" fill="currentColor"/>
+                <path d="M10 12.9l-1.7 1.9h3.4L10 12.9z" fill="currentColor"/>
+              </svg>
+            </span>
+          </button>
+        </div>
+        <div class="toolbar-group toolbar-group-crop" role="group" aria-label="Crop and history controls">
+          <button id="crop-auto" type="button" title="Crop image" aria-label="Crop image" aria-pressed="false">
+            <span class="icon" aria-hidden="true">✂</span>
+          </button>
+          <button id="crop-apply" type="button" class="is-hidden" title="Apply crop" aria-label="Apply crop">
+            <span class="icon" aria-hidden="true">✓</span>
+          </button>
+          <button id="transform-undo" type="button" title="Reset crop or undo last transform" aria-label="Reset crop or undo last transform">
+            <span class="icon" aria-hidden="true">↶</span>
+          </button>
+          <button id="transform-redo" type="button" title="Redo last transform" aria-label="Redo last transform">
+            <span class="icon" aria-hidden="true">↷</span>
+          </button>
+        </div>
+        <div class="toolbar-group toolbar-group-compare" role="group" aria-label="Compare controls">
+          <button id="compare-tool" type="button" title="Before/after compare" aria-label="Before/after compare" aria-pressed="false">
+            <span class="icon" aria-hidden="true">⇆</span>
+          </button>
+          <button id="compare-side-by-side" type="button" title="Side-by-side compare" aria-label="Side-by-side compare" aria-pressed="false">
+            <span class="icon" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle">
+                <rect x="2.5" y="4" width="6.5" height="11" rx="1.4" stroke="currentColor" stroke-width="1.4"/>
+                <rect x="11" y="4" width="6.5" height="11" rx="1.4" stroke="currentColor" stroke-width="1.4"/>
+                <path d="M10 5.2v8.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-dasharray="1.8 1.8"/>
+                <path d="M9.2 2.7l.65 1.35 1.5.18-1.1 1.02.3 1.47-1.35-.72-1.35.72.3-1.47-1.1-1.02 1.5-.18.65-1.35z" fill="currentColor"/>
+              </svg>
+            </span>
+          </button>
+        </div>
+        <div class="toolbar-group toolbar-group-inspect" role="group" aria-label="Inspection controls">
+          <button id="custom-background-toggle" type="button" title="Use custom background" aria-label="Use custom background" aria-pressed="false">
+            <span class="icon" aria-hidden="true">◪</span>
+          </button>
+          <button id="pipette-tool" type="button" title="Color picker" aria-label="Color picker">
+            <span class="icon" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle">
+                <path d="M14.44 2.44a2.5 2.5 0 0 1 3.54 3.54l-1.13 1.13-3.54-3.54 1.13-1.13zm-2.2 2.2l3.54 3.54-9.19 9.19c-.2.2-.45.34-.72.4l-3.13.7a.5.5 0 0 1-.6-.6l.7-3.13c.06-.27.2-.52.4-.72l9.19-9.19z" fill="var(--vscode-icon-foreground)"/>
+              </svg>
+            </span>
+          </button>
+          <button id="info-toggle" type="button" title="Show/Hide info" aria-label="Show/Hide info">
+            <span class="icon" aria-hidden="true">?</span>
+          </button>
+        </div>
       </div>
       <div id="compare-controls" class="compare-controls${hasComparisonImage ? '' : ' is-hidden'}" aria-label="Comparison controls">
-        <button id="compare-pick" type="button" class="compare-pick-button" aria-label="Choose comparison image">
-          <span class="icon" aria-hidden="true">
-            <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle">
-              <path d="M3.25 5.75a1.5 1.5 0 0 1 1.5-1.5h4.1l1.2 1.5h5.2a1.5 1.5 0 0 1 1.5 1.5v7a1.5 1.5 0 0 1-1.5 1.5H4.75a1.5 1.5 0 0 1-1.5-1.5v-8.5z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
-              <path d="M10 8.1v4M8 10.1h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
-            </svg>
-          </span>
-        </button>
-        <button id="compare-orientation" type="button" class="compare-orientation-button" aria-label="Switch to horizontal split" data-orientation="vertical">
-          <span class="icon" aria-hidden="true">
-            <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle">
-              <rect x="3" y="3" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.4"/>
-              <path d="M10 4v12" stroke="currentColor" stroke-width="1.4"/>
-            </svg>
-          </span>
-        </button>
-        <input id="compare-slider" type="range" min="0" max="100" value="50" step="1" aria-label="Comparison split" />
-        <button id="compare-diff-prev" type="button" class="compare-diff-nav compare-diff-prev" aria-label="Previous difference" title="Previous difference">
-          <span class="icon" aria-hidden="true">◀</span>
-        </button>
-        <span id="compare-diff-index" class="compare-diff-nav compare-diff-index" aria-live="polite">0/0</span>
-        <button id="compare-diff-next" type="button" class="compare-diff-nav compare-diff-next" aria-label="Next difference" title="Next difference">
-          <span class="icon" aria-hidden="true">▶</span>
-        </button>
-        <button id="compare-diff-target" type="button" class="compare-diff-nav compare-diff-target" aria-label="Show differences on left image" title="Show differences on left image" data-target="left">
-          <span class="icon" aria-hidden="true">
-            <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle">
-              <rect x="2.5" y="3.5" width="7.5" height="13" rx="1.6" fill="currentColor" fill-opacity="0.18" stroke="currentColor" stroke-width="1.2"/>
-              <rect x="10" y="3.5" width="7.5" height="13" rx="1.6" stroke="currentColor" stroke-width="1.2"/>
-            </svg>
-          </span>
-        </button>
-        <button id="compare-diff-all" type="button" class="compare-diff-nav compare-diff-all" aria-label="Show all differences" title="Show all differences" aria-pressed="false">
-          <span class="icon" aria-hidden="true">
-            <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle">
-              <rect x="3" y="3" width="5.8" height="5.8" rx="1.1" stroke="currentColor" stroke-width="1.2"/>
-              <rect x="11.2" y="3" width="5.8" height="5.8" rx="1.1" stroke="currentColor" stroke-width="1.2"/>
-              <rect x="3" y="11.2" width="5.8" height="5.8" rx="1.1" stroke="currentColor" stroke-width="1.2"/>
-              <rect x="11.2" y="11.2" width="5.8" height="5.8" rx="1.1" stroke="currentColor" stroke-width="1.2"/>
-            </svg>
-          </span>
-        </button>
-        <button id="compare-diff-autocenter" type="button" class="compare-diff-nav compare-diff-autocenter" aria-label="Auto-center selected difference" title="Auto-center selected difference" aria-pressed="false">
-          <span class="icon" aria-hidden="true">
-            <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle">
-              <circle cx="10" cy="10" r="5.2" stroke="currentColor" stroke-width="1.2"/>
-              <circle cx="10" cy="10" r="1.6" fill="currentColor"/>
-              <path d="M10 2.5v2.2M10 15.3v2.2M2.5 10h2.2M15.3 10h2.2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-            </svg>
-          </span>
-        </button>
-        <label class="compare-diff-nav compare-diff-sensitivity" for="compare-diff-sensitivity" title="Differences sensitivity">
-          <span class="compare-diff-sensitivity-label">Sensitivity</span>
-          <input id="compare-diff-sensitivity" type="range" min="1" max="100" value="10" step="1" aria-label="Differences sensitivity" />
-          <span id="compare-diff-sensitivity-value" class="compare-diff-sensitivity-value" aria-live="polite">10</span>
-        </label>
-        <span id="compare-image-label" class="compare-image-label">${hasComparisonImage ? escapeHtml(comparisonImageLabel) : 'No comparison image'}</span>
+        <div class="compare-toolbar-group compare-toolbar-group-source" role="group" aria-label="Comparison source controls">
+          <button id="compare-pick" type="button" class="compare-pick-button" aria-label="Choose comparison image">
+            <span class="icon" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle">
+                <path d="M3.25 5.75a1.5 1.5 0 0 1 1.5-1.5h4.1l1.2 1.5h5.2a1.5 1.5 0 0 1 1.5 1.5v7a1.5 1.5 0 0 1-1.5 1.5H4.75a1.5 1.5 0 0 1-1.5-1.5v-8.5z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+                <path d="M10 8.1v4M8 10.1h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+              </svg>
+            </span>
+          </button>
+          <button id="compare-orientation" type="button" class="compare-orientation-button" aria-label="Switch to horizontal split" data-orientation="vertical">
+            <span class="icon" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle">
+                <rect x="3" y="3" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.4"/>
+                <path d="M10 4v12" stroke="currentColor" stroke-width="1.4"/>
+              </svg>
+            </span>
+          </button>
+          <input id="compare-slider" type="range" min="0" max="100" value="50" step="1" aria-label="Comparison split" />
+          <span id="compare-image-label" class="compare-image-label">${hasComparisonImage ? escapeHtml(comparisonImageLabel) : 'No comparison image'}</span>
+        </div>
+        <div class="compare-toolbar-group compare-toolbar-group-diff-nav" role="group" aria-label="Difference navigation controls">
+          <button id="compare-diff-prev" type="button" class="compare-diff-nav compare-diff-prev" aria-label="Previous difference" title="Previous difference">
+            <span class="icon" aria-hidden="true">◀</span>
+          </button>
+          <span id="compare-diff-index" class="compare-diff-nav compare-diff-index" aria-live="polite">0/0</span>
+          <button id="compare-diff-next" type="button" class="compare-diff-nav compare-diff-next" aria-label="Next difference" title="Next difference">
+            <span class="icon" aria-hidden="true">▶</span>
+          </button>
+        </div>
+        <div class="compare-toolbar-group compare-toolbar-group-diff-display" role="group" aria-label="Difference display controls">
+          <button id="compare-diff-target" type="button" class="compare-diff-nav compare-diff-target" aria-label="Show differences on left image" title="Show differences on left image" data-target="left">
+            <span class="icon" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle">
+                <rect x="2.5" y="3.5" width="7.5" height="13" rx="1.6" fill="currentColor" fill-opacity="0.18" stroke="currentColor" stroke-width="1.2"/>
+                <rect x="10" y="3.5" width="7.5" height="13" rx="1.6" stroke="currentColor" stroke-width="1.2"/>
+              </svg>
+            </span>
+          </button>
+          <button id="compare-diff-all" type="button" class="compare-diff-nav compare-diff-all" aria-label="Show all differences" title="Show all differences" aria-pressed="false">
+            <span class="icon" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle">
+                <rect x="3" y="3" width="5.8" height="5.8" rx="1.1" stroke="currentColor" stroke-width="1.2"/>
+                <rect x="11.2" y="3" width="5.8" height="5.8" rx="1.1" stroke="currentColor" stroke-width="1.2"/>
+                <rect x="3" y="11.2" width="5.8" height="5.8" rx="1.1" stroke="currentColor" stroke-width="1.2"/>
+                <rect x="11.2" y="11.2" width="5.8" height="5.8" rx="1.1" stroke="currentColor" stroke-width="1.2"/>
+              </svg>
+            </span>
+          </button>
+          <button id="compare-diff-autocenter" type="button" class="compare-diff-nav compare-diff-autocenter" aria-label="Auto-center selected difference" title="Auto-center selected difference" aria-pressed="false">
+            <span class="icon" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle">
+                <circle cx="10" cy="10" r="5.2" stroke="currentColor" stroke-width="1.2"/>
+                <circle cx="10" cy="10" r="1.6" fill="currentColor"/>
+                <path d="M10 2.5v2.2M10 15.3v2.2M2.5 10h2.2M15.3 10h2.2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+              </svg>
+            </span>
+          </button>
+          <label class="compare-diff-nav compare-diff-sensitivity" for="compare-diff-sensitivity" title="Differences sensitivity">
+            <span class="compare-diff-sensitivity-label">Sensitivity</span>
+            <input id="compare-diff-sensitivity" type="range" min="1" max="100" value="10" step="1" aria-label="Differences sensitivity" />
+            <span id="compare-diff-sensitivity-value" class="compare-diff-sensitivity-value" aria-live="polite">10</span>
+          </label>
+        </div>
       </div>
       <canvas id="compare-diff-overlay" class="compare-diff-overlay is-hidden" aria-hidden="true"></canvas>
       <canvas id="compare-diff-overlay-secondary" class="compare-diff-overlay is-hidden" aria-hidden="true"></canvas>

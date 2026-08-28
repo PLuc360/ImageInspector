@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Changed
 - Unified gallery and Image Details toolbar item borders with an accent-derived color that adapts to the active light/dark theme.
 - Updated the Image Details undo control to use context-aware behavior and labels for crop reset, preview undo, and saved-edit undo.
+- Reorganized the Image Details toolbar into visual action categories separated by dividers, and moved the inspection tools group to the far right.
 
 ### Fixed
 - Fixed Image Details saved crop undo staying disabled after the webview refreshes by preserving undo/redo history for persisted edits during the current session.
