@@ -2049,6 +2049,7 @@ class ImageFolderGalleryPanel {
       vscode.ViewColumn.One,
       {
         enableScripts: true,
+        retainContextWhenHidden: true,
         localResourceRoots: [
           vscode.Uri.joinPath(context.extensionUri, 'media'),
           vscode.Uri.file(folderUri.fsPath)

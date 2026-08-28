@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
+
+## [1.17.0] - 2026-08-28
 ### Added
 - Added a gallery toolbar search field with multi-criteria filtering support, including free-text name matching and structured queries such as `type:png`, `name:warm`, `width>1000`, and `height<=512`.
 - Added image crop controls to the Image Details toolbar, including automatic border-aware crop detection, manual crop adjustment, and apply/reset actions.
@@ -16,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Reorganized the Image Details toolbar into visual action categories separated by dividers, and moved the inspection tools group to the far right.
 
 ### Fixed
+- Fixed folder galleries briefly showing the empty-state message when returning to their tab by preserving the webview context while hidden.
 - Fixed Image Details saved crop undo staying disabled after the webview refreshes by preserving undo/redo history for persisted edits during the current session.
 
 ## [1.16.1] - 2026-07-11
