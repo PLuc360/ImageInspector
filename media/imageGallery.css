@@ -496,6 +496,7 @@ body.vscode-high-contrast-light {
   grid-template-columns: repeat(auto-fill, minmax(calc(var(--thumb-size, 96px) + 8px), 1fr));
   gap: 4px;
   align-items: start;
+  overflow-anchor: none;
 }
 
 .gallery-grid.thumb-size-196 { --thumb-size: 196px; }

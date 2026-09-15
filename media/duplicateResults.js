@@ -209,6 +209,9 @@
     filesLabel.textContent = files.join(', ');
     filesLabel.title = files.join(' | ');
 
+    /**
+     * Activates the current duplicate group and cycles the focused file within it.
+     */
     const activateGroupSelection = () => {
       if (isSamePathList(activeGroupFilePaths, filePaths)) {
         activeGroupFocusIndex = (activeGroupFocusIndex + 1) % filePaths.length;

@@ -106,12 +106,25 @@ function sanitizeCropBounds(bounds: CropBounds | undefined): CropBounds | undefi
  */
 class ImageCustomDocument implements vscode.CustomDocument {
   uri: vscode.Uri;
+
+  /**
+   * Creates a custom document wrapper for one image URI.
+   *
+   * @param uri Image document URI.
+   */
   constructor(uri: vscode.Uri) {
     this.uri = uri;
   }
+
+  /**
+   * Releases document resources.
+   */
   dispose(): void {}
 }
 
+/**
+ * Provides the custom readonly editor used by Image Inspector previews.
+ */
 class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorProvider<ImageCustomDocument> {
   public static readonly viewType = 'imageInspector.previewEditor';
   private readonly context: vscode.ExtensionContext;
@@ -123,15 +136,30 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
   private readonly galleryNavigationByPanel = new Map<vscode.WebviewPanel, { orderedFilePaths: string[]; currentPosition: number }>();
   private readonly pendingGalleryNavigationByUri = new Map<string, { orderedFilePaths: string[]; currentPosition: number }>();
 
+  /**
+   * Creates the shared editor provider instance.
+   *
+   * @param context Extension context used to resolve resources.
+   */
   constructor(context: vscode.ExtensionContext) {
     this.context = context;
   }
 
+  /**
+   * Opens the backing custom document for an image file.
+   *
+   * @param uri Image URI requested by VS Code.
+   * @param openContext Additional open metadata from VS Code.
+   * @param token Cancellation token.
+   * @returns Custom document wrapper bound to the image URI.
+   */
   async openCustomDocument(
     uri: vscode.Uri,
     openContext: vscode.CustomDocumentOpenContext,
     token: vscode.CancellationToken
   ): Promise<ImageCustomDocument> {
+    void openContext;
+    void token;
     return new ImageCustomDocument(uri);
   }
 
@@ -1176,6 +1204,7 @@ interface DuplicateGroupMessage {
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { createHash } from 'node:crypto';
+import * as os from 'node:os';
 
 // Buffer is global in Node.js, but can be imported explicitly if needed.
 import { Buffer } from 'buffer';
@@ -1218,7 +1247,6 @@ type FileVersionInfo = {
 };
 
 /**
-        previewBackgroundRgb: settings.previewBackgroundRgb,
  * Builds a stable cache key that encodes the file path, size and modification timestamp.
  *
  * @param filePath Absolute file path.
@@ -1393,6 +1421,23 @@ async function processWithConcurrencyLimit<T>(
 }
 
 /**
+ * Resolves the gallery metadata worker count for the current machine.
+ *
+ * Gallery opening performs a mix of file reads, metadata extraction and thumbnail
+ * generation. A fixed low cap underuses multi-core systems, but an unbounded value
+ * would increase memory pressure on large folders.
+ *
+ * @returns Safe worker count for initial gallery metadata loading.
+ */
+function getGalleryMetadataLoadConcurrency(): number {
+  const availableParallelism = typeof os.availableParallelism === 'function'
+    ? os.availableParallelism()
+    : os.cpus().length;
+
+  return Math.max(4, Math.min(8, availableParallelism || 4));
+}
+
+/**
  * Manages WebviewPanel instances for folder image galleries.
  * One panel is kept alive per folder path.
  */
@@ -1401,7 +1446,7 @@ class ImageFolderGalleryPanel {
   private readonly panel: vscode.WebviewPanel;
   private readonly folderUri: vscode.Uri;
   private readonly extensionUri: vscode.Uri;
-  private readonly imageFiles: Array<{ src: string; thumbUrl?: string; filePath: string; name: string; type: string; size: number; width: number; height: number; mtimeMs: number }>;
+  private readonly imageFiles: Array<{ src: string; thumbUrl?: string; filePath: string; name: string; type: string; size: number; width: number; height: number; mtimeMs: number; sortMtimeMs?: number }>;
   private readonly panelDisposables: vscode.Disposable[] = [];
   private duplicateResultsPanel: vscode.WebviewPanel | undefined;
   private isDisposed = false;
@@ -1512,7 +1557,10 @@ class ImageFolderGalleryPanel {
         size: details.sizeBytes,
         width: details.width,
         height: details.height,
-        mtimeMs: fileVersionInfo.mtimeMs
+        mtimeMs: fileVersionInfo.mtimeMs,
+        sortMtimeMs: galleryPanel.imageFiles[currentIndex]?.sortMtimeMs
+          ?? galleryPanel.imageFiles[currentIndex]?.mtimeMs
+          ?? fileVersionInfo.mtimeMs
       };
 
       galleryPanel.imageFiles[currentIndex] = updatedMeta;
@@ -1602,7 +1650,9 @@ class ImageFolderGalleryPanel {
       return;
     }
 
-    void processWithConcurrencyLimit(imagePaths, 4, async (filePath) => {
+    const metadataLoadConcurrency = getGalleryMetadataLoadConcurrency();
+
+    void processWithConcurrencyLimit(imagePaths, metadataLoadConcurrency, async (filePath) => {
       try {
         if (this.isDisposed || initialRefreshGeneration !== this.refreshGeneration) {
           return;
@@ -1627,7 +1677,8 @@ class ImageFolderGalleryPanel {
           size: details.sizeBytes,
           width: details.width,
           height: details.height,
-          mtimeMs: fileVersionInfo.mtimeMs
+          mtimeMs: fileVersionInfo.mtimeMs,
+          sortMtimeMs: fileVersionInfo.mtimeMs
         };
         const currentIndex = this.imageFiles.findIndex((img) => img.filePath === filePath);
         if (currentIndex === -1) {
@@ -3123,28 +3174,6 @@ function formatSvgNumber(value: number): string {
   }
 
   return Number.parseFloat(value.toFixed(6)).toString();
-}
-
-/**
- * Reads an ICO header and returns the most relevant icon entry.
- * @param filePath Absolute ICO file path.
- * @returns Largest icon entry when available.
- */
-async function getIcoPrimaryEntry(filePath: string): Promise<IcoImageEntry | undefined> {
-  const entries = await parseIcoEntries(filePath);
-
-  if (entries.length === 0) {
-    return undefined;
-  }
-
-  return entries.slice().sort((entryA, entryB) => {
-    const areaDifference = entryB.width * entryB.height - entryA.width * entryA.height;
-    if (areaDifference !== 0) {
-      return areaDifference;
-    }
-
-    return entryB.bitCount - entryA.bitCount;
-  })[0];
 }
 
 /**

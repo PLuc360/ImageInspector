@@ -1,18 +1,6 @@
 /**
  * HTML builders for Image Inspector webviews (details, gallery, and duplicates).
  */
-/**
- * Formats a file size in bytes to a human-readable string with dynamic unit.
- * @param size File size in bytes.
- * @returns Formatted string (e.g. '512 bytes', '1.2 KB', '3.4 MB').
- */
-function formatFileSize(size: number | undefined): string {
-  if (typeof size !== 'number' || isNaN(size) || size < 0) return 'N/A';
-  if (size < 1024) return `${size} bytes`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  if (size < 1024 * 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(2)} MB`;
-  return `${(size / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 

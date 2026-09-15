@@ -1984,6 +1984,11 @@ function runCompareDifferenceAnalysis(token) {
   let changedPixels = 0;
   let activePixelThreshold = defaultPixelThreshold;
 
+  /**
+   * Rebuilds the binary diff mask for the current threshold and updates the changed-pixel count.
+   *
+   * @param {number} pixelThreshold Minimum weighted pixel delta required to mark a pixel as changed.
+   */
   const fillDiffMask = (pixelThreshold) => {
     changedPixels = 0;
 
@@ -2771,6 +2776,9 @@ function bindPressAndHoldAction(button, action) {
   let activePointerId = null;
   let hasRepeated = false;
 
+  /**
+   * Clears the pending hold-delay and repeat-interval timers for the current button press.
+   */
   const clearRepeatTimers = () => {
     if (repeatTimeoutId !== null) {
       clearTimeout(repeatTimeoutId);
@@ -2783,6 +2791,11 @@ function bindPressAndHoldAction(button, action) {
     }
   };
 
+  /**
+   * Ends the current press-and-hold interaction and releases pointer capture when needed.
+   *
+   * @param {number | null} pointerId Pointer being released, or null when ending unconditionally.
+   */
   const endPress = (pointerId) => {
     if (activePointerId !== null && pointerId !== null && activePointerId !== pointerId) {
       return;
@@ -3991,6 +4004,61 @@ function endOverlayDrag() {
   saveInfoOverlayPosition();
 }
 
+/**
+ * Handles pointer movement for active crop and overlay drag interactions.
+ *
+ * @param {PointerEvent} event Window-level pointer event.
+ */
+function handleWindowPointerMove(event) {
+  if (cropInteractionPointerId !== null && cropInteractionPointerId === event.pointerId) {
+    updateCropInteraction(event.clientX, event.clientY);
+    return;
+  }
+
+  if (!isDraggingOverlay || overlayDragPointerId !== event.pointerId) {
+    return;
+  }
+
+  moveOverlayFromPointer(event.clientX, event.clientY);
+}
+
+/**
+ * Handles pointer release or cancellation for active crop and overlay drag interactions.
+ *
+ * @param {PointerEvent} event Window-level pointer event.
+ */
+function handleWindowPointerRelease(event) {
+  if (cropInteractionPointerId !== null && cropInteractionPointerId === event.pointerId) {
+    endCropInteraction();
+    return;
+  }
+
+  if (!isDraggingOverlay || overlayDragPointerId !== event.pointerId) {
+    return;
+  }
+
+  endOverlayDrag();
+}
+
+/**
+ * Clears transient pointer-driven states when the window loses focus.
+ */
+function handleWindowBlur() {
+  if (cropInteractionPointerId !== null) {
+    endCropInteraction();
+  }
+
+  if (isDraggingOverlay) {
+    endOverlayDrag();
+  }
+
+  if (isDraggingCompareDivider) {
+    endCompareDividerDrag();
+  }
+
+  disablePreviewWheelZoomListener();
+}
+
 bindPressAndHoldAction(zoomInButton, () => {
   applyZoomDelta(ZOOM_STEP);
 });
@@ -4345,60 +4413,13 @@ infoOverlayHandle?.addEventListener('pointerdown', (event) => {
   stopEvent(event);
 });
 
-window.addEventListener('pointermove', (event) => {
-  if (cropInteractionPointerId !== null && cropInteractionPointerId === event.pointerId) {
-    updateCropInteraction(event.clientX, event.clientY);
-    return;
-  }
+window.addEventListener('pointermove', handleWindowPointerMove);
 
-  if (!isDraggingOverlay || overlayDragPointerId !== event.pointerId) {
-    return;
-  }
+window.addEventListener('pointerup', handleWindowPointerRelease);
 
-  moveOverlayFromPointer(event.clientX, event.clientY);
-});
+window.addEventListener('pointercancel', handleWindowPointerRelease);
 
-window.addEventListener('pointerup', (event) => {
-  if (cropInteractionPointerId !== null && cropInteractionPointerId === event.pointerId) {
-    endCropInteraction();
-    return;
-  }
-
-  if (!isDraggingOverlay || overlayDragPointerId !== event.pointerId) {
-    return;
-  }
-
-  endOverlayDrag();
-});
-
-window.addEventListener('pointercancel', (event) => {
-  if (cropInteractionPointerId !== null && cropInteractionPointerId === event.pointerId) {
-    endCropInteraction();
-    return;
-  }
-
-  if (!isDraggingOverlay || overlayDragPointerId !== event.pointerId) {
-    return;
-  }
-
-  endOverlayDrag();
-});
-
-window.addEventListener('blur', () => {
-  if (cropInteractionPointerId !== null) {
-    endCropInteraction();
-  }
-
-  if (isDraggingOverlay) {
-    endOverlayDrag();
-  }
-
-  if (isDraggingCompareDivider) {
-    endCompareDividerDrag();
-  }
-
-  disablePreviewWheelZoomListener();
-});
+window.addEventListener('blur', handleWindowBlur);
 
 let isPreviewWheelZoomListenerActive = false;
 
@@ -4442,23 +4463,41 @@ function disablePreviewWheelZoomListener() {
   isPreviewWheelZoomListenerActive = false;
 }
 
-window.addEventListener('keydown', (event) => {
+/**
+ * Enables preview wheel-zoom handling while Ctrl or Cmd is pressed.
+ *
+ * @param {KeyboardEvent} event Keyboard event.
+ */
+function handlePreviewWheelModifierKeyDown(event) {
   if (event.key === 'Control' || event.key === 'Meta') {
     enablePreviewWheelZoomListener();
   }
-}, { passive: true });
+}
 
-window.addEventListener('keyup', (event) => {
+/**
+ * Disables preview wheel-zoom handling when modifier keys are released.
+ *
+ * @param {KeyboardEvent} event Keyboard event.
+ */
+function handlePreviewWheelModifierKeyUp(event) {
   if ((event.key === 'Control' || event.key === 'Meta') && !event.ctrlKey && !event.metaKey) {
     disablePreviewWheelZoomListener();
   }
-}, { passive: true });
+}
 
-previewBody?.addEventListener('pointerdown', () => {
+/**
+ * Gives focus back to the window when the preview receives a pointer press.
+ */
+function handlePreviewPointerFocus() {
   window.focus();
-});
+}
 
-previewBody?.addEventListener('pointerdown', (event) => {
+/**
+ * Starts crop drawing, zoom selection, or panning when the preview is pressed.
+ *
+ * @param {PointerEvent} event Pointer event originating from the preview body.
+ */
+function handlePreviewPointerDown(event) {
   if (!preview || event.button !== 0) {
     return;
   }
@@ -4503,9 +4542,14 @@ previewBody?.addEventListener('pointerdown', (event) => {
   preview.classList.add('dragging');
   previewBody.setPointerCapture(event.pointerId);
   event.preventDefault();
-});
+}
 
-previewBody?.addEventListener('pointermove', (event) => {
+/**
+ * Updates crop drawing, zoom selection, or panning while the pointer moves over the preview.
+ *
+ * @param {PointerEvent} event Pointer event originating from the preview body.
+ */
+function handlePreviewPointerMove(event) {
   if (cropInteractionPointerId !== null && cropInteractionPointerId === event.pointerId) {
     updateCropInteraction(event.clientX, event.clientY);
     event.preventDefault();
@@ -4526,9 +4570,14 @@ previewBody?.addEventListener('pointermove', (event) => {
   const deltaY = event.clientY - dragStartY;
   preview.scrollLeft = dragStartScrollLeft - deltaX;
   preview.scrollTop = dragStartScrollTop - deltaY;
-});
+}
 
-previewBody?.addEventListener('pointerup', (event) => {
+/**
+ * Finalizes preview interactions on pointer release.
+ *
+ * @param {PointerEvent} event Pointer event originating from the preview body.
+ */
+function handlePreviewPointerUp(event) {
   if (cropInteractionPointerId !== null && cropInteractionPointerId === event.pointerId) {
     endCropInteraction();
     return;
@@ -4542,9 +4591,14 @@ previewBody?.addEventListener('pointerup', (event) => {
   }
 
   endPreviewDrag(event.pointerId);
-});
+}
 
-previewBody?.addEventListener('pointercancel', (event) => {
+/**
+ * Cancels preview interactions when pointer capture is interrupted.
+ *
+ * @param {PointerEvent} event Pointer event originating from the preview body.
+ */
+function handlePreviewPointerCancel(event) {
   if (cropInteractionPointerId !== null && cropInteractionPointerId === event.pointerId) {
     endCropInteraction();
     return;
@@ -4556,9 +4610,14 @@ previewBody?.addEventListener('pointercancel', (event) => {
   }
 
   endPreviewDrag(event.pointerId);
-});
+}
 
-previewBody?.addEventListener('dblclick', (event) => {
+/**
+ * Toggles the preview between fit mode and actual size on double click.
+ *
+ * @param {MouseEvent} event Double-click event.
+ */
+function handlePreviewDoubleClick(event) {
   if (cropMode) {
     return;
   }
@@ -4569,7 +4628,23 @@ previewBody?.addEventListener('dblclick', (event) => {
 
   event.preventDefault();
   toggleFitAndActualSize();
-});
+}
+
+window.addEventListener('keydown', handlePreviewWheelModifierKeyDown, { passive: true });
+
+window.addEventListener('keyup', handlePreviewWheelModifierKeyUp, { passive: true });
+
+previewBody?.addEventListener('pointerdown', handlePreviewPointerFocus);
+
+previewBody?.addEventListener('pointerdown', handlePreviewPointerDown);
+
+previewBody?.addEventListener('pointermove', handlePreviewPointerMove);
+
+previewBody?.addEventListener('pointerup', handlePreviewPointerUp);
+
+previewBody?.addEventListener('pointercancel', handlePreviewPointerCancel);
+
+previewBody?.addEventListener('dblclick', handlePreviewDoubleClick);
 
 cropSelectionBox?.addEventListener('pointerdown', (event) => {
   if (event.button !== 0 || !cropMode) {

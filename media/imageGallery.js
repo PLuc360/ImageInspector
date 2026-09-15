@@ -24,6 +24,8 @@
   const MIN_THUMB_SIZE = 196;
   const MAX_THUMB_SIZE = 512;
   const ZOOM_STEP = 16;
+  const LARGE_GALLERY_RENDER_THRESHOLD = 2500;
+  const VIRTUAL_GALLERY_OVERSCAN_ROWS = 3;
   let currentThumbSize = (() => {
     const saved = parseInt(localStorage.getItem(storageKey) || '', 10);
     return !isNaN(saved) ? Math.max(MIN_THUMB_SIZE, Math.min(MAX_THUMB_SIZE, saved)) : MIN_THUMB_SIZE;
@@ -37,15 +39,28 @@
   let scheduledMetaUpdateFlush = 0;
   let scheduledProgressUpdate = 0;
   let scheduledNavigationOrderSync = 0;
+  let scheduledVirtualWindowRender = 0;
+  let pendingVirtualWindowForceRender = false;
   let lastNavigationOrderSignature = '';
+  let currentRenderedOrderIndexes = [];
   const pendingMetaUpdates = new Map();
   const loadedImageSources = new Set();
+  const virtualGalleryState = {
+    enabled: false,
+    grid: null,
+    images: [],
+    columnCount: 1,
+    rowHeight: 0,
+    startIndex: -1,
+    endIndex: -1
+  };
   let activeContextMenu = null;
   let activeContextMenuCleanup = null;
   let activeDuplicateGroupKey = '';
   let activeDuplicateFocusIndex = 0;
   let selectionAnchorIndex = -1;
   let lastDeleteSelectionRequestAt = 0;
+  let lastScrollAt = 0;
 
   /**
    * Applies the accent color used by gallery visual effects.
@@ -346,8 +361,8 @@
       const rightType = getImageTypeLabel(right.img);
       const leftSize = typeof left.img?.size === 'number' ? left.img.size : 0;
       const rightSize = typeof right.img?.size === 'number' ? right.img.size : 0;
-      const leftDate = typeof left.img?.mtimeMs === 'number' && Number.isFinite(left.img.mtimeMs) ? left.img.mtimeMs : 0;
-      const rightDate = typeof right.img?.mtimeMs === 'number' && Number.isFinite(right.img.mtimeMs) ? right.img.mtimeMs : 0;
+      const leftDate = getSortModifiedTimestamp(left.img);
+      const rightDate = getSortModifiedTimestamp(right.img);
       let cmp = 0;
 
       if (currentSort === 'name') {
@@ -367,6 +382,27 @@
     });
 
     return images;
+  }
+
+  /**
+   * Returns the stable modified timestamp used for date sorting.
+   *
+   * Gallery sessions keep this value fixed for images edited from Image Details,
+   * so the current item does not jump to a new position immediately after save.
+   *
+   * @param {any} img Gallery image metadata object.
+   * @returns {number} Timestamp used for sorting, or 0 when unavailable.
+   */
+  function getSortModifiedTimestamp(img) {
+    const preferredTimestamp = Number(img?.sortMtimeMs);
+    if (Number.isFinite(preferredTimestamp) && preferredTimestamp > 0) {
+      return preferredTimestamp;
+    }
+
+    const fallbackTimestamp = Number(img?.mtimeMs);
+    return Number.isFinite(fallbackTimestamp) && fallbackTimestamp > 0
+      ? fallbackTimestamp
+      : 0;
   }
 
   /**
@@ -645,12 +681,13 @@
     const rawThumbSrc = img.thumbUrl || '';
     const thumbSrc = escapeHtml(rawThumbSrc);
     const isLoaded = loadedImageSources.has(rawThumbSrc);
-    const initialSrc = isLoaded ? thumbSrc : EMPTY_IMAGE_SRC;
+    const shouldEagerlyRenderThumb = virtualGalleryState.enabled && rawThumbSrc;
+    const initialSrc = isLoaded || shouldEagerlyRenderThumb ? thumbSrc : EMPTY_IMAGE_SRC;
     const imageClassName = isLoaded ? 'is-loaded' : '';
     const loadedState = isLoaded ? 'true' : 'false';
 
     return `
-      <div class="gallery-item" data-index="${index}" data-name="${escapeHtml(img.name)}" data-type="${escapeHtml(img.type)}" data-size="${img.size}" data-mtime-ms="${String(img.mtimeMs ?? 0)}" data-width="${img.width}" data-height="${img.height}">
+      <div class="gallery-item" data-index="${index}" data-file-path="${escapeHtml(img.filePath || '')}" data-name="${escapeHtml(img.name)}" data-type="${escapeHtml(img.type)}" data-size="${img.size}" data-mtime-ms="${String(img.mtimeMs ?? 0)}" data-sort-mtime-ms="${String(img.sortMtimeMs ?? img.mtimeMs ?? 0)}" data-width="${img.width}" data-height="${img.height}">
         <div class="gallery-thumb">
           <img class="${imageClassName}" src="${initialSrc}" data-src="${thumbSrc}" data-loaded="${loadedState}" alt="${escapeHtml(img.name)}" decoding="async" />
         </div>
@@ -663,6 +700,311 @@
         </div>
       </div>
     `;
+  }
+
+  /**
+   * Creates one gallery card element from the HTML markup builder.
+   * @param {any} img Gallery image metadata object.
+   * @param {number} index Gallery item index.
+   * @returns {HTMLElement | null} Created gallery item element.
+   */
+  function createGalleryItemElement(img, index) {
+    const template = document.createElement('template');
+    template.innerHTML = buildGalleryItemMarkup(img, index).trim();
+    const item = template.content.firstElementChild;
+    return item instanceof HTMLElement ? item : null;
+  }
+
+  /**
+   * Applies metadata to an existing gallery card element.
+   * @param {HTMLElement} item Target rendered gallery item.
+   * @param {any} meta Metadata payload to apply.
+   * @param {number} index Current gallery index.
+   */
+  function patchGalleryItemElement(item, meta, index) {
+    const currentImage = meta || {};
+
+    item.dataset.index = String(index);
+    item.dataset.filePath = String(meta?.filePath ?? '');
+    item.dataset.name = String(meta?.name ?? '');
+    item.dataset.type = String(meta?.type ?? '');
+    item.dataset.size = String(meta?.size ?? 0);
+    item.dataset.mtimeMs = String(meta?.mtimeMs ?? 0);
+    item.dataset.sortMtimeMs = String(meta?.sortMtimeMs ?? meta?.mtimeMs ?? 0);
+    item.dataset.width = String(meta?.width ?? 0);
+    item.dataset.height = String(meta?.height ?? 0);
+
+    const label = item.querySelector('.gallery-label');
+    if (label) {
+      label.textContent = String(meta?.name ?? '');
+    }
+
+    const image = item.querySelector('.gallery-thumb img');
+    if (image instanceof HTMLImageElement) {
+      const nextImageSource = String(meta?.thumbUrl || currentImage.thumbUrl || '');
+      const previousImageSource = image.dataset.src || image.currentSrc || image.src || '';
+      const shouldKeepLoadedState = nextImageSource && nextImageSource === previousImageSource;
+      image.dataset.src = nextImageSource;
+      image.alt = String(meta?.name ?? '');
+
+      if (!shouldKeepLoadedState) {
+        image.dataset.loaded = 'false';
+        image.classList.remove('is-loaded');
+        image.src = EMPTY_IMAGE_SRC;
+      }
+
+      loadGalleryImageIfNearViewport(image);
+    }
+
+    const metaType = item.querySelector('.meta-type');
+    if (metaType) {
+      const extMatch = String(meta?.name ?? '').match(/\.([a-z0-9]+)$/i);
+      const ext = extMatch ? extMatch[1].toLowerCase() : '';
+      metaType.className = 'meta-type badge';
+      if ([
+        'png','jpg','jpeg','gif','bmp','webp','svg','tiff','tif','avif','heic','heif','ico'
+      ].includes(ext)) {
+        metaType.classList.add(`badge-ext-${ext}`);
+      }
+      metaType.textContent = getImageTypeLabel(currentImage);
+    }
+
+    const metaSize = item.querySelector('.meta-size');
+    if (metaSize) {
+      metaSize.textContent = formatFileSize(meta?.size);
+    }
+
+    const metaDate = item.querySelector('.meta-date');
+    if (metaDate) {
+      metaDate.textContent = formatModifiedDate(meta?.mtimeMs);
+    }
+
+    const metaDim = item.querySelector('.meta-dim');
+    if (metaDim) {
+      metaDim.textContent = formatImageDimensions(meta);
+    }
+  }
+
+  /**
+   * Reconciles the gallery grid by reusing existing DOM nodes whenever possible.
+   * @param {HTMLElement} grid Gallery grid container.
+   * @param {Array<{ img: any, index: number }>} images Current filtered and sorted gallery items.
+   */
+  function reconcileGalleryGrid(grid, images) {
+    const existingItemsByFilePath = new Map();
+    grid.querySelectorAll('.gallery-item').forEach((item) => {
+      if (!(item instanceof HTMLElement)) {
+        return;
+      }
+
+      const filePath = String(item.dataset.filePath ?? '');
+      if (filePath) {
+        existingItemsByFilePath.set(filePath, item);
+      }
+    });
+
+    const fragment = document.createDocumentFragment();
+    for (const { img, index } of images) {
+      const filePath = String(img?.filePath ?? '');
+      const existingItem = filePath ? existingItemsByFilePath.get(filePath) : undefined;
+      const nextItem = existingItem instanceof HTMLElement
+        ? existingItem
+        : createGalleryItemElement(img, index);
+
+      if (!(nextItem instanceof HTMLElement)) {
+        continue;
+      }
+
+      patchGalleryItemElement(nextItem, img, index);
+      fragment.appendChild(nextItem);
+    }
+
+    grid.replaceChildren(fragment);
+  }
+
+  /**
+   * Returns the estimated minimum column width used by the responsive grid.
+   * @returns {number} Estimated grid column width in pixels.
+   */
+  function getEstimatedGalleryColumnWidth() {
+    return currentThumbSize + 8;
+  }
+
+  /**
+   * Returns the current resolved gap metrics for the gallery grid.
+   * @param {HTMLElement} grid Gallery grid container.
+   * @returns {{ columnGap: number, rowGap: number }} Resolved gap metrics.
+   */
+  function getGalleryGridGapMetrics(grid) {
+    const computedStyle = window.getComputedStyle(grid);
+    const rawColumnGap = parseFloat(computedStyle.columnGap || computedStyle.gap || '0');
+    const rawRowGap = parseFloat(computedStyle.rowGap || computedStyle.gap || '0');
+    return {
+      columnGap: Number.isFinite(rawColumnGap) ? rawColumnGap : 0,
+      rowGap: Number.isFinite(rawRowGap) ? rawRowGap : 0
+    };
+  }
+
+  /**
+   * Estimates one gallery row height before a measured value is available.
+   * @returns {number} Estimated row height in pixels.
+   */
+  function estimateGalleryRowHeight() {
+    return currentThumbSize + 86;
+  }
+
+  /**
+   * Computes the number of active columns in the responsive gallery grid.
+   * @param {HTMLElement} grid Gallery grid container.
+   * @returns {number} Active column count.
+   */
+  function getGalleryGridColumnCount(grid) {
+    const { columnGap } = getGalleryGridGapMetrics(grid);
+    const minimumColumnWidth = getEstimatedGalleryColumnWidth();
+    const availableWidth = Math.max(grid.clientWidth, minimumColumnWidth);
+    return Math.max(1, Math.floor((availableWidth + columnGap) / (minimumColumnWidth + columnGap)));
+  }
+
+  /**
+   * Cancels any scheduled virtual window refresh.
+   */
+  function cancelVirtualWindowRender() {
+    if (scheduledVirtualWindowRender) {
+      window.cancelAnimationFrame(scheduledVirtualWindowRender);
+      scheduledVirtualWindowRender = 0;
+    }
+
+    pendingVirtualWindowForceRender = false;
+  }
+
+  /**
+   * Schedules one virtual window refresh on the next animation frame.
+   * @param {boolean} [force=false] When true, forces a rebuild even if the visible range is unchanged.
+   */
+  function scheduleVirtualWindowRender(force = false) {
+    if (!virtualGalleryState.enabled) {
+      return;
+    }
+
+    if (force) {
+      pendingVirtualWindowForceRender = true;
+    }
+
+    if (scheduledVirtualWindowRender) {
+      return;
+    }
+
+    scheduledVirtualWindowRender = window.requestAnimationFrame(() => {
+      const shouldForceRender = pendingVirtualWindowForceRender;
+      pendingVirtualWindowForceRender = false;
+      scheduledVirtualWindowRender = 0;
+      renderVirtualGalleryWindow(shouldForceRender);
+    });
+  }
+
+  /**
+   * Renders only the visible slice of a very large gallery.
+   * @param {boolean} [force=false] When true, forces a rebuild even if the visible range is unchanged.
+   */
+  function renderVirtualGalleryWindow(force = false) {
+    if (!virtualGalleryState.enabled
+      || !(virtualGalleryState.grid instanceof HTMLElement)
+      || !Array.isArray(virtualGalleryState.images)) {
+      return;
+    }
+
+    const grid = virtualGalleryState.grid;
+    const images = virtualGalleryState.images;
+    const columnCount = getGalleryGridColumnCount(grid);
+    const totalRows = Math.max(1, Math.ceil(images.length / columnCount));
+    const hasMeasuredRowHeight = virtualGalleryState.rowHeight > 0;
+    const rowHeight = hasMeasuredRowHeight ? virtualGalleryState.rowHeight : estimateGalleryRowHeight();
+    const overscanPixels = rowHeight * VIRTUAL_GALLERY_OVERSCAN_ROWS;
+    const gridTop = grid.getBoundingClientRect().top + window.scrollY;
+    const viewportTop = Math.max(0, window.scrollY - gridTop);
+    const viewportHeight = Math.max(window.innerHeight || document.documentElement.clientHeight || 0, rowHeight);
+    const viewportBottom = viewportTop + viewportHeight;
+    const startRow = Math.min(
+      totalRows - 1,
+      Math.max(0, Math.floor((viewportTop - overscanPixels) / rowHeight))
+    );
+    const endRow = Math.max(
+      startRow,
+      Math.min(totalRows - 1, Math.floor((viewportBottom + overscanPixels) / rowHeight))
+    );
+    const startIndex = startRow * columnCount;
+    const endIndex = Math.min(images.length, (endRow + 1) * columnCount);
+
+    if (!force
+      && virtualGalleryState.columnCount === columnCount
+      && virtualGalleryState.startIndex === startIndex
+      && virtualGalleryState.endIndex === endIndex) {
+      return;
+    }
+
+    virtualGalleryState.columnCount = columnCount;
+    virtualGalleryState.startIndex = startIndex;
+    virtualGalleryState.endIndex = endIndex;
+
+    const existingItemsByFilePath = new Map();
+    grid.querySelectorAll('.gallery-item').forEach((item) => {
+      if (!(item instanceof HTMLElement)) {
+        return;
+      }
+
+      const filePath = String(item.dataset.filePath ?? '');
+      if (filePath) {
+        existingItemsByFilePath.set(filePath, item);
+      }
+    });
+
+    const fragment = document.createDocumentFragment();
+    const topPadding = startRow * rowHeight;
+
+    for (let visibleIndex = startIndex; visibleIndex < endIndex; visibleIndex += 1) {
+      const entry = images[visibleIndex];
+      if (!entry) {
+        continue;
+      }
+
+      const filePath = String(entry.img?.filePath ?? '');
+      const existingItem = filePath ? existingItemsByFilePath.get(filePath) : undefined;
+      const nextItem = existingItem instanceof HTMLElement
+        ? existingItem
+        : createGalleryItemElement(entry.img, entry.index);
+
+      if (!(nextItem instanceof HTMLElement)) {
+        continue;
+      }
+
+      patchGalleryItemElement(nextItem, entry.img, entry.index);
+      nextItem.classList.toggle('is-selected', selectedIndexes.includes(entry.index));
+      fragment.appendChild(nextItem);
+    }
+
+    const renderedRows = Math.max(1, Math.ceil((endIndex - startIndex) / columnCount));
+    const rowsAfterWindow = Math.max(0, totalRows - startRow - renderedRows);
+    const bottomPadding = rowsAfterWindow * rowHeight;
+    grid.style.paddingTop = `${String(Math.max(0, topPadding))}px`;
+    grid.style.paddingBottom = `${String(Math.max(0, bottomPadding))}px`;
+    grid.replaceChildren(fragment);
+    applyThumbSizeToGrid();
+    loadVisibleVirtualGalleryImages(grid);
+
+    const firstRenderedItem = grid.querySelector('.gallery-item');
+    if (firstRenderedItem instanceof HTMLElement) {
+      const { rowGap } = getGalleryGridGapMetrics(grid);
+      const measuredRowHeight = Math.max(1, firstRenderedItem.offsetHeight + rowGap);
+      if (!hasMeasuredRowHeight) {
+        virtualGalleryState.rowHeight = measuredRowHeight;
+        scheduleVirtualWindowRender(true);
+      }
+    }
+
+    initializeLazyGalleryImages();
+    scheduleNearbyRowPreload();
+    syncSelectionClasses();
+    scheduleNavigationOrderSync();
   }
 
   /**
@@ -751,19 +1093,50 @@
   }
 
   /**
+   * Synchronizes the DOM state of a thumbnail that may already be loaded.
+   * This is important when virtualized tiles are recreated while the browser
+   * already has the underlying thumbnail resource available.
+   *
+   * @param {HTMLImageElement} imageElement Thumbnail image element.
+   * @returns {boolean} True when the thumbnail is confirmed as loaded.
+   */
+  function syncLoadedGalleryImageState(imageElement) {
+    if (!(imageElement instanceof HTMLImageElement)) {
+      return false;
+    }
+
+    const expectedSource = imageElement.dataset.src || '';
+    const currentSource = imageElement.currentSrc || imageElement.src || '';
+    if (!expectedSource || currentSource !== expectedSource || !imageElement.complete || imageElement.naturalWidth <= 0) {
+      return false;
+    }
+
+    loadedImageSources.add(expectedSource);
+    imageElement.dataset.loaded = 'true';
+    imageElement.classList.add('is-loaded');
+    return true;
+  }
+
+  /**
    * Loads a thumbnail when it enters the viewport buffer.
    * @param {HTMLImageElement} imageElement Thumbnail image element.
    */
   function loadGalleryImage(imageElement) {
     if (!(imageElement instanceof HTMLImageElement)) return;
     const imageSrc = imageElement.dataset.src;
-    if (!imageSrc || imageElement.dataset.loaded === 'true' || imageElement.dataset.loaded === 'pending') return;
+    if (!imageSrc || imageElement.dataset.loaded === 'true') return;
+    if (syncLoadedGalleryImageState(imageElement)) return;
+    if (imageElement.dataset.loaded === 'pending' && (imageElement.currentSrc || imageElement.src || '') === imageSrc) {
+      return;
+    }
     imageElement.dataset.loaded = 'pending';
     imageElement.loading = 'eager';
     imageElement.fetchPriority = 'high';
     imageElement.addEventListener('load', handleLazyImageLoad, { once: true });
     imageElement.addEventListener('error', handleLazyImageError, { once: true });
-    imageElement.src = imageSrc;
+    if ((imageElement.currentSrc || imageElement.src || '') !== imageSrc) {
+      imageElement.src = imageSrc;
+    }
   }
 
   /**
@@ -771,6 +1144,25 @@
    */
   function initializeLazyGalleryImages() {
     preloadNearbyGalleryRows();
+  }
+
+  /**
+   * Eagerly loads thumbnails for the currently rendered virtual gallery window.
+   * Visible virtual tiles are already a bounded subset, so they should not wait
+   * for an additional viewport proximity pass after a full window rebuild.
+   *
+   * @param {HTMLElement} grid Gallery grid container.
+   */
+  function loadVisibleVirtualGalleryImages(grid) {
+    if (!(grid instanceof HTMLElement)) {
+      return;
+    }
+
+    grid.querySelectorAll('.gallery-thumb img[data-src]').forEach((image) => {
+      if (image instanceof HTMLImageElement) {
+        loadGalleryImage(image);
+      }
+    });
   }
 
   /**
@@ -844,6 +1236,10 @@
    * @returns {number[]} The currently visible indexes.
    */
   function getVisibleGalleryIndexes() {
+    if (virtualGalleryState.enabled) {
+      return currentRenderedOrderIndexes.slice();
+    }
+
     return Array.from(document.querySelectorAll('.gallery-item'))
       .map((element) => {
         if (!(element instanceof HTMLElement)) {
@@ -855,10 +1251,83 @@
   }
 
   /**
+   * Builds a stable lightweight signature for one gallery data snapshot.
+   * @param {any[]} images Gallery metadata array.
+   * @returns {string} Comparable signature for change detection.
+   */
+  function buildGalleryDataSignature(images) {
+    if (!Array.isArray(images) || images.length === 0) {
+      return '';
+    }
+
+    return images.map((img) => [
+      String(img?.filePath ?? ''),
+      String(img?.name ?? ''),
+      String(img?.type ?? ''),
+      String(img?.size ?? 0),
+      String(img?.mtimeMs ?? 0),
+      String(img?.sortMtimeMs ?? 0),
+      String(img?.width ?? 0),
+      String(img?.height ?? 0),
+      String(img?.thumbUrl ?? '')
+    ].join('|')).join('||');
+  }
+
+  /**
+   * Indicates whether the current rendered gallery slice still contains placeholder metadata.
+   * Virtualization stays disabled in that state because progressive metadata updates combined
+   * with scroll-driven window recycling can leave visible tiles stuck on placeholders.
+   *
+   * @param {Array<{ img: any, index: number }>} images Current filtered and sorted gallery items.
+   * @returns {boolean} True when at least one visible gallery item still has pending metadata.
+   */
+  function hasPendingGalleryMetadata(images) {
+    return Array.isArray(images) && images.some(({ img }) => isMetadataPending(img));
+  }
+
+  /**
+   * Indicates whether row virtualization can safely be enabled for the current gallery view.
+   *
+   * @param {Array<{ img: any, index: number }>} images Current filtered and sorted gallery items.
+   * @returns {boolean} True when virtualization should be active.
+   */
+  function shouldEnableVirtualGallery(images) {
+    return Array.isArray(images)
+      && images.length >= LARGE_GALLERY_RENDER_THRESHOLD
+      && !hasPendingGalleryMetadata(images);
+  }
+
+  /**
+   * Counts how many removed indexes are smaller than the provided index.
+   * @param {number[]} sortedRemovedIndexes Ascending removed indexes.
+   * @param {number} targetIndex Original gallery index.
+   * @returns {number} Number of removed indexes before the target index.
+   */
+  function countRemovedIndexesBefore(sortedRemovedIndexes, targetIndex) {
+    let low = 0;
+    let high = sortedRemovedIndexes.length;
+
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2);
+      if (sortedRemovedIndexes[middle] < targetIndex) {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
+    }
+
+    return low;
+  }
+
+  /**
    * Returns current gallery indexes in active filtered/sorted order.
    * @returns {number[]} The sorted gallery indexes.
    */
   function getSortedGalleryIndexes() {
+    if (currentRenderedOrderIndexes.length > 0) {
+      return currentRenderedOrderIndexes.slice();
+    }
+
     return getFilteredSortedImages()
       .map(({ index }) => index)
       .filter((index) => Number.isInteger(index) && index >= 0);
@@ -952,18 +1421,64 @@
    * @param {number[]} indexes Gallery indexes to process.
    */
   function removeImagesFromGallery(indexes) {
-    const indexesToRemove = new Set(
-      indexes.filter((index) => Number.isInteger(index) && index >= 0 && index < galleryImages.length)
-    );
-
-    if (indexesToRemove.size === 0) {
+    const sortedIndexesToRemove = sanitizeSelectedIndexes(indexes);
+    if (sortedIndexesToRemove.length === 0) {
       return;
     }
 
+    const indexesToRemove = new Set(sortedIndexesToRemove);
+    const grid = document.querySelector('.gallery-grid');
     galleryImages = galleryImages.filter((_, index) => !indexesToRemove.has(index));
     selectedIndexes = [];
+    selectionAnchorIndex = -1;
     localStorage.setItem(window.selectionKey, JSON.stringify(selectedIndexes));
-    refreshGalleryView();
+
+    buildGalleryMenu();
+
+    if (virtualGalleryState.enabled || galleryImages.length >= LARGE_GALLERY_RENDER_THRESHOLD) {
+      renderGallery();
+      updateSelectionToolbar();
+      return;
+    }
+
+    if (!(grid instanceof HTMLElement)) {
+      renderGallery();
+      updateSelectionToolbar();
+      return;
+    }
+
+    const renderedItems = Array.from(grid.querySelectorAll('.gallery-item'));
+    for (const item of renderedItems) {
+      if (!(item instanceof HTMLElement)) {
+        continue;
+      }
+
+      const previousIndex = parseInt(item.dataset.index ?? '-1', 10);
+      if (!Number.isInteger(previousIndex) || previousIndex < 0) {
+        continue;
+      }
+
+      if (indexesToRemove.has(previousIndex)) {
+        item.remove();
+        continue;
+      }
+
+      const nextIndex = previousIndex - countRemovedIndexesBefore(sortedIndexesToRemove, previousIndex);
+      item.dataset.index = String(nextIndex);
+    }
+
+    const remainingVisibleCount = grid.querySelectorAll('.gallery-item').length;
+    if (remainingVisibleCount === 0) {
+      grid.innerHTML = galleryImages.length === 0
+        ? '<div class="gallery-empty"><p>No images found in this folder.</p></div>'
+        : '<div class="gallery-empty"><p>No images match the current filters.</p></div>';
+      applyThumbSizeToGrid();
+    }
+
+    updateGalleryCount(remainingVisibleCount, galleryImages.length);
+    syncSelectionClasses();
+    syncGalleryLoadingProgressFromImages();
+    scheduleNavigationOrderSync(true);
   }
 
   /**
@@ -1022,8 +1537,25 @@
     const grid = document.querySelector('.gallery-grid');
     if (!grid) return;
 
+    cancelVirtualWindowRender();
+
     const images = getFilteredSortedImages();
+    currentRenderedOrderIndexes = images.map(({ index }) => index);
     updateGalleryCount(images.length, galleryImages.length);
+
+    virtualGalleryState.enabled = shouldEnableVirtualGallery(images);
+    virtualGalleryState.grid = virtualGalleryState.enabled && grid instanceof HTMLElement ? grid : null;
+    virtualGalleryState.images = virtualGalleryState.enabled ? images : [];
+    if (!virtualGalleryState.enabled) {
+      virtualGalleryState.columnCount = 1;
+      virtualGalleryState.rowHeight = 0;
+      virtualGalleryState.startIndex = -1;
+      virtualGalleryState.endIndex = -1;
+      if (grid instanceof HTMLElement) {
+        grid.style.paddingTop = '0px';
+        grid.style.paddingBottom = '0px';
+      }
+    }
 
     if (galleryImages.length === 0) {
       grid.innerHTML = '<div class="gallery-empty"><p>No images found in this folder.</p></div>';
@@ -1039,8 +1571,13 @@
       return;
     }
 
-    grid.innerHTML = images.map(({ img, index }) => buildGalleryItemMarkup(img, index)).join('');
-    applyThumbSizeToGrid();
+    if (virtualGalleryState.enabled) {
+      virtualGalleryState.rowHeight = virtualGalleryState.rowHeight > 0 ? virtualGalleryState.rowHeight : estimateGalleryRowHeight();
+      renderVirtualGalleryWindow(true);
+    } else {
+      reconcileGalleryGrid(grid, images);
+      applyThumbSizeToGrid();
+    }
 
     const savedScrollY = parseInt(localStorage.getItem(scrollKey) || '', 10);
     if (!isNaN(savedScrollY) && savedScrollY > 0) {
@@ -1048,6 +1585,12 @@
     }
 
     window.requestAnimationFrame(() => {
+      if (virtualGalleryState.enabled) {
+        updateSelectionToolbar();
+        scheduleVirtualWindowRender(true);
+        return;
+      }
+
       initializeLazyGalleryImages();
       scheduleNearbyRowPreload();
       syncSelectionClasses();
@@ -1154,6 +1697,9 @@
       return;
     }
 
+    /**
+     * Refreshes the compact type-filter label shown in the gallery menu header.
+     */
     const updateTypeFilterSummary = () => {
       if (!(typeFilterSummary instanceof HTMLElement)) {
         return;
@@ -1327,63 +1873,7 @@
       return;
     }
 
-    const currentImage = galleryImages[resolvedIndex] || {};
-
-    item.dataset.name = meta.name;
-    item.dataset.type = meta.type;
-    item.dataset.size = String(meta.size);
-    item.dataset.mtimeMs = String(meta.mtimeMs ?? 0);
-    item.dataset.width = String(meta.width);
-    item.dataset.height = String(meta.height);
-
-    const label = item.querySelector('.gallery-label');
-    if (label) {
-      label.textContent = meta.name;
-    }
-
-    const image = item.querySelector('.gallery-thumb img');
-    if (image instanceof HTMLImageElement) {
-      const nextImageSource = meta.thumbUrl || currentImage.thumbUrl || '';
-      const previousImageSource = image.dataset.src || image.currentSrc || image.src || '';
-      image.dataset.src = nextImageSource;
-
-      if (nextImageSource && nextImageSource !== previousImageSource) {
-        image.dataset.loaded = 'false';
-        image.classList.remove('is-loaded');
-        image.src = EMPTY_IMAGE_SRC;
-      }
-
-      loadGalleryImageIfNearViewport(image);
-    }
-
-    const metaType = item.querySelector('.meta-type');
-    if (metaType) {
-      const extMatch = meta.name.match(/\.([a-z0-9]+)$/i);
-      const ext = extMatch ? extMatch[1].toLowerCase() : '';
-      metaType.className = 'meta-type badge';
-      if ([
-        'png','jpg','jpeg','gif','bmp','webp','svg','tiff','tif','avif','heic','heif','ico'
-      ].includes(ext)) {
-        metaType.classList.add(`badge-ext-${ext}`);
-      }
-      metaType.textContent = getImageTypeLabel(currentImage);
-    }
-
-    const metaSize = item.querySelector('.meta-size');
-    if (metaSize) {
-      metaSize.textContent = formatFileSize(meta.size);
-    }
-
-    const metaDate = item.querySelector('.meta-date');
-    if (metaDate) {
-      metaDate.textContent = formatModifiedDate(meta.mtimeMs);
-    }
-
-    const metaDim = item.querySelector('.meta-dim');
-    const dimVal = formatImageDimensions(meta);
-    if (metaDim) {
-      metaDim.textContent = dimVal;
-    }
+    patchGalleryItemElement(item, galleryImages[resolvedIndex] || meta, resolvedIndex);
   }
 
   /**
@@ -1413,6 +1903,20 @@
       if (itemRequiresFullRerender) {
         requiresFullRerender = true;
       }
+    }
+
+    const hasPendingMetadata = galleryImages.some((image) => isMetadataPending(image));
+    const shouldDeferFullRerender = requiresFullRerender
+      && galleryImages.length >= LARGE_GALLERY_RENDER_THRESHOLD
+      && hasPendingMetadata;
+
+    if (shouldDeferFullRerender) {
+      for (const { index, meta } of pendingMetaUpdates.values()) {
+        patchRenderedItemMeta(index, meta);
+      }
+      syncGalleryLoadingProgressFromImages();
+      pendingMetaUpdates.clear();
+      return;
     }
 
     if (requiresFullRerender) {
@@ -1511,10 +2015,18 @@
       window.vscodeApi.postMessage({ type: 'request-gallery-data' });
     }
     window.addEventListener('scroll', () => {
+      lastScrollAt = Date.now();
       scheduleScrollPositionSave();
+      if (virtualGalleryState.enabled) {
+        scheduleVirtualWindowRender();
+      }
       scheduleNearbyRowPreload();
     }, { passive: true });
     window.addEventListener('resize', () => {
+      if (virtualGalleryState.enabled) {
+        virtualGalleryState.rowHeight = 0;
+        scheduleVirtualWindowRender(true);
+      }
       initializeLazyGalleryImages();
       scheduleNearbyRowPreload();
     }, { passive: true });
@@ -1539,6 +2051,7 @@
         window.cancelAnimationFrame(scheduledNavigationOrderSync);
         scheduledNavigationOrderSync = 0;
       }
+      cancelVirtualWindowRender();
       if (scheduledScrollSave) {
         window.cancelAnimationFrame(scheduledScrollSave);
         scheduledScrollSave = 0;
@@ -1546,6 +2059,9 @@
     });
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
+        if (virtualGalleryState.enabled) {
+          scheduleVirtualWindowRender(true);
+        }
         initializeLazyGalleryImages();
         scheduleNearbyRowPreload();
         if (window.vscodeApi && typeof window.vscodeApi.postMessage === 'function') {
@@ -1566,6 +2082,9 @@
     }
     if (msg.type === 'gallery-data') {
       if (Array.isArray(msg.images)) {
+        const previousGallerySignature = buildGalleryDataSignature(galleryImages);
+        const nextGallerySignature = buildGalleryDataSignature(msg.images);
+        const galleryDataChanged = previousGallerySignature !== nextGallerySignature;
         galleryImages = msg.images;
         lastNavigationOrderSignature = '';
         activeDuplicateGroupKey = '';
@@ -1578,14 +2097,19 @@
         }
         selectionAnchorIndex = selectedIndexes.length > 0 ? selectedIndexes[selectedIndexes.length - 1] : -1;
         localStorage.setItem(window.selectionKey, JSON.stringify(selectedIndexes));
-        if (document.readyState === 'complete' || document.readyState === 'interactive') {
-          scheduleGalleryRefresh();
-          scheduleNavigationOrderSync(true);
-        } else {
-          window.addEventListener('DOMContentLoaded', () => {
+        if (galleryDataChanged) {
+          if (document.readyState === 'complete' || document.readyState === 'interactive') {
             scheduleGalleryRefresh();
             scheduleNavigationOrderSync(true);
-          }, { once: true });
+          } else {
+            window.addEventListener('DOMContentLoaded', () => {
+              scheduleGalleryRefresh();
+              scheduleNavigationOrderSync(true);
+            }, { once: true });
+          }
+        } else {
+          updateGalleryCount(getVisibleGalleryIndexes().length, galleryImages.length);
+          updateSelectionToolbar();
         }
       }
     }
@@ -1621,6 +2145,10 @@
   });
 
   document.addEventListener('click', (event) => {
+    if (Date.now() - lastScrollAt < 150) {
+      return;
+    }
+
     const target = event.target;
     if (!target || !(target instanceof Element)) return;
 
@@ -1694,6 +2222,9 @@
       menu.style.left = `${String(left)}px`;
       menu.style.top = `${String(top)}px`;
 
+      /**
+       * Closes and detaches the current context menu instance.
+       */
       const removeMenu = () => {
         if (menu.parentNode) {
           menu.parentNode.removeChild(menu);
@@ -1843,6 +2374,12 @@
   function adjustThumbSize(delta) {
     currentThumbSize = Math.max(MIN_THUMB_SIZE, Math.min(MAX_THUMB_SIZE, currentThumbSize + delta));
     localStorage.setItem(storageKey, String(currentThumbSize));
+    if (virtualGalleryState.enabled) {
+      virtualGalleryState.rowHeight = 0;
+      renderGallery();
+      return;
+    }
+
     applyThumbSizeToGrid();
     initializeLazyGalleryImages();
     scheduleNearbyRowPreload();

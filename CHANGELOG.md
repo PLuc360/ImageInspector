@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.18.0] - 2026-09-15
+### Changed
+- Cleaned up recent extension and webview code paths by removing dead helpers, tightening inline documentation, and extracting clearer named handlers in the Image Details webview.
+- Clarified the gallery virtualization activation logic so it only turns on once progressive metadata loading has stabilized.
+
+### Fixed
+- Fixed large folder galleries showing visible empty tiles while scrolling during metadata loading by disabling row virtualization until gallery metadata is fully loaded.
+- Fixed some end-of-load gallery refresh cases leaving the visible gallery window out of sync after progressive metadata updates on very large folders.
+
 ## [1.17.0] - 2026-08-28
 ### Added
 - Added a gallery toolbar search field with multi-criteria filtering support, including free-text name matching and structured queries such as `type:png`, `name:warm`, `width>1000`, and `height<=512`.
