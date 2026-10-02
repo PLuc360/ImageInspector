@@ -1498,6 +1498,30 @@
   }
 
   /**
+   * Deletes the current selection using the same optimistic flow as the toolbar button.
+   * A short dedupe window avoids double-processing when both the webview keydown handler
+   * and the VS Code keybinding route fire for the same Delete key press.
+   * @returns {boolean} True when a deletion was scheduled.
+   */
+  function deleteCurrentSelection() {
+    const indexesToRemove = sanitizeSelectedIndexes([...selectedIndexes]);
+    if (indexesToRemove.length === 0) {
+      return false;
+    }
+
+    const now = Date.now();
+    if (now - lastDeleteSelectionRequestAt < 250) {
+      return true;
+    }
+
+    lastDeleteSelectionRequestAt = now;
+    window.requestAnimationFrame(() => {
+      deleteSelectedImages(indexesToRemove);
+    });
+    return true;
+  }
+
+  /**
    * Opens the selected images in the requested comparison mode.
    * @param {'split' | 'side-by-side'} mode Requested comparison mode.
    */
@@ -2004,10 +2028,7 @@
     if (deleteButton instanceof HTMLButtonElement) {
       deleteButton.addEventListener('click', () => {
         showToolbarClickHalo(deleteButton);
-        const indexesToRemove = [...selectedIndexes];
-        window.requestAnimationFrame(() => {
-          deleteSelectedImages(indexesToRemove);
-        });
+        deleteCurrentSelection();
       });
     }
 
@@ -2139,8 +2160,8 @@
       const direction = msg.direction === 'prev' ? 'prev' : 'next';
       selectDuplicateGroupByFilePaths(msg.filePaths, direction);
     }
-    if (msg.type === 'trigger-delete-selected' || msg.type === 'request-delete-selected') {
-      requestDeleteSelectionFromHost();
+    if (msg.type === 'trigger-delete-selected') {
+      deleteCurrentSelection();
     }
   });
 
@@ -2310,34 +2331,6 @@
       || event.keyCode === 8;
   }
 
-  /**
-   * Requests deletion of current selection from the extension host.
-   * Host is responsible for showing the confirmation popup.
-   * @returns {boolean} True when a deletion request was sent.
-   */
-  function requestDeleteSelectionFromHost() {
-    const indexesToRemove = sanitizeSelectedIndexes([...selectedIndexes]);
-    if (indexesToRemove.length === 0) {
-      return false;
-    }
-
-    const now = Date.now();
-    if (now - lastDeleteSelectionRequestAt < 250) {
-      return true;
-    }
-
-    if (window.vscodeApi && typeof window.vscodeApi.postMessage === 'function') {
-      lastDeleteSelectionRequestAt = now;
-      window.vscodeApi.postMessage({
-        type: 'request-delete-selected',
-        indexes: indexesToRemove
-      });
-      return true;
-    }
-
-    return false;
-  }
-
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Control' || event.key === 'Meta') {
       enableWheelZoomListener();
@@ -2353,7 +2346,7 @@
       return;
     }
 
-    const hasDeleted = requestDeleteSelectionFromHost();
+    const hasDeleted = deleteCurrentSelection();
     if (hasDeleted) {
       event.preventDefault();
     }

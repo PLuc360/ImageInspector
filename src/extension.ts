@@ -1246,6 +1246,354 @@ type FileVersionInfo = {
   mtimeMs: number;
 };
 
+type GalleryImageMeta = {
+  src: string;
+  thumbUrl?: string;
+  filePath: string;
+  name: string;
+  type: string;
+  size: number;
+  width: number;
+  height: number;
+  mtimeMs: number;
+  sortMtimeMs?: number;
+};
+
+type PersistedGalleryImageCacheEntry = {
+  versionKey: string;
+  name: string;
+  type: string;
+  size: number;
+  width: number;
+  height: number;
+  mtimeMs: number;
+  thumbUrl: string;
+  sortMtimeMs: number;
+};
+
+type PersistedFolderGalleryCache = {
+  version: 1;
+  folderPath: string;
+  updatedAt: number;
+  items: Record<string, PersistedGalleryImageCacheEntry>;
+};
+
+const PERSISTED_GALLERY_CACHE_VERSION = 1;
+const GALLERY_VERSION_INFO_LOAD_CONCURRENCY = 32;
+
+let galleryPersistentCacheDirectory: vscode.Uri | undefined;
+
+const folderGalleryCacheMemoryStore = new Map<string, PersistedFolderGalleryCache>();
+const folderGalleryCacheWriteTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const folderGalleryCacheWritePromises = new Map<string, Promise<void>>();
+
+/**
+ * Initializes the persistent gallery cache directory inside VS Code storage.
+ *
+ * @param context Extension context used to resolve the storage location.
+ */
+async function initializePersistentGalleryCache(context: vscode.ExtensionContext): Promise<void> {
+  galleryPersistentCacheDirectory = vscode.Uri.joinPath(context.globalStorageUri, 'gallery-cache');
+  await vscode.workspace.fs.createDirectory(galleryPersistentCacheDirectory);
+}
+
+/**
+ * Returns the on-disk cache file path for one folder gallery.
+ *
+ * @param folderPath Absolute folder path.
+ * @returns Cache file URI, or undefined when the storage directory is unavailable.
+ */
+function getFolderGalleryCacheFileUri(folderPath: string): vscode.Uri | undefined {
+  if (!galleryPersistentCacheDirectory) {
+    return undefined;
+  }
+
+  const folderHash = createHash('sha1').update(folderPath).digest('hex');
+  return vscode.Uri.joinPath(galleryPersistentCacheDirectory, `${folderHash}.json`);
+}
+
+/**
+ * Builds an empty persistent cache payload for one gallery folder.
+ *
+ * @param folderPath Absolute folder path.
+ * @returns Empty cache object.
+ */
+function createEmptyFolderGalleryCache(folderPath: string): PersistedFolderGalleryCache {
+  return {
+    version: PERSISTED_GALLERY_CACHE_VERSION,
+    folderPath,
+    updatedAt: Date.now(),
+    items: {}
+  };
+}
+
+/**
+ * Validates one parsed persisted gallery cache entry.
+ *
+ * @param value Parsed JSON value.
+ * @returns True when the value matches the expected persisted entry shape.
+ */
+function isPersistedGalleryImageCacheEntry(value: unknown): value is PersistedGalleryImageCacheEntry {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as Partial<PersistedGalleryImageCacheEntry>;
+  return typeof candidate.versionKey === 'string'
+    && typeof candidate.name === 'string'
+    && typeof candidate.type === 'string'
+    && typeof candidate.size === 'number'
+    && typeof candidate.width === 'number'
+    && typeof candidate.height === 'number'
+    && typeof candidate.mtimeMs === 'number'
+    && typeof candidate.thumbUrl === 'string'
+    && typeof candidate.sortMtimeMs === 'number';
+}
+
+/**
+ * Loads the persisted cache for one folder, keeping a validated in-memory copy.
+ *
+ * @param folderPath Absolute folder path.
+ * @returns Persistent cache object for the folder.
+ */
+async function loadFolderGalleryCache(folderPath: string): Promise<PersistedFolderGalleryCache> {
+  const cached = folderGalleryCacheMemoryStore.get(folderPath);
+  if (cached) {
+    return cached;
+  }
+
+  const cacheFileUri = getFolderGalleryCacheFileUri(folderPath);
+  if (!cacheFileUri) {
+    const emptyCache = createEmptyFolderGalleryCache(folderPath);
+    folderGalleryCacheMemoryStore.set(folderPath, emptyCache);
+    return emptyCache;
+  }
+
+  try {
+    const rawCache = await fs.readFile(cacheFileUri.fsPath, 'utf8');
+    const parsedCache = JSON.parse(rawCache) as {
+      version?: unknown;
+      folderPath?: unknown;
+      updatedAt?: unknown;
+      items?: unknown;
+    };
+
+    const itemsRecord: Record<string, PersistedGalleryImageCacheEntry> = {};
+    if (parsedCache.items && typeof parsedCache.items === 'object') {
+      for (const [filePath, entry] of Object.entries(parsedCache.items as Record<string, unknown>)) {
+        if (typeof filePath === 'string' && isPersistedGalleryImageCacheEntry(entry)) {
+          itemsRecord[filePath] = entry;
+        }
+      }
+    }
+
+    const normalizedCache: PersistedFolderGalleryCache = {
+      version: PERSISTED_GALLERY_CACHE_VERSION,
+      folderPath,
+      updatedAt: typeof parsedCache.updatedAt === 'number' ? parsedCache.updatedAt : 0,
+      items: itemsRecord
+    };
+
+    folderGalleryCacheMemoryStore.set(folderPath, normalizedCache);
+    return normalizedCache;
+  } catch {
+    const emptyCache = createEmptyFolderGalleryCache(folderPath);
+    folderGalleryCacheMemoryStore.set(folderPath, emptyCache);
+    return emptyCache;
+  }
+}
+
+/**
+ * Writes one folder cache to disk.
+ *
+ * @param folderPath Absolute folder path.
+ */
+async function persistFolderGalleryCache(folderPath: string): Promise<void> {
+  const cacheFileUri = getFolderGalleryCacheFileUri(folderPath);
+  const cachePayload = folderGalleryCacheMemoryStore.get(folderPath);
+  if (!cacheFileUri || !cachePayload) {
+    return;
+  }
+
+  cachePayload.updatedAt = Date.now();
+  await fs.writeFile(cacheFileUri.fsPath, JSON.stringify(cachePayload), 'utf8');
+}
+
+/**
+ * Schedules one batched disk write for a folder gallery cache.
+ *
+ * @param folderPath Absolute folder path.
+ */
+function scheduleFolderGalleryCachePersist(folderPath: string): void {
+  const existingTimer = folderGalleryCacheWriteTimers.get(folderPath);
+  if (existingTimer) {
+    clearTimeout(existingTimer);
+  }
+
+  const nextTimer = setTimeout(() => {
+    folderGalleryCacheWriteTimers.delete(folderPath);
+    const writePromise = persistFolderGalleryCache(folderPath)
+      .catch(() => {
+        // Ignore cache write errors and continue with runtime behavior.
+      })
+      .finally(() => {
+        folderGalleryCacheWritePromises.delete(folderPath);
+      });
+    folderGalleryCacheWritePromises.set(folderPath, writePromise);
+  }, 200);
+
+  folderGalleryCacheWriteTimers.set(folderPath, nextTimer);
+}
+
+/**
+ * Removes one image entry from the persisted folder cache.
+ *
+ * @param folderPath Absolute folder path.
+ * @param filePath Absolute image file path.
+ */
+async function removePersistedGalleryImageMeta(folderPath: string, filePath: string): Promise<void> {
+  const cachePayload = await loadFolderGalleryCache(folderPath);
+  if (!(filePath in cachePayload.items)) {
+    return;
+  }
+
+  delete cachePayload.items[filePath];
+  scheduleFolderGalleryCachePersist(folderPath);
+}
+
+/**
+ * Converts one persisted cache entry back to runtime gallery metadata.
+ *
+ * @param filePath Absolute image file path.
+ * @param entry Persisted cache entry.
+ * @returns Runtime gallery metadata.
+ */
+function toGalleryImageMeta(filePath: string, entry: PersistedGalleryImageCacheEntry): GalleryImageMeta {
+  return {
+    src: '',
+    thumbUrl: entry.thumbUrl,
+    filePath,
+    name: entry.name,
+    type: entry.type,
+    size: entry.size,
+    width: entry.width,
+    height: entry.height,
+    mtimeMs: entry.mtimeMs,
+    sortMtimeMs: entry.sortMtimeMs
+  };
+}
+
+/**
+ * Restores cached gallery metadata when the file version still matches.
+ *
+ * @param folderPath Absolute folder path.
+ * @param filePath Absolute image file path.
+ * @param fileVersionInfo Current file version information.
+ * @returns Cached gallery metadata when available and still valid.
+ */
+async function getPersistedGalleryImageMeta(
+  folderPath: string,
+  filePath: string,
+  fileVersionInfo: FileVersionInfo
+): Promise<GalleryImageMeta | undefined> {
+  const cachePayload = await loadFolderGalleryCache(folderPath);
+  const cachedEntry = cachePayload.items[filePath];
+  if (!cachedEntry || cachedEntry.versionKey !== fileVersionInfo.key) {
+    return undefined;
+  }
+
+  setBoundedCachedValue(galleryThumbnailCache, fileVersionInfo.key, cachedEntry.thumbUrl, MAX_GALLERY_THUMBNAIL_CACHE_ENTRIES);
+  return toGalleryImageMeta(filePath, cachedEntry);
+}
+
+/**
+ * Stores one fully resolved gallery metadata entry in the persistent folder cache.
+ *
+ * @param folderPath Absolute folder path.
+ * @param fileVersionInfo Current file version information.
+ * @param meta Runtime gallery metadata to persist.
+ */
+async function persistGalleryImageMeta(
+  folderPath: string,
+  fileVersionInfo: FileVersionInfo,
+  meta: GalleryImageMeta
+): Promise<void> {
+  const cachePayload = await loadFolderGalleryCache(folderPath);
+  cachePayload.items[meta.filePath] = {
+    versionKey: fileVersionInfo.key,
+    name: meta.name,
+    type: meta.type,
+    size: meta.size,
+    width: meta.width,
+    height: meta.height,
+    mtimeMs: meta.mtimeMs,
+    thumbUrl: meta.thumbUrl ?? '',
+    sortMtimeMs: meta.sortMtimeMs ?? meta.mtimeMs
+  };
+  scheduleFolderGalleryCachePersist(folderPath);
+}
+
+/**
+ * Loads current file version information for a list of images with bounded concurrency.
+ *
+ * @param imagePaths Absolute image file paths.
+ * @returns Version info map keyed by file path.
+ */
+async function loadGalleryFileVersionInfos(imagePaths: readonly string[]): Promise<Map<string, FileVersionInfo>> {
+  const versionInfoByPath = new Map<string, FileVersionInfo>();
+
+  await processWithConcurrencyLimit(imagePaths, GALLERY_VERSION_INFO_LOAD_CONCURRENCY, async (filePath) => {
+    try {
+      const versionInfo = await getFileVersionInfo(filePath);
+      versionInfoByPath.set(filePath, versionInfo);
+    } catch {
+      // Ignore files that disappear during scan.
+    }
+  });
+
+  return versionInfoByPath;
+}
+
+/**
+ * Resolves gallery metadata, preferring the persistent folder cache before recomputing.
+ *
+ * @param folderPath Absolute folder path.
+ * @param filePath Absolute image file path.
+ * @param fileVersionInfo Current file version information.
+ * @returns Fully resolved gallery metadata.
+ */
+async function resolveGalleryImageMeta(
+  folderPath: string,
+  filePath: string,
+  fileVersionInfo: FileVersionInfo
+): Promise<GalleryImageMeta> {
+  const persistedMeta = await getPersistedGalleryImageMeta(folderPath, filePath, fileVersionInfo);
+  if (persistedMeta) {
+    return persistedMeta;
+  }
+
+  const [details, thumbUrl] = await Promise.all([
+    getImageDetails(filePath, fileVersionInfo),
+    getGalleryThumbnailSource(filePath, fileVersionInfo)
+  ]);
+
+  const resolvedMeta: GalleryImageMeta = {
+    src: '',
+    thumbUrl,
+    filePath,
+    name: details.fileName,
+    type: details.format,
+    size: details.sizeBytes,
+    width: details.width,
+    height: details.height,
+    mtimeMs: fileVersionInfo.mtimeMs,
+    sortMtimeMs: fileVersionInfo.mtimeMs
+  };
+
+  await persistGalleryImageMeta(folderPath, fileVersionInfo, resolvedMeta);
+  return resolvedMeta;
+}
+
 /**
  * Builds a stable cache key that encodes the file path, size and modification timestamp.
  *
@@ -1446,11 +1794,10 @@ class ImageFolderGalleryPanel {
   private readonly panel: vscode.WebviewPanel;
   private readonly folderUri: vscode.Uri;
   private readonly extensionUri: vscode.Uri;
-  private readonly imageFiles: Array<{ src: string; thumbUrl?: string; filePath: string; name: string; type: string; size: number; width: number; height: number; mtimeMs: number; sortMtimeMs?: number }>;
+  private readonly imageFiles: GalleryImageMeta[];
   private readonly panelDisposables: vscode.Disposable[] = [];
   private duplicateResultsPanel: vscode.WebviewPanel | undefined;
   private isDisposed = false;
-  private deleteSelectionConfirmationInProgress = false;
   private refreshGeneration = 0;
   private duplicateScanGeneration = 0;
   private duplicateScanRunning = false;
@@ -1540,28 +1887,16 @@ class ImageFolderGalleryPanel {
 
     try {
       const fileVersionInfo = await getFileVersionInfo(changedFilePath);
-      const details = await getImageDetails(changedFilePath, fileVersionInfo);
-      const thumbUrl = await getGalleryThumbnailSource(changedFilePath, fileVersionInfo);
+      const updatedMeta = await resolveGalleryImageMeta(parentFolder, changedFilePath, fileVersionInfo);
 
       const currentIndex = galleryPanel.imageFiles.findIndex((img) => img.filePath === changedFilePath);
       if (currentIndex === -1) {
         return;
       }
 
-      const updatedMeta = {
-        src: '',
-        thumbUrl,
-        filePath: changedFilePath,
-        name: details.fileName,
-        type: details.format,
-        size: details.sizeBytes,
-        width: details.width,
-        height: details.height,
-        mtimeMs: fileVersionInfo.mtimeMs,
-        sortMtimeMs: galleryPanel.imageFiles[currentIndex]?.sortMtimeMs
-          ?? galleryPanel.imageFiles[currentIndex]?.mtimeMs
-          ?? fileVersionInfo.mtimeMs
-      };
+      updatedMeta.sortMtimeMs = galleryPanel.imageFiles[currentIndex]?.sortMtimeMs
+        ?? galleryPanel.imageFiles[currentIndex]?.mtimeMs
+        ?? fileVersionInfo.mtimeMs;
 
       galleryPanel.imageFiles[currentIndex] = updatedMeta;
       await galleryPanel.panel.webview.postMessage({
@@ -1586,18 +1921,39 @@ class ImageFolderGalleryPanel {
       return;
     }
 
+    const versionInfoByPath = await loadGalleryFileVersionInfos(imagePaths);
+    const initialImageFiles: GalleryImageMeta[] = [];
+    const pendingImagePaths: string[] = [];
+
+    for (const filePath of imagePaths) {
+      const fileVersionInfo = versionInfoByPath.get(filePath);
+      if (!fileVersionInfo) {
+        continue;
+      }
+
+      const persistedMeta = await getPersistedGalleryImageMeta(folderPath, filePath, fileVersionInfo);
+      if (persistedMeta) {
+        initialImageFiles.push(persistedMeta);
+        continue;
+      }
+
+      pendingImagePaths.push(filePath);
+      initialImageFiles.push({
+        src: '',
+        thumbUrl: '',
+        filePath,
+        name: path.basename(filePath),
+        type: 'Loading...',
+        size: 0,
+        width: 0,
+        height: 0,
+        mtimeMs: fileVersionInfo.mtimeMs,
+        sortMtimeMs: fileVersionInfo.mtimeMs
+      });
+    }
+
     this.imageFiles.length = 0;
-    this.imageFiles.push(...imagePaths.map((filePath) => ({
-      src: '',
-      thumbUrl: '',
-      filePath,
-      name: path.basename(filePath),
-      type: 'Loading...',
-      size: 0,
-      width: 0,
-      height: 0,
-      mtimeMs: 0
-    })));
+    this.imageFiles.push(...initialImageFiles);
 
     const settings = getImageInspectorSettings();
     this.panel.title = `Gallery: ${path.basename(folderPath)}`;
@@ -1609,17 +1965,17 @@ class ImageFolderGalleryPanel {
       {
         themeAccentRgb: settings.themeAccentRgb,
         initialProgress: {
-          active: imagePaths.length > 0,
-          completed: 0,
-          total: imagePaths.length,
+          active: pendingImagePaths.length > 0,
+          completed: initialImageFiles.length - pendingImagePaths.length,
+          total: initialImageFiles.length,
           label: 'Loading gallery metadata...'
         }
       }
     );
 
     const initialRefreshGeneration = this.refreshGeneration;
-    const initialTotal = imagePaths.length;
-    let initialCompleted = 0;
+    const initialTotal = this.imageFiles.length;
+    let initialCompleted = initialTotal - pendingImagePaths.length;
     const postInitialProgress = (force = false): void => {
       if (this.isDisposed || initialRefreshGeneration !== this.refreshGeneration) {
         return;
@@ -1650,36 +2006,36 @@ class ImageFolderGalleryPanel {
       return;
     }
 
+    if (pendingImagePaths.length === 0) {
+      void this.panel.webview.postMessage({
+        type: 'gallery-load-progress',
+        active: false,
+        completed: initialTotal,
+        total: initialTotal,
+        label: 'Loading gallery metadata...'
+      });
+      return;
+    }
+
     const metadataLoadConcurrency = getGalleryMetadataLoadConcurrency();
 
-    void processWithConcurrencyLimit(imagePaths, metadataLoadConcurrency, async (filePath) => {
+    void processWithConcurrencyLimit(pendingImagePaths, metadataLoadConcurrency, async (filePath) => {
       try {
         if (this.isDisposed || initialRefreshGeneration !== this.refreshGeneration) {
           return;
         }
 
-        const fileVersionInfo = await getFileVersionInfo(filePath);
-        const [details, thumbUrl] = await Promise.all([
-          getImageDetails(filePath, fileVersionInfo),
-          getGalleryThumbnailSource(filePath, fileVersionInfo)
-        ]);
+        const fileVersionInfo = versionInfoByPath.get(filePath);
+        if (!fileVersionInfo) {
+          return;
+        }
+
+        const updatedMeta = await resolveGalleryImageMeta(folderPath, filePath, fileVersionInfo);
 
         if (this.isDisposed || initialRefreshGeneration !== this.refreshGeneration) {
           return;
         }
 
-        const updatedMeta = {
-          src: '',
-          thumbUrl,
-          filePath,
-          name: details.fileName,
-          type: details.format,
-          size: details.sizeBytes,
-          width: details.width,
-          height: details.height,
-          mtimeMs: fileVersionInfo.mtimeMs,
-          sortMtimeMs: fileVersionInfo.mtimeMs
-        };
         const currentIndex = this.imageFiles.findIndex((img) => img.filePath === filePath);
         if (currentIndex === -1) {
           return;
@@ -2172,6 +2528,7 @@ class ImageFolderGalleryPanel {
                 }
 
                 await fs.unlink(img.filePath);
+                await removePersistedGalleryImageMeta(this.folderUri.fsPath, img.filePath);
                 deletedPaths.add(img.filePath);
               } catch (err) {
                 // eslint-disable-next-line no-console
@@ -2221,38 +2578,6 @@ class ImageFolderGalleryPanel {
         // Handle duplicate search requests from gallery or duplicate panels.
         if (message.type === 'start-duplicate-search') {
           void this.startDuplicateSearch();
-          return;
-        }
-        if (message.type === 'request-delete-selected') {
-          if (this.deleteSelectionConfirmationInProgress) {
-            return;
-          }
-
-          const indexes = normalizeGalleryIndexes(message.indexes);
-          if (indexes.length === 0) {
-            return;
-          }
-
-          this.deleteSelectionConfirmationInProgress = true;
-          try {
-            const confirmationAction = 'Delete';
-            const confirmationMessage = indexes.length === 1
-              ? 'Delete the selected image?'
-              : `Delete ${indexes.length} selected images?`;
-            const confirmedAction = await vscode.window.showWarningMessage(
-              confirmationMessage,
-              { modal: true },
-              confirmationAction
-            );
-
-            if (confirmedAction !== confirmationAction) {
-              return;
-            }
-
-            await removeGalleryImagesByIndexes(indexes);
-          } finally {
-            this.deleteSelectionConfirmationInProgress = false;
-          }
           return;
         }
         // Handle image removal requests.
@@ -2329,6 +2654,8 @@ class ImageFolderGalleryPanel {
  * @param context Extension context.
  */
 export function activate(context: vscode.ExtensionContext): void {
+  void initializePersistentGalleryCache(context);
+
   const provider = new ImageDetailsCustomEditorProvider(context);
 
   const providerDisposable = vscode.window.registerCustomEditorProvider(
