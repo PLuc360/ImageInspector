@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.18.1] - 2026-10-02
+### Changed
+- Improved gallery reopen performance by persisting folder gallery metadata and thumbnails in VS Code storage and reusing cached entries when files are unchanged.
+- Unified gallery deletion so the toolbar button and `Delete`/`Backspace` shortcuts now use the same fast optimistic removal flow.
+
+### Fixed
+- Fixed stale persisted gallery cache entries by invalidating them when images are updated or deleted.
+- Fixed duplicate search navigation in very large galleries by restoring correct focus/scroll behavior when the target duplicate image is outside the current virtualized DOM window.
+
 ## [1.18.0] - 2026-09-15
 ### Changed
 - Cleaned up recent extension and webview code paths by removing dead helpers, tightening inline documentation, and extracting clearer named handlers in the Image Details webview.

@@ -640,11 +640,7 @@
     localStorage.setItem(window.selectionKey, JSON.stringify(selectedIndexes));
 
     const focusedIndex = nextSelectedIndexes[Math.min(Math.max(activeDuplicateFocusIndex, 0), nextSelectedIndexes.length - 1)];
-    const focusedItem = document.querySelector(`.gallery-item[data-index="${focusedIndex}"]`);
-    if (focusedItem instanceof HTMLElement) {
-      showToolbarClickHalo(focusedItem);
-      focusedItem.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
-    }
+    focusGalleryItemByIndex(focusedIndex);
   }
 
   /**
@@ -1248,6 +1244,71 @@
         return parseInt(element.dataset.index ?? '-1', 10);
       })
       .filter((index) => Number.isInteger(index) && index >= 0);
+  }
+
+  /**
+   * Finds the current filtered/sorted position for one gallery index.
+   * @param {number} galleryIndex Gallery item index.
+   * @returns {number} Position in current rendered order, or -1 when unavailable.
+   */
+  function getRenderedOrderPositionForGalleryIndex(galleryIndex) {
+    if (!Number.isInteger(galleryIndex) || galleryIndex < 0) {
+      return -1;
+    }
+
+    if (virtualGalleryState.enabled && Array.isArray(virtualGalleryState.images) && virtualGalleryState.images.length > 0) {
+      return virtualGalleryState.images.findIndex((entry) => entry?.index === galleryIndex);
+    }
+
+    return currentRenderedOrderIndexes.indexOf(galleryIndex);
+  }
+
+  /**
+   * Reveals one gallery item inside the virtualized window so it can be focused.
+   * @param {number} galleryIndex Gallery item index.
+   * @returns {boolean} True when the virtual window was adjusted.
+   */
+  function revealVirtualGalleryIndex(galleryIndex) {
+    if (!virtualGalleryState.enabled || !(virtualGalleryState.grid instanceof HTMLElement)) {
+      return false;
+    }
+
+    const itemPosition = getRenderedOrderPositionForGalleryIndex(galleryIndex);
+    if (itemPosition < 0) {
+      return false;
+    }
+
+    const columnCount = Math.max(1, virtualGalleryState.columnCount || getGalleryGridColumnCount(virtualGalleryState.grid));
+    const rowHeight = Math.max(1, virtualGalleryState.rowHeight || estimateGalleryRowHeight());
+    const targetRow = Math.floor(itemPosition / columnCount);
+    const gridTop = virtualGalleryState.grid.getBoundingClientRect().top + window.scrollY;
+    const viewportHeight = Math.max(window.innerHeight || document.documentElement.clientHeight || 0, rowHeight);
+    const targetScrollY = Math.max(0, gridTop + (targetRow * rowHeight) - Math.max(0, (viewportHeight - rowHeight) / 2));
+
+    virtualGalleryState.rowHeight = rowHeight;
+    window.scrollTo({ top: targetScrollY, behavior: 'smooth' });
+    renderVirtualGalleryWindow(true);
+    return true;
+  }
+
+  /**
+   * Highlights and scrolls one gallery item into view.
+   * @param {number} galleryIndex Gallery item index.
+   */
+  function focusGalleryItemByIndex(galleryIndex) {
+    if (!Number.isInteger(galleryIndex) || galleryIndex < 0) {
+      return;
+    }
+
+    let focusedItem = document.querySelector(`.gallery-item[data-index="${galleryIndex}"]`);
+    if (!(focusedItem instanceof HTMLElement) && revealVirtualGalleryIndex(galleryIndex)) {
+      focusedItem = document.querySelector(`.gallery-item[data-index="${galleryIndex}"]`);
+    }
+
+    if (focusedItem instanceof HTMLElement) {
+      showToolbarClickHalo(focusedItem);
+      focusedItem.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+    }
   }
 
   /**
