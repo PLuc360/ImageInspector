@@ -1790,6 +1790,7 @@ function getGalleryMetadataLoadConcurrency(): number {
  * One panel is kept alive per folder path.
  */
 class ImageFolderGalleryPanel {
+  static readonly viewType = 'imageInspector.folderGallery';
   private static readonly activePanels = new Map<string, ImageFolderGalleryPanel>();
   private readonly panel: vscode.WebviewPanel;
   private readonly folderUri: vscode.Uri;
@@ -1820,17 +1821,23 @@ class ImageFolderGalleryPanel {
   static async open(
     folderUri: vscode.Uri,
     context: vscode.ExtensionContext,
-    provider: ImageDetailsCustomEditorProvider
+    provider: ImageDetailsCustomEditorProvider,
+    restoredPanel?: vscode.WebviewPanel
   ): Promise<void> {
     const folderPath = folderUri.fsPath;
     const existing = ImageFolderGalleryPanel.activePanels.get(folderPath);
     if (existing) {
+      if (restoredPanel) {
+        restoredPanel.dispose();
+        return;
+      }
+
       existing.panel.reveal();
       void existing.refreshFromSettings(getImageInspectorSettings());
       return;
     }
 
-    const instance = new ImageFolderGalleryPanel(folderUri, context, provider);
+    const instance = new ImageFolderGalleryPanel(folderUri, context, provider, restoredPanel);
     ImageFolderGalleryPanel.activePanels.set(folderPath, instance);
 
     try {
@@ -2438,11 +2445,13 @@ class ImageFolderGalleryPanel {
    * @param folderUri URI of the folder being displayed.
    * @param context Extension context.
    * @param provider Shared image details provider used to open comparisons.
+   * @param restoredPanel Optional panel restored by VS Code to reuse instead of creating a new one.
    */
   private constructor(
     folderUri: vscode.Uri,
     context: vscode.ExtensionContext,
-    provider: ImageDetailsCustomEditorProvider
+    provider: ImageDetailsCustomEditorProvider,
+    restoredPanel?: vscode.WebviewPanel
   ) {
     this.folderUri = folderUri;
     this.extensionUri = context.extensionUri;
@@ -2450,19 +2459,27 @@ class ImageFolderGalleryPanel {
     const folderName = path.basename(folderUri.fsPath);
     const settings = getImageInspectorSettings();
 
-    this.panel = vscode.window.createWebviewPanel(
-      'imageInspector.folderGallery',
-      `Gallery: ${folderName} — loading...`,
-      vscode.ViewColumn.One,
-      {
-        enableScripts: true,
-        retainContextWhenHidden: true,
-        localResourceRoots: [
-          vscode.Uri.joinPath(context.extensionUri, 'media'),
-          vscode.Uri.file(folderUri.fsPath)
-        ]
-      }
-    );
+    const panelOptions: vscode.WebviewPanelOptions & vscode.WebviewOptions = {
+      enableScripts: true,
+      retainContextWhenHidden: true,
+      localResourceRoots: [
+        vscode.Uri.joinPath(context.extensionUri, 'media'),
+        vscode.Uri.file(folderUri.fsPath)
+      ]
+    };
+
+    if (restoredPanel) {
+      this.panel = restoredPanel;
+      this.panel.title = `Gallery: ${folderName} — loading...`;
+      this.panel.webview.options = panelOptions;
+    } else {
+      this.panel = vscode.window.createWebviewPanel(
+        ImageFolderGalleryPanel.viewType,
+        `Gallery: ${folderName} — loading...`,
+        vscode.ViewColumn.One,
+        panelOptions
+      );
+    }
 
     this.panel.webview.html = buildFolderGalleryLoadingWebview(
       this.panel.webview,
@@ -2733,6 +2750,41 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   );
 
+  const galleryPanelSerializerDisposable = vscode.window.registerWebviewPanelSerializer(
+    ImageFolderGalleryPanel.viewType,
+    {
+      /**
+       * Restores a folder gallery panel after VS Code restarts.
+       *
+       * @param restoredPanel Panel recreated by VS Code.
+       * @param state State saved by the gallery webview.
+       */
+      async deserializeWebviewPanel(restoredPanel: vscode.WebviewPanel, state: unknown): Promise<void> {
+        const folderPath = state && typeof state === 'object' && 'folderPath' in state
+          ? (state as { folderPath?: unknown }).folderPath
+          : undefined;
+
+        if (typeof folderPath !== 'string' || folderPath.length === 0) {
+          restoredPanel.dispose();
+          return;
+        }
+
+        try {
+          const stats = await fs.stat(folderPath);
+          if (!stats.isDirectory()) {
+            restoredPanel.dispose();
+            return;
+          }
+        } catch {
+          restoredPanel.dispose();
+          return;
+        }
+
+        await ImageFolderGalleryPanel.open(vscode.Uri.file(folderPath), context, provider, restoredPanel);
+      }
+    }
+  );
+
   const deleteSelectedGalleryImagesDisposable = vscode.commands.registerCommand(
     'imageInspector.deleteSelectedGalleryImages',
     async () => {
@@ -2758,6 +2810,7 @@ export function activate(context: vscode.ExtensionContext): void {
     configurationChangeDisposable,
     activeColorThemeChangeDisposable,
     openFolderGalleryDisposable,
+    galleryPanelSerializerDisposable,
     deleteSelectedGalleryImagesDisposable,
     pickThemeAccentColorDisposable
   );

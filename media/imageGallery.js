@@ -8,6 +8,8 @@
 
   window.vscodeApi = window.vscodeApi || (typeof window.acquireVsCodeApi === 'function' ? window.acquireVsCodeApi() : undefined);
   const galleryId = document.body?.dataset?.galleryId || location.pathname;
+  // Persist the folder path so VS Code can restore this gallery after a restart.
+  window.vscodeApi?.setState({ folderPath: galleryId });
   const storageKey = `galleryThumbSize:${galleryId}`;
   const galleryStateKey = `galleryViewState:${galleryId}`;
   window.selectionKey = `gallerySelectedIndexes:${galleryId}`;

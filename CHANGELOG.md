@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [1.19.0] - 2026-10-08
 ### Added
 - Added an anti-aliasing toggle button ("AA") in the Image Details toolbar to switch between smooth and pixelated image rendering.
+- Folder galleries are now restored when VS Code restarts, like opened image files.
 
 ## [1.18.1] - 2026-10-02
 ### Changed
