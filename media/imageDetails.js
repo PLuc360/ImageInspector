@@ -54,6 +54,7 @@ const zoomOutButton = document.getElementById('zoom-out');
 const zoomResetButton = document.getElementById('zoom-reset');
 const zoomFitButton = document.getElementById('zoom-fit');
 const customBackgroundToggleButton = document.getElementById('custom-background-toggle');
+const antialiasingToggleButton = document.getElementById('antialiasing-toggle');
 const galleryNavPrevButton = document.getElementById('gallery-nav-prev');
 const galleryNavNextButton = document.getElementById('gallery-nav-next');
 const galleryNavPositionLabel = document.getElementById('gallery-nav-position');
@@ -108,6 +109,7 @@ let pipetteMode = false;
 let pipetteResultFadeTimeoutId = null;
 let pipetteResultHideTimeoutId = null;
 let customBackgroundEnabled = false;
+let antialiasingEnabled = false;
 const INFO_OVERLAY_STORAGE_KEY = 'imageDetails.infoOverlayVisible';
 const INFO_OVERLAY_POSITION_STORAGE_KEY = 'imageDetails.infoOverlayPosition';
 const COMPARE_DIFF_SENSITIVITY_STORAGE_KEY = 'imageDetails.compareDiffSensitivity';
@@ -1007,6 +1009,29 @@ function applyPreviewBackgroundRgb(backgroundRgb) {
   }
 
   layoutElement.style.setProperty('--image-details-custom-background-rgb', backgroundRgb.trim());
+}
+
+/**
+ * Applies the anti-aliasing state to the preview images and the toolbar toggle.
+ * When disabled, images are rendered with nearest-neighbor (pixelated) scaling.
+ */
+function updateAntialiasingToggleUi() {
+  [image, compareImage].forEach((imageElement) => {
+    imageElement?.classList.toggle('img-pixelated', !antialiasingEnabled);
+  });
+
+  if (!antialiasingToggleButton) {
+    return;
+  }
+
+  const nextLabel = antialiasingEnabled
+    ? 'Disable anti-aliasing'
+    : 'Enable anti-aliasing';
+
+  antialiasingToggleButton.classList.toggle('is-active', antialiasingEnabled);
+  antialiasingToggleButton.setAttribute('aria-pressed', antialiasingEnabled ? 'true' : 'false');
+  antialiasingToggleButton.setAttribute('aria-label', nextLabel);
+  antialiasingToggleButton.setAttribute('title', nextLabel);
 }
 
 /**
@@ -4077,6 +4102,11 @@ bindClickAction(zoomFitButton, () => {
 
 bindClickAction(customBackgroundToggleButton, () => {
   setCustomBackgroundEnabled(!customBackgroundEnabled);
+});
+
+bindClickAction(antialiasingToggleButton, () => {
+  antialiasingEnabled = !antialiasingEnabled;
+  updateAntialiasingToggleUi();
 });
 
 bindClickAction(rotateLeftButton, () => {

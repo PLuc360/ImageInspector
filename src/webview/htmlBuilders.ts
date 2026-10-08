@@ -285,6 +285,9 @@ export function buildCustomEditorWebview(
           <button id="custom-background-toggle" type="button" title="Use custom background" aria-label="Use custom background" aria-pressed="false">
             <span class="icon" aria-hidden="true">◪</span>
           </button>
+          <button id="antialiasing-toggle" type="button" title="Enable anti-aliasing" aria-label="Enable anti-aliasing" aria-pressed="false">
+            <span class="icon" aria-hidden="true">AA</span>
+          </button>
           <button id="pipette-tool" type="button" title="Color picker" aria-label="Color picker">
             <span class="icon" aria-hidden="true">
               <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="svg-inline-middle">
