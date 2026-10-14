@@ -62,6 +62,7 @@ export function buildCustomEditorWebview(
     themeAccentRgb?: string;
     previewBackgroundRgb?: string;
     saveEditsToOriginalFile?: boolean;
+    autoCropSensitivity?: number;
     canUndoPersistedEdit?: boolean;
     canRedoPersistedEdit?: boolean;
     icoVariants?: IcoVariantViewModel[];
@@ -83,6 +84,7 @@ export function buildCustomEditorWebview(
   const themeAccentRgb = options?.themeAccentRgb ?? '0,200,110';
   const previewBackgroundRgb = options?.previewBackgroundRgb ?? '32,32,32';
   const saveEditsToOriginalFile = options?.saveEditsToOriginalFile ?? false;
+  const autoCropSensitivity = Math.min(64, Math.max(0, Math.round(options?.autoCropSensitivity ?? 12)));
   const canUndoPersistedEdit = options?.canUndoPersistedEdit ?? false;
   const canRedoPersistedEdit = options?.canRedoPersistedEdit ?? false;
   const loupeDiameter = options?.pipetteLoupeDiameter ?? 96;
@@ -259,6 +261,7 @@ export function buildCustomEditorWebview(
           <button id="crop-apply" type="button" class="is-hidden" title="Apply crop" aria-label="Apply crop">
             <span class="icon" aria-hidden="true">✓</span>
           </button>
+          <input id="crop-sensitivity" class="is-hidden" type="range" min="0" max="64" step="1" value="${String(autoCropSensitivity)}" title="Border detection sensitivity" aria-label="Border detection sensitivity">
           <button id="transform-undo" type="button" title="Reset crop or undo last transform" aria-label="Reset crop or undo last transform">
             <span class="icon" aria-hidden="true">↶</span>
           </button>

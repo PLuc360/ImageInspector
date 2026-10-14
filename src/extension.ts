@@ -45,8 +45,8 @@ interface ImageInspectorSettings {
   themeAccentRgb: string;
   previewBackgroundRgb: string;
   saveEditsToOriginalFile: boolean;
-  pipetteLoupeDiameter: number;
-  pipetteLoupeVirtualResolution: number;
+  autoCropSensitivity: number;
+  pipetteLoupeDiameter: number;  pipetteLoupeVirtualResolution: number;
   pipetteLoupeZoomAtMinImageZoom: number;
   pipetteLoupeZoomAtMaxImageZoom: number;
 }
@@ -204,8 +204,17 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
             return;
           }
 
-          const webviewMessage = message as { type: string; direction?: string; axis?: string; bounds?: CropBounds };
+          const webviewMessage = message as { type: string; direction?: string; axis?: string; bounds?: CropBounds; value?: number };
           const currentImageUri = this.openPanels.get(webviewPanel) ?? document.uri;
+          if (webviewMessage.type === 'set-auto-crop-sensitivity') {
+            if (typeof webviewMessage.value === 'number' && Number.isFinite(webviewMessage.value)) {
+              void vscode.workspace
+                .getConfiguration('imageInspector')
+                .update('autoCropSensitivity', clampInteger(webviewMessage.value, 0, 64), vscode.ConfigurationTarget.Global);
+            }
+            return;
+          }
+
           if (webviewMessage.type === 'pick-compare-image') {
             void this.promptComparisonImageForPanel(webviewPanel, currentImageUri);
             return;
@@ -408,6 +417,7 @@ class ImageDetailsCustomEditorProvider implements vscode.CustomReadonlyEditorPro
         toolbarPosition: settings.toolbarPosition,
         themeAccentRgb: settings.themeAccentRgb,
         saveEditsToOriginalFile: settings.saveEditsToOriginalFile,
+        autoCropSensitivity: settings.autoCropSensitivity,
         canUndoPersistedEdit: this.canUndoPersistedEdit(filePath),
         canRedoPersistedEdit: this.canRedoPersistedEdit(filePath),
         icoVariants,
@@ -3303,6 +3313,7 @@ function getImageInspectorSettings(): ImageInspectorSettings {
     themeAccentRgb: resolveThemeAccentRgb(themeAccentColor),
     previewBackgroundRgb: resolvePreviewBackgroundRgb(imageDetailsBackgroundColor),
     saveEditsToOriginalFile: imageInspectorConfig.get<boolean>('saveEditsToOriginalFile', true),
+    autoCropSensitivity: clampInteger(imageInspectorConfig.get<number>('autoCropSensitivity', 12), 0, 64),
     pipetteLoupeDiameter: clampInteger(imageInspectorConfig.get<number>('pipetteLoupeDiameter', 96), 48, 256),
     pipetteLoupeVirtualResolution: clampInteger(
       imageInspectorConfig.get<number>('pipetteLoupeVirtualResolution', 25),

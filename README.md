@@ -208,6 +208,14 @@ Recommended flow:
 2. npm run compile
 3. Press F5 in VS Code to start Extension Development Host
 
+Build the VSIX package:
+
+```sh
+npx @vscode/vsce package
+```
+
+This runs `npm run compile` (via `vscode:prepublish`) and generates `image-inspector-<version>.vsix` at the project root.
+
 
 ## License
 
@@ -425,6 +433,14 @@ Cycle recommandé:
 1. npm install
 2. npm run compile
 3. F5 dans VS Code pour ouvrir un Extension Development Host
+
+Générer le package VSIX:
+
+```sh
+npx @vscode/vsce package
+```
+
+Cette commande lance `npm run compile` (via `vscode:prepublish`) et génère `image-inspector-<version>.vsix` à la racine du projet.
 
 ## Licence
 

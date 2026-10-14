@@ -2,7 +2,7 @@
   "name": "image-inspector",
   "displayName": "Image Inspector",
   "description": "Displays image information (dimensions, size, format, metadata).",
-  "version": "1.19.0",
+  "version": "1.20.0",
   "publisher": "pierre-luc-guegan",
   "icon": "assets/icon.png",
   "repository": {
@@ -51,6 +51,13 @@
           "enum": ["top", "bottom", "left", "right"],
           "default": "top",
           "description": "Position of the toolbar in the image inspector webview (top, bottom, left, right)."
+        },
+        "imageInspector.autoCropSensitivity": {
+          "type": "integer",
+          "default": 12,
+          "minimum": 0,
+          "maximum": 64,
+          "description": "Color tolerance used to auto-detect uniform borders when cropping. Higher values tolerate more color variation. Also adjustable with the slider in the Image Details toolbar."
         },
         "imageInspector.themeAccentColor": {
           "type": "string",

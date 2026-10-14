@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.20.0] - 2026-10-14
+### Added
+- Added an Image Details toolbar slider to adjust the sensitivity of automatic border detection during cropping.
+- Persisted the automatic crop sensitivity setting through the `imageInspector.autoCropSensitivity` configuration.
+
 ## [1.19.0] - 2026-10-08
 ### Added
 - Added an anti-aliasing toggle button ("AA") in the Image Details toolbar to switch between smooth and pixelated image rendering.

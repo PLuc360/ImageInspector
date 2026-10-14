@@ -64,6 +64,7 @@ const mirrorHorizontalButton = document.getElementById('mirror-horizontal');
 const mirrorVerticalButton = document.getElementById('mirror-vertical');
 const zoomSelectButton = document.getElementById('zoom-select');
 const cropAutoButton = document.getElementById('crop-auto');
+const cropSensitivityInput = document.getElementById('crop-sensitivity');
 const cropApplyButton = document.getElementById('crop-apply');
 const transformUndoButton = document.getElementById('transform-undo');
 const transformRedoButton = document.getElementById('transform-redo');
@@ -125,6 +126,9 @@ const DIFF_REGION_MERGE_GAP_PX_MIN = 0;
 const DIFF_REGION_MERGE_GAP_PX_MAX = 6;
 const DEFAULT_COMPARE_DIFF_SENSITIVITY = 10;
 const AUTO_CROP_BORDER_COLOR_TOLERANCE = 12;
+let autoCropColorTolerance = cropSensitivityInput instanceof HTMLInputElement && Number.isFinite(Number(cropSensitivityInput.value))
+  ? Number(cropSensitivityInput.value)
+  : AUTO_CROP_BORDER_COLOR_TOLERANCE;
 const AUTO_CROP_BORDER_MATCH_RATIO = 0.995;
 const AUTO_CROP_MAX_TRIM_RATIO = 0.45;
 const AUTO_CROP_MIN_CONTENT_SIZE = 4;
@@ -644,7 +648,7 @@ function isUniformBorderRow(pixelData, imageWidth, rowIndex, borderColor) {
   let matchingPixels = 0;
 
   for (let x = 0; x < imageWidth; x += 1) {
-    if (areRgbaColorsSimilar(getRgbaAt(pixelData, imageWidth, x, rowIndex), borderColor, AUTO_CROP_BORDER_COLOR_TOLERANCE)) {
+    if (areRgbaColorsSimilar(getRgbaAt(pixelData, imageWidth, x, rowIndex), borderColor, autoCropColorTolerance)) {
       matchingPixels += 1;
     }
   }
@@ -666,7 +670,7 @@ function isUniformBorderColumn(pixelData, imageWidth, imageHeight, columnIndex, 
   let matchingPixels = 0;
 
   for (let y = 0; y < imageHeight; y += 1) {
-    if (areRgbaColorsSimilar(getRgbaAt(pixelData, imageWidth, columnIndex, y), borderColor, AUTO_CROP_BORDER_COLOR_TOLERANCE)) {
+    if (areRgbaColorsSimilar(getRgbaAt(pixelData, imageWidth, columnIndex, y), borderColor, autoCropColorTolerance)) {
       matchingPixels += 1;
     }
   }
@@ -700,7 +704,7 @@ function detectAutoCropBounds() {
     getRgbaAt(pixelData, imageWidth, imageWidth - 1, imageHeight - 1)
   ];
 
-  if (!cornerPixels.every((cornerPixel) => areRgbaColorsSimilar(borderReference, cornerPixel, AUTO_CROP_BORDER_COLOR_TOLERANCE))) {
+  if (!cornerPixels.every((cornerPixel) => areRgbaColorsSimilar(borderReference, cornerPixel, autoCropColorTolerance))) {
     return null;
   }
 
@@ -1281,6 +1285,8 @@ function updateCropModeUi() {
     cropApplyButton.classList.toggle('is-hidden', !cropMode);
     cropApplyButton.disabled = !cropMode || !cropDraftBounds;
   }
+
+  cropSensitivityInput?.classList.toggle('is-hidden', !cropMode);
 
   if (!cropMode) {
     cropSelectionBox?.classList.add('is-hidden');
@@ -4149,6 +4155,26 @@ bindClickAction(cropAutoButton, () => {
   triggerAutoCrop();
 });
 
+cropSensitivityInput?.addEventListener('input', () => {
+  const nextTolerance = Number(cropSensitivityInput.value);
+  if (!Number.isFinite(nextTolerance)) {
+    return;
+  }
+
+  autoCropColorTolerance = nextTolerance;
+  if (!cropMode) {
+    return;
+  }
+
+  cropDefaultBounds = detectAutoCropBounds() || getFullImageCropBounds();
+  cropDraftBounds = normalizeCropBounds(cropDefaultBounds);
+  updateCropModeUi();
+});
+
+cropSensitivityInput?.addEventListener('change', () => {
+  vscode?.postMessage({ type: 'set-auto-crop-sensitivity', value: Number(cropSensitivityInput.value) });
+});
+
 bindClickAction(cropApplyButton, () => {
   applyCropDraftSelection();
 });
@@ -4859,6 +4885,10 @@ window.addEventListener('message', (event) => {
           message.settings.saveEditsToOriginalFile,
           saveEditsToOriginalFile
         );
+        if (Number.isFinite(message.settings.autoCropSensitivity) && cropSensitivityInput) {
+          autoCropColorTolerance = toClampedInteger(message.settings.autoCropSensitivity, 0, 64, autoCropColorTolerance);
+          cropSensitivityInput.value = String(autoCropColorTolerance);
+        }
         applyLoupeSettings({
           diameter: message.settings.pipetteLoupeDiameter,
           virtualResolution: message.settings.pipetteLoupeVirtualResolution,

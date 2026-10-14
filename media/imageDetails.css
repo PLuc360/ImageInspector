@@ -492,6 +492,13 @@ body {
   color: var(--vscode-button-foreground);
 }
 
+.zoom-toolbar #crop-sensitivity {
+  width: 72px;
+  accent-color: var(--vscode-focusBorder);
+  cursor: pointer;
+  vertical-align: middle;
+}
+
 .zoom-toolbar #zoom-select.is-active,
 .zoom-toolbar #crop-auto.is-active,
 .zoom-toolbar #custom-background-toggle.is-active,
