@@ -90,6 +90,11 @@ const compareDiffOverlay = document.getElementById('compare-diff-overlay');
 const compareDiffOverlaySecondary = document.getElementById('compare-diff-overlay-secondary');
 const zoomSelectionBox = document.getElementById('zoom-selection-box');
 const cropSelectionBox = document.getElementById('crop-selection-box');
+const cropSelectionDimension = document.getElementById('crop-selection-dimension');
+const cropSelectionCoordinateNorthWest = document.getElementById('crop-selection-coordinate-nw');
+const cropSelectionCoordinateNorthEast = document.getElementById('crop-selection-coordinate-ne');
+const cropSelectionCoordinateSouthEast = document.getElementById('crop-selection-coordinate-se');
+const cropSelectionCoordinateSouthWest = document.getElementById('crop-selection-coordinate-sw');
 const pipetteButton = document.getElementById('pipette-tool');
 const pipetteCanvas = document.getElementById('pipette-canvas');
 const pipetteColorResult = document.getElementById('pipette-color-result');
@@ -133,6 +138,7 @@ const AUTO_CROP_BORDER_MATCH_RATIO = 0.995;
 const AUTO_CROP_MAX_TRIM_RATIO = 0.45;
 const AUTO_CROP_MIN_CONTENT_SIZE = 4;
 const CROP_MIN_SIZE = 4;
+const CROP_OVERLAY_LABEL_MARGIN_PX = 5;
 
 let zoom = 1;
 let fitMode = false;
@@ -1195,6 +1201,138 @@ function getNaturalImagePointFromClient(clientX, clientY) {
 }
 
 /**
+ * Formats crop overlay coordinates using natural image pixels.
+ *
+ * @param {number} x Pixel X coordinate.
+ * @param {number} y Pixel Y coordinate.
+ * @returns {string} Readable coordinate label.
+ */
+function formatCropCoordinate(x, y) {
+  return `(${String(Math.round(x))}, ${String(Math.round(y))})`;
+}
+
+/**
+ * Updates crop overlay labels to match the current normalized crop bounds.
+ *
+ * @param {{ left: number; top: number; width: number; height: number } | null} bounds Active crop bounds.
+ */
+function updateCropSelectionOverlayLabels(bounds) {
+  if (!bounds) {
+    if (cropSelectionDimension) {
+      cropSelectionDimension.textContent = '';
+    }
+    if (cropSelectionCoordinateNorthWest) {
+      cropSelectionCoordinateNorthWest.textContent = '';
+    }
+    if (cropSelectionCoordinateNorthEast) {
+      cropSelectionCoordinateNorthEast.textContent = '';
+    }
+    if (cropSelectionCoordinateSouthEast) {
+      cropSelectionCoordinateSouthEast.textContent = '';
+    }
+    if (cropSelectionCoordinateSouthWest) {
+      cropSelectionCoordinateSouthWest.textContent = '';
+    }
+    return;
+  }
+
+  const right = bounds.left + bounds.width;
+  const bottom = bounds.top + bounds.height;
+
+  if (cropSelectionDimension) {
+    cropSelectionDimension.textContent = `${String(bounds.width)} × ${String(bounds.height)}`;
+  }
+  if (cropSelectionCoordinateNorthWest) {
+    cropSelectionCoordinateNorthWest.textContent = formatCropCoordinate(bounds.left, bounds.top);
+  }
+  if (cropSelectionCoordinateNorthEast) {
+    cropSelectionCoordinateNorthEast.textContent = formatCropCoordinate(right, bounds.top);
+  }
+  if (cropSelectionCoordinateSouthEast) {
+    cropSelectionCoordinateSouthEast.textContent = formatCropCoordinate(right, bottom);
+  }
+  if (cropSelectionCoordinateSouthWest) {
+    cropSelectionCoordinateSouthWest.textContent = formatCropCoordinate(bounds.left, bottom);
+  }
+}
+
+/**
+ * Toggles whether a crop overlay badge should be rendered inside the selection box.
+ *
+ * @param {HTMLElement | null} element Overlay badge element.
+ * @param {boolean} shouldPlaceInside Whether the badge should be placed inside the crop box.
+ */
+function setCropOverlayLabelInsideState(element, shouldPlaceInside) {
+  if (!element) {
+    return;
+  }
+
+  element.classList.toggle('is-inside', shouldPlaceInside);
+}
+
+/**
+ * Updates crop overlay badge placement depending on the current rendered selection size.
+ *
+ * @param {number} renderedWidth Current crop box width in rendered pixels.
+ * @param {number} renderedHeight Current crop box height in rendered pixels.
+ */
+function updateCropSelectionOverlayPlacement(renderedWidth, renderedHeight) {
+  const allLabels = [
+    cropSelectionCoordinateNorthWest,
+    cropSelectionCoordinateNorthEast,
+    cropSelectionCoordinateSouthEast,
+    cropSelectionCoordinateSouthWest,
+    cropSelectionDimension
+  ];
+
+  const hasAllLabelElements = allLabels.every((labelElement) => labelElement instanceof HTMLElement);
+  if (!hasAllLabelElements) {
+    for (const labelElement of allLabels) {
+      setCropOverlayLabelInsideState(labelElement, false);
+    }
+    return;
+  }
+
+  const northWestWidth = cropSelectionCoordinateNorthWest.offsetWidth;
+  const northWestHeight = cropSelectionCoordinateNorthWest.offsetHeight;
+  const northEastWidth = cropSelectionCoordinateNorthEast.offsetWidth;
+  const northEastHeight = cropSelectionCoordinateNorthEast.offsetHeight;
+  const southEastWidth = cropSelectionCoordinateSouthEast.offsetWidth;
+  const southEastHeight = cropSelectionCoordinateSouthEast.offsetHeight;
+  const southWestWidth = cropSelectionCoordinateSouthWest.offsetWidth;
+  const southWestHeight = cropSelectionCoordinateSouthWest.offsetHeight;
+  const dimensionWidth = cropSelectionDimension.offsetWidth;
+  const dimensionHeight = cropSelectionDimension.offsetHeight;
+  const margin = CROP_OVERLAY_LABEL_MARGIN_PX;
+
+  const northWestRight = margin + northWestWidth;
+  const northEastLeft = renderedWidth - margin - northEastWidth;
+  const dimensionLeft = (renderedWidth - dimensionWidth) / 2;
+  const dimensionRight = dimensionLeft + dimensionWidth;
+  const southWestRight = margin + southWestWidth;
+  const southEastLeft = renderedWidth - margin - southEastWidth;
+
+  const topRowFits = dimensionLeft >= northWestRight
+    && dimensionRight <= northEastLeft
+    && northEastLeft >= northWestRight;
+  const bottomRowFits = southEastLeft >= southWestRight;
+  const verticalFits = renderedHeight >= northWestHeight + southWestHeight + (margin * 2);
+  const dimensionFits = renderedWidth >= dimensionWidth + (margin * 2)
+    && renderedHeight >= dimensionHeight + (margin * 2);
+  const allInside = topRowFits
+    && bottomRowFits
+    && verticalFits
+    && dimensionFits
+    && renderedHeight >= northEastHeight + southEastHeight + (margin * 2)
+    && renderedHeight >= dimensionHeight + southWestHeight + (margin * 2)
+    && renderedHeight >= dimensionHeight + southEastHeight + (margin * 2);
+
+  for (const labelElement of allLabels) {
+    setCropOverlayLabelInsideState(labelElement, allInside);
+  }
+}
+
+/**
  * Updates undo/redo buttons to reflect local and persisted transform history.
  */
 function updateTransformHistoryButtonsState() {
@@ -1262,12 +1400,14 @@ function renderCropSelectionBox() {
   const width = Math.max(1, normalizedBounds.width * currentZoom);
   const height = Math.max(1, normalizedBounds.height * currentZoom);
 
+  updateCropSelectionOverlayLabels(normalizedBounds);
   cropSelectionBox.style.left = `${String(Math.round(left))}px`;
   cropSelectionBox.style.top = `${String(Math.round(top))}px`;
   cropSelectionBox.style.width = `${String(Math.round(width))}px`;
   cropSelectionBox.style.height = `${String(Math.round(height))}px`;
   cropSelectionBox.classList.toggle('is-dragging', cropInteractionPointerId !== null);
   cropSelectionBox.classList.remove('is-hidden');
+  updateCropSelectionOverlayPlacement(width, height);
 }
 
 /**
@@ -4996,7 +5136,12 @@ window.addEventListener('resize', () => {
   const top = Number.parseFloat(infoOverlay.style.top || '0');
   applyInfoOverlayPosition(left, top);
 
-  requestOverviewMapViewportUpdate();
+  if (fitMode) {
+    updateView();
+  } else {
+    requestOverviewMapViewportUpdate();
+    renderCropSelectionBox();
+  }
   // Redraw difference regions if side-by-side compare is active.
   if (typeof isSideBySideCompareActive === 'function' && isSideBySideCompareActive()) {
     renderCompareDifferenceOverlay();

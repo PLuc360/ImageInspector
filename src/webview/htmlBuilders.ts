@@ -410,7 +410,11 @@ export function buildCustomEditorWebview(
       ${icoGalleryMarkup}
       <div id="zoom-selection-box" class="zoom-selection-box" aria-hidden="true"></div>
       <div id="crop-selection-box" class="crop-selection-box is-hidden" aria-hidden="true">
-        <div class="crop-selection-label">Crop</div>
+        <div id="crop-selection-dimension" class="crop-selection-dimension"></div>
+        <div id="crop-selection-coordinate-nw" class="crop-selection-coordinate corner-nw"></div>
+        <div id="crop-selection-coordinate-ne" class="crop-selection-coordinate corner-ne"></div>
+        <div id="crop-selection-coordinate-se" class="crop-selection-coordinate corner-se"></div>
+        <div id="crop-selection-coordinate-sw" class="crop-selection-coordinate corner-sw"></div>
         <div class="crop-selection-handle handle-nw" data-crop-handle="nw"></div>
         <div class="crop-selection-handle handle-ne" data-crop-handle="ne"></div>
         <div class="crop-selection-handle handle-se" data-crop-handle="se"></div>
@@ -751,4 +755,3 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 }
-

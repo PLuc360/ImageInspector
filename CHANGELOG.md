@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.20.1] - 2026-10-16
+### Changed
+- Updated the Image Details crop overlay to replace the previous `Crop` badge with live corner coordinates and centered selection dimensions.
+- Refined crop overlay badge placement so labels stay inside the selection with consistent 5px margins when space allows, and move fully outside the selection when it becomes too small.
+
+### Fixed
+- Fixed manual crop selections drifting out of alignment with the image when the Image Details view is resized.
+- Fixed crop overlay corner badges partially remaining inside very small selections by moving them fully outside on both axes when the selection cannot contain all labels without overlap.
+
 ## [1.20.0] - 2026-10-14
 ### Added
 - Added an Image Details toolbar slider to adjust the sensitivity of automatic border detection during cropping.
